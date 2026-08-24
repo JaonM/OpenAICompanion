@@ -9,7 +9,6 @@ pub enum AgentError {
     UnknownTool(String),
     Model(String),
     Tool { name: String, message: String },
-    Observer(String),
 }
 
 impl fmt::Display for AgentError {
@@ -22,7 +21,6 @@ impl fmt::Display for AgentError {
             Self::UnknownTool(name) => write!(f, "unknown tool: {name}"),
             Self::Model(message) => write!(f, "model error: {message}"),
             Self::Tool { name, message } => write!(f, "tool '{name}' failed: {message}"),
-            Self::Observer(message) => write!(f, "observer error: {message}"),
         }
     }
 }

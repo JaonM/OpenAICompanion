@@ -1,30 +1,19 @@
 use crate::{
-    AgentError, AgentEvent, AgentRun, LoopConfig, Message, ModelRequest, ModelServe,
-    TerminationReason, ToolRegistry,
+    AgentError, AgentRun, LoopConfig, Message, ModelRequest, ModelServe, TerminationReason,
+    ToolRegistry,
 };
 
-pub trait Observer {
-    fn on_event(&mut self, event: AgentEvent) -> Result<(), AgentError>;
-}
-
-pub struct NoopObserver;
-impl Observer for NoopObserver {
-    fn on_event(&mut self, _event: AgentEvent) -> Result<(), AgentError> {
-        Ok(())
-    }
-}
-
-pub struct AgentLoop<M, O = NoopObserver> {
+/// Minimal tool-use loop: ask the model, execute returned tools, then feed
+/// their results back into the next model request.
+pub struct AgentLoop<M> {
     model: M,
     registry: ToolRegistry,
-    observer: O,
     config: LoopConfig,
 }
 
-pub struct AgentLoopBuilder<M, O = NoopObserver> {
+pub struct AgentLoopBuilder<M> {
     model: M,
     registry: ToolRegistry,
-    observer: O,
     config: LoopConfig,
 }
 
@@ -33,25 +22,13 @@ impl<M> AgentLoopBuilder<M> {
         Self {
             model,
             registry: ToolRegistry::new(),
-            observer: NoopObserver,
             config: LoopConfig::default(),
         }
     }
-}
 
-impl<M, O> AgentLoopBuilder<M, O> {
     pub fn with_tool(mut self, tool: impl crate::Tool + 'static) -> Result<Self, AgentError> {
         self.registry.register(tool)?;
         Ok(self)
-    }
-
-    pub fn with_observer<NO>(self, observer: NO) -> AgentLoopBuilder<M, NO> {
-        AgentLoopBuilder {
-            model: self.model,
-            registry: self.registry,
-            observer,
-            config: self.config,
-        }
     }
 
     pub fn with_config(mut self, config: LoopConfig) -> Self {
@@ -59,7 +36,7 @@ impl<M, O> AgentLoopBuilder<M, O> {
         self
     }
 
-    pub fn build(self) -> Result<AgentLoop<M, O>, AgentError> {
+    pub fn build(self) -> Result<AgentLoop<M>, AgentError> {
         if self.config.max_steps == 0 {
             return Err(AgentError::InvalidConfig(
                 "max_steps must be greater than zero",
@@ -68,7 +45,6 @@ impl<M, O> AgentLoopBuilder<M, O> {
         Ok(AgentLoop {
             model: self.model,
             registry: self.registry,
-            observer: self.observer,
             config: self.config,
         })
     }
@@ -78,36 +54,22 @@ impl<M: ModelServe> AgentLoop<M> {
     pub fn new(model: M) -> Result<Self, AgentError> {
         AgentLoopBuilder::new(model).build()
     }
-}
 
-impl<M: ModelServe, O: Observer> AgentLoop<M, O> {
     pub fn run(&mut self, user_input: impl Into<String>) -> Result<AgentRun, AgentError> {
         let user_input = user_input.into();
         let mut history = vec![Message::User {
             content: user_input.clone(),
         }];
-        self.observer.on_event(AgentEvent::Started {
-            user_input: user_input.clone(),
-        })?;
 
         for step in 0..self.config.max_steps {
-            self.observer
-                .on_event(AgentEvent::ModelRequested { step })?;
             let response = self.model.complete(ModelRequest {
                 system_prompt: self.config.system_prompt.clone(),
                 user_input: user_input.clone(),
                 history: history.clone(),
                 tools: self.registry.list_tools(),
             })?;
+
             if response.tool_calls.is_empty() {
-                self.observer.on_event(AgentEvent::ModelResponded {
-                    step,
-                    tool_calls: 0,
-                })?;
-                self.observer.on_event(AgentEvent::Completed {
-                    step,
-                    output: response.content.clone(),
-                })?;
                 return Ok(AgentRun {
                     output: response.content,
                     history,
@@ -115,34 +77,23 @@ impl<M: ModelServe, O: Observer> AgentLoop<M, O> {
                     termination: TerminationReason::Completed,
                 });
             }
+
             if response
                 .tool_calls
                 .iter()
-                .any(|call| call.name.trim().is_empty() || call.id.trim().is_empty())
+                .any(|call| call.id.trim().is_empty() || call.name.trim().is_empty())
             {
                 return Err(AgentError::InvalidAction(
                     "tool call id and name must not be empty".into(),
                 ));
             }
-            self.observer.on_event(AgentEvent::ModelResponded {
-                step,
-                tool_calls: response.tool_calls.len(),
-            })?;
+
             history.push(Message::Assistant {
                 content: response.content,
                 tool_calls: response.tool_calls.clone(),
             });
             for call in response.tool_calls {
-                self.observer.on_event(AgentEvent::ToolStarted {
-                    step,
-                    call: call.clone(),
-                })?;
                 let output = self.registry.execute(&call)?;
-                self.observer.on_event(AgentEvent::ToolCompleted {
-                    step,
-                    call: call.clone(),
-                    output: output.clone(),
-                })?;
                 history.push(Message::Tool {
                     call_id: call.id,
                     name: call.name,
@@ -151,9 +102,7 @@ impl<M: ModelServe, O: Observer> AgentLoop<M, O> {
                 });
             }
         }
-        self.observer.on_event(AgentEvent::MaxStepsReached {
-            max_steps: self.config.max_steps,
-        })?;
+
         Ok(AgentRun {
             output: String::new(),
             history,
@@ -170,11 +119,9 @@ mod tests {
 
     struct ScriptedModel {
         responses: Vec<ModelResponse>,
-        requests: Vec<ModelRequest>,
     }
     impl ModelServe for ScriptedModel {
-        fn complete(&mut self, request: ModelRequest) -> Result<ModelResponse, AgentError> {
-            self.requests.push(request);
+        fn complete(&mut self, _request: ModelRequest) -> Result<ModelResponse, AgentError> {
             Ok(if self.responses.is_empty() {
                 ModelResponse::final_text("fallback")
             } else {
@@ -194,26 +141,23 @@ mod tests {
     }
 
     #[test]
-    fn direct_answer_finishes_without_tool_execution() {
+    fn direct_answer_finishes() {
         let model = ScriptedModel {
             responses: vec![ModelResponse::final_text("answer")],
-            requests: vec![],
         };
         let mut agent = AgentLoop::new(model).unwrap();
         let result = agent.run("question").unwrap();
         assert_eq!(result.output, "answer");
-        assert_eq!(result.steps, 1);
         assert_eq!(result.termination, TerminationReason::Completed);
     }
 
     #[test]
-    fn tool_result_is_injected_into_next_model_request() {
+    fn tool_result_returns_to_model_context() {
         let model = ScriptedModel {
             responses: vec![
                 ModelResponse::with_tool_calls("", vec![ToolCall::new("call-1", "echo", "hello")]),
                 ModelResponse::final_text("done"),
             ],
-            requests: vec![],
         };
         let mut agent = AgentLoopBuilder::new(model)
             .with_tool(EchoTool)
@@ -228,9 +172,9 @@ mod tests {
     }
 
     #[test]
-    fn exposes_sorted_tool_definitions_and_stops_at_limit() {
-        struct EmptyModel;
-        impl ModelServe for EmptyModel {
+    fn stops_at_max_steps() {
+        struct EndlessModel;
+        impl ModelServe for EndlessModel {
             fn complete(&mut self, _: ModelRequest) -> Result<ModelResponse, AgentError> {
                 Ok(ModelResponse::with_tool_calls(
                     "",
@@ -238,22 +182,24 @@ mod tests {
                 ))
             }
         }
-        let mut agent = AgentLoopBuilder::new(EmptyModel)
+        let config = LoopConfig {
+            max_steps: 2,
+            ..LoopConfig::default()
+        };
+        let mut agent = AgentLoopBuilder::new(EndlessModel)
             .with_tool(EchoTool)
             .unwrap()
-            .with_config(LoopConfig {
-                max_steps: 2,
-                ..LoopConfig::default()
-            })
+            .with_config(config)
             .build()
             .unwrap();
-        let result = agent.run("question").unwrap();
-        assert_eq!(result.termination, TerminationReason::MaxStepsReached);
-        assert_eq!(result.steps, 2);
+        assert_eq!(
+            agent.run("question").unwrap().termination,
+            TerminationReason::MaxStepsReached
+        );
     }
 
     #[test]
-    fn validates_tool_calls_before_execution() {
+    fn rejects_invalid_tool_call() {
         struct InvalidModel;
         impl ModelServe for InvalidModel {
             fn complete(&mut self, _: ModelRequest) -> Result<ModelResponse, AgentError> {

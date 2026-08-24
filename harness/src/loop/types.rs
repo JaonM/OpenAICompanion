@@ -137,33 +137,3 @@ impl Default for LoopConfig {
         }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AgentEvent {
-    Started {
-        user_input: String,
-    },
-    ModelRequested {
-        step: usize,
-    },
-    ModelResponded {
-        step: usize,
-        tool_calls: usize,
-    },
-    ToolStarted {
-        step: usize,
-        call: ToolCall,
-    },
-    ToolCompleted {
-        step: usize,
-        call: ToolCall,
-        output: ToolOutput,
-    },
-    Completed {
-        step: usize,
-        output: String,
-    },
-    MaxStepsReached {
-        max_steps: usize,
-    },
-}
