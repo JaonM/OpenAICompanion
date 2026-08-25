@@ -12,6 +12,10 @@
 - UniFFI 生成改用 library mode：先构建 `libharness.dylib`，再从动态库生成 Kotlin 绑定，规避单 UDL 模式的 crate 定位限制；JVM/JNA 生成物放在 `jvmMain`，commonMain 只保留抽象。
 - 将 Rust `ModelServing`、`Tool`、`ToolExecutor` 和 Loop 改为 Future 驱动；UniFFI `ToolProvider` 也改为异步 foreign trait，Kotlin Provider 不再使用 `runBlocking`。
 - 将 `load_more_tools` 改为覆盖式分页：每次调用切换到下一页工具，不累积上一页可见工具，并补充分页测试。
+- 增加 `Configuration.tool_execute_timeout`，使用 Future 定时器限制单个工具执行时间，超时转换为统一的 `ToolExecutionError::Timeout`。
+- 增加统一 `ToolExecutionError`、可重试工具元数据、指数退避重试，以及工具最终失败后的 AI Tool Message 反馈开关。
+- 将同一轮模型响应中的多个工具调用改为并发执行；所有调用完成后仍按模型返回顺序写入 Tool Message，并补充并发回归测试。
+- 增加 `Configuration.max_concurrent_tools`，使用有序并发缓冲限制单轮工具调用的最大在途数量；默认上限为 4，配置为 1 时退化为串行执行。
 
 ## 验证结果
 
