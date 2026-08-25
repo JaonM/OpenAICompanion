@@ -3,4 +3,19 @@ name = "harness"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[features]
+cli = ["uniffi/cli"]
+
 [dependencies]
+async-trait = "0.1"
+uniffi = "0.29"
+
+[build-dependencies]
+uniffi = { version = "0.29", features = ["build"] }

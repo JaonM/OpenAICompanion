@@ -1,58 +1,34 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidLibrary)
-    alias(libs.plugins.kotlinSerialization)
+    kotlin("multiplatform") version "2.2.0"
+    kotlin("plugin.serialization") version "2.2.0"
 }
 
+group = "com.openai.companion"
+version = "0.1.0"
+
 kotlin {
-    androidTarget {
-        compilations.all {
-            kotlinOptions.jvmTarget = "17"
-        }
-    }
+    jvmToolchain(11)
 
-    jvm("desktop")
-
-    listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
-        target.binaries.framework {
-            baseName = "KMPHarness"
-            isStatic = true
-        }
-    }
-
-    wasmJs {
-        browser()
+    jvm {
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_11)
     }
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.kotlinx.serialization.json)
-            implementation(libs.kotlinx.coroutines.core)
+            implementation("io.modelcontextprotocol:kotlin-sdk:0.15.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+            implementation("io.ktor:ktor-client-core:3.2.3")
+            implementation("io.ktor:ktor-client-sse:3.2.3")
         }
-
-        androidMain.dependencies {
-            implementation(libs.kotlinx.coroutines.android)
+        jvmMain.dependencies {
+            implementation("io.ktor:ktor-client-cio:3.2.3")
         }
-
-        desktopMain.dependencies {
-            implementation(libs.kotlinx.coroutines.swing)
+        commonTest.dependencies {
+            implementation(kotlin("test"))
         }
-
-        iosMain.dependencies {}
-        wasmJsMain.dependencies {}
     }
 }
 
-android {
-    namespace = "com.harness.kmp"
-    compileSdk = 34
-
-    defaultConfig {
-        minSdk = 24
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-}
