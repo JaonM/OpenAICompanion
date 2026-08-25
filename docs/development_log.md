@@ -11,6 +11,7 @@
 - UniFFI 生成脚本固定从 `harness` crate 工作目录、使用相对 UDL 路径运行，避免 UniFFI 报告 UDL 不在 crate 内。
 - UniFFI 生成改用 library mode：先构建 `libharness.dylib`，再从动态库生成 Kotlin 绑定，规避单 UDL 模式的 crate 定位限制；JVM/JNA 生成物放在 `jvmMain`，commonMain 只保留抽象。
 - 将 Rust `ModelServing`、`Tool`、`ToolExecutor` 和 Loop 改为 Future 驱动；UniFFI `ToolProvider` 也改为异步 foreign trait，Kotlin Provider 不再使用 `runBlocking`。
+- 将 `load_more_tools` 改为覆盖式分页：每次调用切换到下一页工具，不累积上一页可见工具，并补充分页测试。
 
 ## 验证结果
 

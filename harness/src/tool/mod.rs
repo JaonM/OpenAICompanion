@@ -35,7 +35,7 @@ enum RegisteredTool {
 
 struct DisclosureState {
     order: Vec<String>,
-    loaded_tools: usize,
+    page_start: usize,
     num_tool_per_load: usize,
 }
 
@@ -57,9 +57,10 @@ impl Tool for LoadMoreTools {
             name: "load_more_tools".into(),
             message: "tool registry lock poisoned".into(),
         })?;
-        let before = state.loaded_tools;
-        state.loaded_tools = (before + state.num_tool_per_load).min(state.order.len());
-        let names = state.order[before..state.loaded_tools].join(", ");
+        let before = state.page_start;
+        let page_end = (before + state.num_tool_per_load).min(state.order.len());
+        state.page_start = page_end;
+        let names = state.order[before..page_end].join(", ");
         Ok(ToolOutput::success(if names.is_empty() {
             "No more tools are available".into()
         } else {
@@ -83,7 +84,7 @@ impl ToolRegistry {
         }
         let state = Arc::new(Mutex::new(DisclosureState {
             order: Vec::new(),
-            loaded_tools: 0,
+            page_start: 0,
             num_tool_per_load,
         }));
         let mut registry = Self {
@@ -131,7 +132,7 @@ impl ToolRegistry {
                 .lock()
                 .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
             state.order.retain(|name| self.tools.contains_key(name));
-            state.loaded_tools = state.loaded_tools.min(state.order.len());
+            state.page_start = state.page_start.min(state.order.len());
         }
         for tool in tools {
             let definition =
@@ -155,7 +156,7 @@ impl ToolRegistry {
             .lock()
             .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
         state.order.retain(|name| self.tools.contains_key(name));
-        state.loaded_tools = state.loaded_tools.min(state.order.len());
+        state.page_start = state.page_start.min(state.order.len());
         Ok(())
     }
 
@@ -211,8 +212,9 @@ impl ToolExecutor for ToolRegistry {
             .state
             .lock()
             .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
-        let end = state.loaded_tools.min(state.order.len());
-        let mut result = state.order[..end]
+        let start = state.page_start.min(state.order.len());
+        let end = (start + state.num_tool_per_load).min(state.order.len());
+        let mut result = state.order[start..end]
             .iter()
             .filter_map(|name| self.definition(name))
             .collect::<Vec<_>>();
@@ -248,5 +250,62 @@ impl ToolExecutor for ToolRegistry {
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new(8).expect("default tool page size is valid")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NamedTool(&'static str);
+
+    impl Tool for NamedTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition::new(self.0, self.0, "{}")
+        }
+
+        fn execute<'a>(&'a self, _: &'a ToolCall) -> ToolFuture<'a> {
+            Box::pin(async { Ok(ToolOutput::success("ok")) })
+        }
+    }
+
+    #[test]
+    fn load_more_tools_replaces_the_visible_page() {
+        let mut registry = ToolRegistry::new(2).unwrap();
+        for name in ["one", "two", "three", "four", "five"] {
+            registry.register(NamedTool(name)).unwrap();
+        }
+
+        let names = |tools: Vec<ToolDefinition>| {
+            tools.into_iter().map(|tool| tool.name).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(registry.list_tools().unwrap()),
+            vec!["one", "two", "load_more_tools"]
+        );
+
+        block_on(registry.execute(&ToolCall::new("1", "load_more_tools", "{}"))).unwrap();
+        assert_eq!(
+            names(registry.list_tools().unwrap()),
+            vec!["three", "four", "load_more_tools"]
+        );
+
+        block_on(registry.execute(&ToolCall::new("2", "load_more_tools", "{}"))).unwrap();
+        assert_eq!(names(registry.list_tools().unwrap()), vec!["five"]);
+    }
+
+    fn block_on<F: Future>(mut future: F) -> F::Output {
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        fn clone(_: *const ()) -> RawWaker { RawWaker::new(std::ptr::null(), &VTABLE) }
+        fn noop(_: *const ()) {}
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+        let mut context = Context::from_waker(&waker);
+        let mut future = unsafe { Pin::new_unchecked(&mut future) };
+        loop {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
+                return value;
+            }
+        }
     }
 }
