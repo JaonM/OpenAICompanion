@@ -4,6 +4,7 @@
 
 - [ ] 明确定义 `Action`、工具调用和模型响应的稳定协议（候选：JSON/MCP）。
 - [ ] 增加取消信号、超时、重试和每工具调用的资源限制。
+- [ ] 由 app 层接入正式异步 runtime；Harness 核心不绑定 Tokio/Coroutine runtime。
 - [ ] 支持流式模型输出及增量事件。
 - [ ] 增加并发工具调用，同时保证状态一致性和可配置的并发上限。
 - [ ] 增加持久化 session、memory 和 trace store。
@@ -13,6 +14,9 @@
 
 ## 工程化
 
-- [ ] 补充 workspace、CI、clippy 与文档测试配置。
+- [ ] 补充 workspace、CI 与文档测试配置。
+- [x] 在 CI 中执行 `cargo run --manifest-path harness/Cargo.toml --features cli --bin uniffi-bindgen` 并验证 Kotlin 绑定生成。
+- [ ] 接入目标平台的 UniFFI Kotlin 生成物与 Rust 动态库构建产物。
+- [ ] 为 KMP 端到端连接远程/端侧 MCP Server 增加平台测试。
 - [ ] 建立成本、延迟、工具成功率和循环终止原因指标。
 - [ ] 定义版本化 API 和兼容性策略。
