@@ -2,18 +2,43 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::AgentError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecutionError {
+    Timeout,
+    PermissionDenied,
+    NetworkUnreachable,
+    InvalidArguments,
+    ResourceNotFound,
+    ServerInternalError,
+    Cancelled,
+    Unknown,
+}
+
+impl std::fmt::Display for ToolExecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for ToolExecutionError {}
+
 #[derive(Debug, Clone, PartialEq, Eq, ::uniffi::Record)]
 pub struct McpTool {
     pub name: String,
     pub description: String,
     pub input_schema_json: String,
+    pub retryable: bool,
 }
 
 #[::uniffi::export(with_foreign)]
 #[::async_trait::async_trait]
 pub trait ToolProvider: Send + Sync {
-    async fn get_tools(&self) -> Vec<McpTool>;
-    async fn call_tool(&self, name: String, arguments_json: String) -> String;
+    async fn get_tools(&self) -> Result<Vec<McpTool>, ToolExecutionError>;
+    async fn call_tool(
+        &self,
+        name: String,
+        arguments_json: String,
+    ) -> Result<String, ToolExecutionError>;
 }
 
 static TOOL_PROVIDER: OnceLock<Mutex<Option<Arc<dyn ToolProvider>>>> = OnceLock::new();
@@ -41,7 +66,10 @@ pub async fn register_all_mcp_tools(
         registry.clear_mcp_tools()?;
         return Ok(0);
     };
-    let tools: Vec<McpTool> = provider.get_tools().await;
+    let tools: Vec<McpTool> = provider
+        .get_tools()
+        .await
+        .map_err(AgentError::ToolProvider)?;
     let count = tools.len();
     registry.replace_mcp_tools(provider, tools)?;
     Ok(count)

@@ -756,16 +756,16 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 
 
 // For large crates we prevent `MethodTooLargeException` (see #2340)
-// N.B. the name of the extension is very misleading, since it is 
-// rather `InterfaceTooLargeException`, caused by too many methods 
+// N.B. the name of the extension is very misleading, since it is
+// rather `InterfaceTooLargeException`, caused by too many methods
 // in the interface for large crates.
 //
 // By splitting the otherwise huge interface into two parts
-// * UniffiLib 
+// * UniffiLib
 // * IntegrityCheckingUniffiLib (this)
 // we allow for ~2x as many methods in the UniffiLib interface.
-// 
-// The `ffi_uniffi_contract_version` method and all checksum methods are put 
+//
+// The `ffi_uniffi_contract_version` method and all checksum methods are put
 // into `IntegrityCheckingUniffiLib` and these methods are called only once,
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
@@ -790,8 +790,8 @@ internal interface UniffiLib : Library {
         internal val INSTANCE: UniffiLib by lazy {
             val componentName = "harness"
             // For large crates we prevent `MethodTooLargeException` (see #2340)
-            // N.B. the name of the extension is very misleading, since it is 
-            // rather `InterfaceTooLargeException`, caused by too many methods 
+            // N.B. the name of the extension is very misleading, since it is
+            // rather `InterfaceTooLargeException`, caused by too many methods
             // in the interface for large crates.
             //
             // By splitting the otherwise huge interface into two parts
@@ -799,7 +799,7 @@ internal interface UniffiLib : Library {
             // * IntegrityCheckingUniffiLib
             // And all checksum methods are put into `IntegrityCheckingUniffiLib`
             // we allow for ~2x as many methods in the UniffiLib interface.
-            // 
+            //
             // Thus we first load the library with `loadIndirect` as `IntegrityCheckingUniffiLib`
             // so that we can (optionally!) call `uniffiCheckApiChecksums`...
             loadIndirect<IntegrityCheckingUniffiLib>(componentName)
@@ -814,13 +814,13 @@ internal interface UniffiLib : Library {
             // to trigger this issue, the performance impact is negligible, running on
             // a macOS M1 machine the `loadIndirect` call takes ~50ms.
             val lib = loadIndirect<UniffiLib>(componentName)
-            // No need to check the contract version and checksums, since 
+            // No need to check the contract version and checksums, since
             // we already did that with `IntegrityCheckingUniffiLib` above.
             uniffiCallbackInterfaceToolProvider.register(lib)
             // Loading of library with integrity check done.
             lib
         }
-        
+
         // The Cleaner for the whole library
         internal val CLEANER: UniffiCleaner by lazy {
             UniffiCleaner.create()
@@ -828,9 +828,9 @@ internal interface UniffiLib : Library {
     }
 
     // FFI functions
-    fun uniffi_harness_fn_clone_toolprovider(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_harness_fn_clone_toolprovider(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
-fun uniffi_harness_fn_free_toolprovider(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_harness_fn_free_toolprovider(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun uniffi_harness_fn_init_callback_vtable_toolprovider(`vtable`: UniffiVTableCallbackInterfaceToolProvider,
 ): Unit
@@ -838,17 +838,17 @@ fun uniffi_harness_fn_method_toolprovider_get_tools(`ptr`: Pointer,
 ): Long
 fun uniffi_harness_fn_method_toolprovider_call_tool(`ptr`: Pointer,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,
 ): Long
-fun uniffi_harness_fn_func_register_tool_provider(`provider`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_harness_fn_func_register_tool_provider(`provider`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-fun uniffi_harness_fn_func_unregister_tool_provider(uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_harness_fn_func_unregister_tool_provider(uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-fun ffi_harness_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-fun ffi_harness_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-fun ffi_harness_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-fun ffi_harness_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_harness_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -856,7 +856,7 @@ fun ffi_harness_rust_future_cancel_u8(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_u8(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 fun ffi_harness_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -864,7 +864,7 @@ fun ffi_harness_rust_future_cancel_i8(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_i8(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 fun ffi_harness_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -872,7 +872,7 @@ fun ffi_harness_rust_future_cancel_u16(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_u16(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Short
 fun ffi_harness_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -880,7 +880,7 @@ fun ffi_harness_rust_future_cancel_i16(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_i16(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Short
 fun ffi_harness_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -888,7 +888,7 @@ fun ffi_harness_rust_future_cancel_u32(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_u32(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Int
 fun ffi_harness_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -896,7 +896,7 @@ fun ffi_harness_rust_future_cancel_i32(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_i32(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Int
 fun ffi_harness_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -904,7 +904,7 @@ fun ffi_harness_rust_future_cancel_u64(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_u64(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 fun ffi_harness_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -912,7 +912,7 @@ fun ffi_harness_rust_future_cancel_i64(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_i64(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 fun ffi_harness_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -920,7 +920,7 @@ fun ffi_harness_rust_future_cancel_f32(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_f32(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Float
 fun ffi_harness_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -928,7 +928,7 @@ fun ffi_harness_rust_future_cancel_f64(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_f64(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Double
 fun ffi_harness_rust_future_poll_pointer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -936,7 +936,7 @@ fun ffi_harness_rust_future_cancel_pointer(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_pointer(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun ffi_harness_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -944,7 +944,7 @@ fun ffi_harness_rust_future_cancel_rust_buffer(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_rust_buffer(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_harness_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -952,7 +952,7 @@ fun ffi_harness_rust_future_cancel_void(`handle`: Long,
 ): Unit
 fun ffi_harness_rust_future_free_void(`handle`: Long,
 ): Unit
-fun ffi_harness_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_harness_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 
 }
@@ -974,10 +974,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_harness_checksum_func_unregister_tool_provider() != 23390.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_harness_checksum_method_toolprovider_get_tools() != 9348.toShort()) {
+    if (lib.uniffi_harness_checksum_method_toolprovider_get_tools() != 40495.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_harness_checksum_method_toolprovider_call_tool() != 1575.toShort()) {
+    if (lib.uniffi_harness_checksum_method_toolprovider_call_tool() != 5270.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1179,7 +1179,7 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
         }
     }
 
-/** 
+/**
  * Used to instantiate an interface without an actual pointer, for fakes in tests, mostly.
  *
  * @suppress
@@ -1279,6 +1279,29 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
+    override fun lift(value: Byte): Boolean {
+        return value.toInt() != 0
+    }
+
+    override fun read(buf: ByteBuffer): Boolean {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: Boolean): Byte {
+        return if (value) 1.toByte() else 0.toByte()
+    }
+
+    override fun allocationSize(value: Boolean) = 1UL
+
+    override fun write(value: Boolean, buf: ByteBuffer) {
+        buf.put(lower(value))
+    }
 }
 
 /**
@@ -1438,11 +1461,11 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 
 
 public interface ToolProvider {
-    
+
     suspend fun `getTools`(): List<McpTool>
-    
+
     suspend fun `callTool`(`name`: kotlin.String, `argumentsJson`: kotlin.String): kotlin.String
-    
+
     companion object
 }
 
@@ -1528,14 +1551,15 @@ open class ToolProviderImpl: Disposable, AutoCloseable, ToolProvider
         }
     }
 
-    
+
+    @Throws(ToolExecutionException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `getTools`() : List<McpTool> {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_harness_fn_method_toolprovider_get_tools(
                 thisPtr,
-                
+
             )
         },
         { future, callback, continuation -> UniffiLib.INSTANCE.ffi_harness_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -1544,11 +1568,12 @@ open class ToolProviderImpl: Disposable, AutoCloseable, ToolProvider
         // lift function
         { FfiConverterSequenceTypeMcpTool.lift(it) },
         // Error FFI converter
-        UniffiNullRustCallStatusErrorHandler,
+        ToolExecutionException.ErrorHandler,
     )
     }
 
-    
+
+    @Throws(ToolExecutionException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `callTool`(`name`: kotlin.String, `argumentsJson`: kotlin.String) : kotlin.String {
         return uniffiRustCallAsync(
@@ -1564,16 +1589,16 @@ open class ToolProviderImpl: Disposable, AutoCloseable, ToolProvider
         // lift function
         { FfiConverterString.lift(it) },
         // Error FFI converter
-        UniffiNullRustCallStatusErrorHandler,
+        ToolExecutionException.ErrorHandler,
     )
     }
 
-    
 
-    
-    
+
+
+
     companion object
-    
+
 }
 
 
@@ -1605,10 +1630,11 @@ internal object uniffiCallbackInterfaceToolProvider {
             }
 
             uniffiOutReturn.uniffiSetValue(
-                uniffiTraitInterfaceCallAsync(
+                uniffiTraitInterfaceCallAsyncWithError(
                     makeCall,
                     uniffiHandleSuccess,
-                    uniffiHandleError
+                    uniffiHandleError,
+                    { e: ToolExecutionException -> FfiConverterTypeToolExecutionError.lower(e) }
                 )
             )
         }
@@ -1641,10 +1667,11 @@ internal object uniffiCallbackInterfaceToolProvider {
             }
 
             uniffiOutReturn.uniffiSetValue(
-                uniffiTraitInterfaceCallAsync(
+                uniffiTraitInterfaceCallAsyncWithError(
                     makeCall,
                     uniffiHandleSuccess,
-                    uniffiHandleError
+                    uniffiHandleError,
+                    { e: ToolExecutionException -> FfiConverterTypeToolExecutionError.lower(e) }
                 )
             )
         }
@@ -1701,11 +1728,12 @@ public object FfiConverterTypeToolProvider: FfiConverter<ToolProvider, Pointer> 
 
 
 data class McpTool (
-    var `name`: kotlin.String, 
-    var `description`: kotlin.String, 
-    var `inputSchemaJson`: kotlin.String
+    var `name`: kotlin.String,
+    var `description`: kotlin.String,
+    var `inputSchemaJson`: kotlin.String,
+    var `retryable`: kotlin.Boolean
 ) {
-    
+
     companion object
 }
 
@@ -1718,20 +1746,114 @@ public object FfiConverterTypeMcpTool: FfiConverterRustBuffer<McpTool> {
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
     override fun allocationSize(value: McpTool) = (
             FfiConverterString.allocationSize(value.`name`) +
             FfiConverterString.allocationSize(value.`description`) +
-            FfiConverterString.allocationSize(value.`inputSchemaJson`)
+            FfiConverterString.allocationSize(value.`inputSchemaJson`) +
+            FfiConverterBoolean.allocationSize(value.`retryable`)
     )
 
     override fun write(value: McpTool, buf: ByteBuffer) {
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`description`, buf)
             FfiConverterString.write(value.`inputSchemaJson`, buf)
+            FfiConverterBoolean.write(value.`retryable`, buf)
     }
+}
+
+
+
+
+
+sealed class ToolExecutionException(message: String): kotlin.Exception(message) {
+
+        class Timeout(message: String) : ToolExecutionException(message)
+
+        class PermissionDenied(message: String) : ToolExecutionException(message)
+
+        class NetworkUnreachable(message: String) : ToolExecutionException(message)
+
+        class InvalidArguments(message: String) : ToolExecutionException(message)
+
+        class ResourceNotFound(message: String) : ToolExecutionException(message)
+
+        class ServerInternalException(message: String) : ToolExecutionException(message)
+
+        class Cancelled(message: String) : ToolExecutionException(message)
+
+        class Unknown(message: String) : ToolExecutionException(message)
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<ToolExecutionException> {
+        override fun lift(error_buf: RustBuffer.ByValue): ToolExecutionException = FfiConverterTypeToolExecutionError.lift(error_buf)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeToolExecutionError : FfiConverterRustBuffer<ToolExecutionException> {
+    override fun read(buf: ByteBuffer): ToolExecutionException {
+
+            return when(buf.getInt()) {
+            1 -> ToolExecutionException.Timeout(FfiConverterString.read(buf))
+            2 -> ToolExecutionException.PermissionDenied(FfiConverterString.read(buf))
+            3 -> ToolExecutionException.NetworkUnreachable(FfiConverterString.read(buf))
+            4 -> ToolExecutionException.InvalidArguments(FfiConverterString.read(buf))
+            5 -> ToolExecutionException.ResourceNotFound(FfiConverterString.read(buf))
+            6 -> ToolExecutionException.ServerInternalException(FfiConverterString.read(buf))
+            7 -> ToolExecutionException.Cancelled(FfiConverterString.read(buf))
+            8 -> ToolExecutionException.Unknown(FfiConverterString.read(buf))
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+
+    }
+
+    override fun allocationSize(value: ToolExecutionException): ULong {
+        return 4UL
+    }
+
+    override fun write(value: ToolExecutionException, buf: ByteBuffer) {
+        when(value) {
+            is ToolExecutionException.Timeout -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ToolExecutionException.PermissionDenied -> {
+                buf.putInt(2)
+                Unit
+            }
+            is ToolExecutionException.NetworkUnreachable -> {
+                buf.putInt(3)
+                Unit
+            }
+            is ToolExecutionException.InvalidArguments -> {
+                buf.putInt(4)
+                Unit
+            }
+            is ToolExecutionException.ResourceNotFound -> {
+                buf.putInt(5)
+                Unit
+            }
+            is ToolExecutionException.ServerInternalException -> {
+                buf.putInt(6)
+                Unit
+            }
+            is ToolExecutionException.Cancelled -> {
+                buf.putInt(7)
+                Unit
+            }
+            is ToolExecutionException.Unknown -> {
+                buf.putInt(8)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
 }
 
 
@@ -1769,20 +1891,20 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
 
 
  fun `registerToolProvider`(`provider`: ToolProvider)
-        = 
+        =
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_harness_fn_func_register_tool_provider(
         FfiConverterTypeToolProvider.lower(`provider`),_status)
 }
-    
-    
+
+
  fun `unregisterToolProvider`()
-        = 
+        =
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_harness_fn_func_unregister_tool_provider(
         _status)
 }
-    
-    
+
+
 
 

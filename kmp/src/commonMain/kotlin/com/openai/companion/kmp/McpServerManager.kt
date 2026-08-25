@@ -48,7 +48,7 @@ class McpServerManager {
 
     suspend fun tools(): List<McpToolDescriptor> = mutex.withLock { cachedTools.values.toList() }
 
-    suspend fun callTool(name: String, argumentsJson: String): String {
+    suspend fun callTool(name: String, argumentsJson: String): McpCallResult {
         val (serverId, toolName) = mutex.withLock {
             cachedTools.entries.firstOrNull { it.value.name == name }
                 ?.let { it.key.substringBeforeLast('/') to it.value.name }

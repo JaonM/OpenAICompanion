@@ -10,7 +10,7 @@ pub mod tool;
 mod types;
 pub mod uniffi;
 
-pub use uniffi::{McpTool, ToolProvider};
+pub use uniffi::{McpTool, ToolExecutionError, ToolProvider};
 ::uniffi::include_scaffolding!("harness");
 
 pub use configuration::Configuration;

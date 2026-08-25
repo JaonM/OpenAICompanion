@@ -10,15 +10,66 @@ data class McpTool(
     val name: String,
     val description: String,
     val inputSchemaJson: String,
+    val retryable: Boolean = false,
 )
 
-/** Synchronous UniFFI callback over the manager's last refreshed snapshot. */
+/** Async UniFFI callback over the manager's current aggregate snapshot. */
 class McpToolProvider(private val manager: McpServerManager) : RustToolProvider {
     /** Reads the current aggregate so server attach/detach is immediately visible to Rust. */
-    override suspend fun getTools(): List<McpTool> = manager.tools().map {
-            McpTool(it.name, it.description, it.inputSchemaJson)
+    override suspend fun getTools(): List<McpTool> = try {
+        manager.tools().map {
+        McpTool(it.name, it.description, it.inputSchemaJson, it.retryable)
+        }
+    } catch (error: ToolExecutionException) {
+        throw error
+    } catch (error: Throwable) {
+        throw ToolExecutionException(
+            ToolExecutionErrorCode.NETWORK_UNREACHABLE,
+            error.message.orEmpty(),
+            error,
+        )
     }
 
-    override suspend fun callTool(name: String, argumentsJson: String): String =
-        manager.callTool(name, argumentsJson)
+    override suspend fun callTool(name: String, argumentsJson: String): String = try {
+        manager.callTool(name, argumentsJson).let { result ->
+            if (result.isError) {
+                throw ToolExecutionException(
+                    classifyMcpError(result.contentJson),
+                    result.contentJson,
+                )
+            }
+            result.contentJson
+        }
+    } catch (error: ToolExecutionException) {
+        throw error
+    } catch (error: IllegalArgumentException) {
+        throw ToolExecutionException(
+            ToolExecutionErrorCode.INVALID_ARGUMENTS,
+            error.message.orEmpty(),
+            error,
+        )
+    } catch (error: Throwable) {
+        throw ToolExecutionException(
+            ToolExecutionErrorCode.UNKNOWN,
+            error.message.orEmpty(),
+            error,
+        )
+    }
+}
+
+private fun classifyMcpError(content: String): ToolExecutionErrorCode {
+    val normalized = content.lowercase()
+    return when {
+        "permission" in normalized || "denied" in normalized ->
+            ToolExecutionErrorCode.PERMISSION_DENIED
+        "network" in normalized || "unreachable" in normalized || "connection" in normalized ->
+            ToolExecutionErrorCode.NETWORK_UNREACHABLE
+        "argument" in normalized || "parameter" in normalized ->
+            ToolExecutionErrorCode.INVALID_ARGUMENTS
+        "not found" in normalized || "not_found" in normalized ->
+            ToolExecutionErrorCode.RESOURCE_NOT_FOUND
+        "cancel" in normalized -> ToolExecutionErrorCode.CANCELLED
+        "timeout" in normalized -> ToolExecutionErrorCode.TIMEOUT
+        else -> ToolExecutionErrorCode.SERVER_INTERNAL_ERROR
+    }
 }

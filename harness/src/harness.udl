@@ -3,5 +3,17 @@ namespace harness {
     void unregister_tool_provider();
 };
 
+[Error]
+enum ToolExecutionError {
+    "Timeout",
+    "PermissionDenied",
+    "NetworkUnreachable",
+    "InvalidArguments",
+    "ResourceNotFound",
+    "ServerInternalError",
+    "Cancelled",
+    "Unknown"
+};
+
 typedef record McpTool;
 typedef trait_with_foreign ToolProvider;

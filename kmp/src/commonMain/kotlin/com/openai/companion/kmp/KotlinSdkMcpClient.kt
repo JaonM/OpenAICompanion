@@ -28,11 +28,15 @@ class KotlinSdkMcpClient(
         }
     }
 
-    override suspend fun callTool(name: String, argumentsJson: String): String {
+    override suspend fun callTool(name: String, argumentsJson: String): McpCallResult {
         ensureConnected()
         val arguments = Json.decodeFromString<JsonObject>(argumentsJson)
         val result = client.callTool(CallToolRequest(name = name, arguments = arguments))
-        return result?.toString().orEmpty()
+            ?: throw ToolExecutionException(
+                ToolExecutionErrorCode.SERVER_INTERNAL_ERROR,
+                "MCP server returned an empty tool result",
+            )
+        return McpCallResult(result.toString(), result.isError == true)
     }
 
     override suspend fun close() {
@@ -58,4 +62,3 @@ class KotlinSdkMcpClient(
             KotlinSdkMcpClient(HttpClient { install(SSE) }, endpoint)
     }
 }
-
