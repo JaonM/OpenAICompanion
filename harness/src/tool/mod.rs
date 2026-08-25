@@ -202,7 +202,7 @@ impl ToolRegistry {
 }
 
 impl ToolExecutor for ToolRegistry {
-    fn refresh<'a>(&'a mut self) -> ExecutorFuture<'a, Result<(), AgentError>> {
+    fn refresh(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
         Box::pin(async move { crate::uniffi::register_all_mcp_tools(self).await.map(|_| ()) })
     }
 
