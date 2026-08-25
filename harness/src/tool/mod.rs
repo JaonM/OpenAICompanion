@@ -5,8 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{AgentError, McpTool, ToolCall, ToolDefinition, ToolOutput, ToolProvider};
 
-pub type ToolFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<ToolOutput, AgentError>> + Send + 'a>>;
+pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<ToolOutput, AgentError>> + Send + 'a>>;
 pub type ExecutorFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait Tool: Send + Sync {
@@ -21,7 +20,16 @@ pub trait ToolExecutor {
     }
 
     fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError>;
-    fn execute<'a>(&'a mut self, call: &'a ToolCall) -> ExecutorFuture<'a, Result<ToolOutput, AgentError>>;
+    fn is_retryable(&self, call: &ToolCall) -> bool {
+        self.list_tools()
+            .ok()
+            .and_then(|tools| tools.into_iter().find(|tool| tool.name == call.name))
+            .is_some_and(|tool| tool.retryable)
+    }
+    fn execute<'a>(
+        &'a self,
+        call: &'a ToolCall,
+    ) -> ExecutorFuture<'a, Result<ToolOutput, AgentError>>;
 }
 
 enum RegisteredTool {
@@ -53,19 +61,19 @@ impl Tool for LoadMoreTools {
 
     fn execute<'a>(&'a self, _: &'a ToolCall) -> ToolFuture<'a> {
         Box::pin(async move {
-        let mut state = self.state.lock().map_err(|_| AgentError::Tool {
-            name: "load_more_tools".into(),
-            message: "tool registry lock poisoned".into(),
-        })?;
-        let before = state.page_start;
-        let page_end = (before + state.num_tool_per_load).min(state.order.len());
-        state.page_start = page_end;
-        let names = state.order[before..page_end].join(", ");
-        Ok(ToolOutput::success(if names.is_empty() {
-            "No more tools are available".into()
-        } else {
-            format!("Loaded tools: {names}")
-        }))
+            let mut state = self.state.lock().map_err(|_| AgentError::Tool {
+                name: "load_more_tools".into(),
+                message: "tool registry lock poisoned".into(),
+            })?;
+            let before = state.page_start;
+            let page_end = (before + state.num_tool_per_load).min(state.order.len());
+            state.page_start = page_end;
+            let names = state.order[before..page_end].join(", ");
+            Ok(ToolOutput::success(if names.is_empty() {
+                "No more tools are available".into()
+            } else {
+                format!("Loaded tools: {names}")
+            }))
         })
     }
 }
@@ -136,7 +144,8 @@ impl ToolRegistry {
         }
         for tool in tools {
             let definition =
-                ToolDefinition::new(&tool.name, &tool.description, &tool.input_schema_json);
+                ToolDefinition::new(&tool.name, &tool.description, &tool.input_schema_json)
+                    .with_retryable(tool.retryable);
             self.insert(
                 definition.clone(),
                 RegisteredTool::KmpMcp {
@@ -204,7 +213,11 @@ impl ToolRegistry {
 
 impl ToolExecutor for ToolRegistry {
     fn refresh(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
-        Box::pin(async move { crate::uniffi::register_all_mcp_tools(self).await.map(|_| ()) })
+        Box::pin(async move {
+            crate::uniffi::register_all_mcp_tools(self)
+                .await
+                .map(|_| ())
+        })
     }
 
     fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
@@ -227,22 +240,41 @@ impl ToolExecutor for ToolRegistry {
         Ok(result)
     }
 
-    fn execute<'a>(&'a mut self, call: &'a ToolCall) -> ExecutorFuture<'a, Result<ToolOutput, AgentError>> {
+    fn is_retryable(&self, call: &ToolCall) -> bool {
+        self.definition(&call.name)
+            .is_some_and(|definition| definition.retryable)
+    }
+
+    fn execute<'a>(
+        &'a self,
+        call: &'a ToolCall,
+    ) -> ExecutorFuture<'a, Result<ToolOutput, AgentError>> {
         Box::pin(async move {
-        let tool = self
-            .tools
-            .get(&call.name)
-            .ok_or_else(|| AgentError::UnknownTool(call.name.clone()))?;
-        let result = match tool {
-            RegisteredTool::Builtin(tool) | RegisteredTool::Local(tool) => tool.execute(call).await,
-            RegisteredTool::KmpMcp { provider, .. } => Ok(ToolOutput::success(
-                provider.call_tool(call.name.clone(), call.arguments.clone()).await,
-            )),
-        };
-        result.map_err(|error| AgentError::Tool {
-            name: call.name.clone(),
-            message: error.to_string(),
-        })
+            let tool = self
+                .tools
+                .get(&call.name)
+                .ok_or_else(|| AgentError::UnknownTool(call.name.clone()))?;
+            let result = match tool {
+                RegisteredTool::Builtin(tool) | RegisteredTool::Local(tool) => {
+                    tool.execute(call).await
+                }
+                RegisteredTool::KmpMcp { provider, .. } => provider
+                    .call_tool(call.name.clone(), call.arguments.clone())
+                    .await
+                    .map(ToolOutput::success)
+                    .map_err(|error| AgentError::ToolExecution {
+                        name: call.name.clone(),
+                        message: error.to_string(),
+                        error,
+                    }),
+            };
+            result.map_err(|error| match error {
+                AgentError::ToolExecution { .. } => error,
+                error => AgentError::Tool {
+                    name: call.name.clone(),
+                    message: error.to_string(),
+                },
+            })
         })
     }
 }
@@ -296,7 +328,9 @@ mod tests {
 
     fn block_on<F: Future>(mut future: F) -> F::Output {
         use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-        fn clone(_: *const ()) -> RawWaker { RawWaker::new(std::ptr::null(), &VTABLE) }
+        fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
         fn noop(_: *const ()) {}
         static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
         let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };

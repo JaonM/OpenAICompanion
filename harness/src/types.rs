@@ -4,6 +4,7 @@ pub struct ToolDefinition {
     pub description: String,
     /// Kept as text until a serialization/schema dependency is selected.
     pub parameters_schema: String,
+    pub retryable: bool,
 }
 
 impl ToolDefinition {
@@ -16,7 +17,13 @@ impl ToolDefinition {
             name: name.into(),
             description: description.into(),
             parameters_schema: parameters_schema.into(),
+            retryable: false,
         }
+    }
+
+    pub fn with_retryable(mut self, retryable: bool) -> Self {
+        self.retryable = retryable;
+        self
     }
 }
 

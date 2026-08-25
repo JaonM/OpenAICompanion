@@ -1,5 +1,7 @@
 use std::{error::Error, fmt};
 
+use crate::ToolExecutionError;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentError {
     InvalidConfig(&'static str),
@@ -8,7 +10,16 @@ pub enum AgentError {
     EmptyToolName,
     UnknownTool(String),
     Model(String),
-    Tool { name: String, message: String },
+    Tool {
+        name: String,
+        message: String,
+    },
+    ToolExecution {
+        name: String,
+        error: ToolExecutionError,
+        message: String,
+    },
+    ToolProvider(ToolExecutionError),
 }
 
 impl fmt::Display for AgentError {
@@ -21,8 +32,34 @@ impl fmt::Display for AgentError {
             Self::UnknownTool(name) => write!(f, "unknown tool: {name}"),
             Self::Model(message) => write!(f, "model error: {message}"),
             Self::Tool { name, message } => write!(f, "tool '{name}' failed: {message}"),
+            Self::ToolExecution {
+                name,
+                error,
+                message,
+            } => {
+                write!(f, "tool '{name}' failed with {error}: {message}")
+            }
+            Self::ToolProvider(error) => write!(f, "MCP provider failed: {error}"),
         }
     }
 }
 
 impl Error for AgentError {}
+
+impl AgentError {
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::ToolExecution {
+                error: ToolExecutionError::Timeout
+                    | ToolExecutionError::NetworkUnreachable
+                    | ToolExecutionError::ServerInternalError,
+                ..
+            } | Self::ToolProvider(
+                ToolExecutionError::Timeout
+                    | ToolExecutionError::NetworkUnreachable
+                    | ToolExecutionError::ServerInternalError
+            )
+        )
+    }
+}
