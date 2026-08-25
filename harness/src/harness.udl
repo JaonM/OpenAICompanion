@@ -1,0 +1,7 @@
+namespace harness {
+    void register_tool_provider(ToolProvider provider);
+    void unregister_tool_provider();
+};
+
+typedef record McpTool;
+typedef trait_with_foreign ToolProvider;

@@ -1,14 +1,33 @@
 //! Reusable, dependency-free Agent Loop kernel.
 
+use std::sync::Arc;
+
+mod configuration;
 mod error;
 pub mod r#loop;
 pub mod serving;
 pub mod tool;
+mod types;
+pub mod uniffi;
 
+pub use uniffi::{McpTool, ToolProvider};
+::uniffi::include_scaffolding!("harness");
+
+pub use configuration::Configuration;
 pub use error::AgentError;
-pub use r#loop::{
-    AgentLoop, AgentLoopBuilder, AgentRun, LoopConfig, Message, ModelRequest, ModelResponse,
-    TerminationReason, ToolCall, ToolDefinition, ToolOutput,
+pub use r#loop::run;
+pub use serving::{ModelFuture, ModelServing};
+pub use tool::{Tool, ToolExecutor, ToolRegistry};
+pub use types::{
+    AgentRun, Message, ModelRequest, ModelResponse, TerminationReason, ToolCall, ToolDefinition,
+    ToolOutput,
 };
-pub use serving::ModelServe;
-pub use tool::{Tool, ToolRegistry};
+pub use uniffi::{register_all_mcp_tools, unregister_tool_provider_from_registry};
+
+pub fn register_tool_provider(provider: Arc<dyn ToolProvider>) {
+    uniffi::store_tool_provider(provider);
+}
+
+pub fn unregister_tool_provider() {
+    uniffi::clear_tool_provider();
+}

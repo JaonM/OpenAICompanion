@@ -122,18 +122,3 @@ pub struct AgentRun {
     pub steps: usize,
     pub termination: TerminationReason,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopConfig {
-    pub system_prompt: String,
-    pub max_steps: usize,
-}
-
-impl Default for LoopConfig {
-    fn default() -> Self {
-        Self {
-            system_prompt: String::new(),
-            max_steps: 16,
-        }
-    }
-}
