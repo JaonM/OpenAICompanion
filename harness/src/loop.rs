@@ -42,6 +42,11 @@ where
             "retry_backoff must be greater than zero when retries are enabled",
         ));
     }
+    if !executor.is_initialized() {
+        return Err(AgentError::InvalidConfig(
+            "tool executor must be initialized before running the agent loop",
+        ));
+    }
 
     let user_input = user_input.into();
     let mut history = vec![Message::User {
@@ -49,7 +54,7 @@ where
     }];
 
     for step in 0..config.max_steps {
-        executor.refresh().await?;
+        executor.sync_if_changed().await?;
         let response = model
             .complete(ModelRequest {
                 system_prompt: config.system_prompt.clone(),
@@ -254,6 +259,7 @@ mod tests {
         };
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor.register(Echo).unwrap();
+        block_on(executor.initialize()).unwrap();
         let result = block_on(run(
             &mut model,
             &mut executor,
@@ -277,6 +283,7 @@ mod tests {
             .push(ModelResponse::final_text("timeout explained"));
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor.register(HangingTool).unwrap();
+        block_on(executor.initialize()).unwrap();
         let config = Configuration {
             tool_execute_timeout: std::time::Duration::from_millis(5),
             ..Configuration::default()
@@ -307,6 +314,7 @@ mod tests {
                 attempts: std::sync::Mutex::new(0),
             })
             .unwrap();
+        block_on(executor.initialize()).unwrap();
         let config = Configuration {
             max_tool_retries: 1,
             retry_backoff: std::time::Duration::from_millis(1),
@@ -360,6 +368,7 @@ mod tests {
                 state: std::sync::Arc::clone(&state),
             })
             .unwrap();
+        futures::executor::block_on(executor.initialize()).unwrap();
 
         let result = futures::executor::block_on(run(
             &mut model,

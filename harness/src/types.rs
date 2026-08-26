@@ -2,7 +2,7 @@
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
-    /// Kept as text until a serialization/schema dependency is selected.
+    /// Provider-neutral JSON Schema encoded as a string at the core boundary.
     pub parameters_schema: String,
     pub retryable: bool,
 }
@@ -24,6 +24,64 @@ impl ToolDefinition {
     pub fn with_retryable(mut self, retryable: bool) -> Self {
         self.retryable = retryable;
         self
+    }
+}
+
+/// Converts an internal tool definition into the function-tool schema expected
+/// by model providers such as OpenAI-compatible APIs.
+///
+/// `parameters_schema` remains a JSON string at the Harness boundary so that
+/// callers can provide provider-neutral JSON Schema without coupling the core
+/// types to a particular schema model.
+pub fn tool_definition_to_function_schema(
+    definition: &ToolDefinition,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let parameters = serde_json::from_str::<serde_json::Value>(&definition.parameters_schema)?;
+    Ok(serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": parameters,
+        }
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ToolDefinition, tool_definition_to_function_schema};
+
+    #[test]
+    fn converts_tool_definition_to_function_schema() {
+        let definition = ToolDefinition::new(
+            "get_current_weather",
+            "获取指定城市的当前天气情况",
+            r#"{
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "城市或地区名称"
+                    },
+                    "unit": {
+                        "type": "string",
+                        "enum": ["celsius", "fahrenheit"]
+                    }
+                },
+                "required": ["location"]
+            }"#,
+        );
+
+        let schema = tool_definition_to_function_schema(&definition).unwrap();
+        assert_eq!(schema["type"], "function");
+        assert_eq!(schema["function"]["name"], "get_current_weather");
+        assert_eq!(schema["function"]["parameters"]["required"][0], "location");
+    }
+
+    #[test]
+    fn rejects_invalid_parameter_schema() {
+        let definition = ToolDefinition::new("broken", "Broken", "not-json");
+        assert!(tool_definition_to_function_schema(&definition).is_err());
     }
 }
 

@@ -331,6 +331,7 @@ dependencies = [
  "async-trait",
  "futures",
  "futures-timer",
+ "serde_json",
  "uniffi",
 ]
 

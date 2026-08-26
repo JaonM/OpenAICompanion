@@ -42,9 +42,14 @@ pub trait ToolProvider: Send + Sync {
 }
 
 static TOOL_PROVIDER: OnceLock<Mutex<Option<Arc<dyn ToolProvider>>>> = OnceLock::new();
+static MCP_TOOL_SNAPSHOT: OnceLock<Mutex<(u64, Vec<McpTool>)>> = OnceLock::new();
 
 fn provider_slot() -> &'static Mutex<Option<Arc<dyn ToolProvider>>> {
     TOOL_PROVIDER.get_or_init(|| Mutex::new(None))
+}
+
+fn tool_snapshot_slot() -> &'static Mutex<(u64, Vec<McpTool>)> {
+    MCP_TOOL_SNAPSHOT.get_or_init(|| Mutex::new((0, Vec::new())))
 }
 
 pub fn store_tool_provider(provider: Arc<dyn ToolProvider>) {
@@ -52,7 +57,22 @@ pub fn store_tool_provider(provider: Arc<dyn ToolProvider>) {
     *slot = Some(provider);
 }
 
-fn current_tool_provider() -> Result<Option<Arc<dyn ToolProvider>>, AgentError> {
+pub fn update_mcp_tools(tools: Vec<McpTool>) {
+    let mut snapshot = tool_snapshot_slot()
+        .lock()
+        .expect("MCP tool snapshot lock poisoned");
+    snapshot.0 = snapshot.0.wrapping_add(1);
+    snapshot.1 = tools;
+}
+
+pub(crate) fn current_mcp_tool_snapshot() -> (u64, Vec<McpTool>) {
+    tool_snapshot_slot()
+        .lock()
+        .expect("MCP tool snapshot lock poisoned")
+        .clone()
+}
+
+pub(crate) fn current_tool_provider() -> Result<Option<Arc<dyn ToolProvider>>, AgentError> {
     Ok(provider_slot()
         .lock()
         .map_err(|_| AgentError::Model("tool provider lock poisoned".into()))?
@@ -77,6 +97,7 @@ pub async fn register_all_mcp_tools(
 
 pub fn clear_tool_provider() {
     *provider_slot().lock().expect("tool provider lock poisoned") = None;
+    update_mcp_tools(Vec::new());
 }
 
 pub fn unregister_tool_provider_from_registry(

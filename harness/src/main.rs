@@ -1,6 +1,6 @@
 use harness::{
     AgentError, Configuration, ModelRequest, ModelResponse, ModelServing, Tool, ToolCall,
-    ToolDefinition, ToolOutput, ToolRegistry,
+    ToolDefinition, ToolExecutor, ToolOutput, ToolRegistry,
 };
 
 // This binary is intentionally small: real model and tool adapters belong in
@@ -41,6 +41,7 @@ fn main() -> Result<(), AgentError> {
     let mut model = DemoModel { first_turn: true };
     let mut tools = ToolRegistry::new(config.num_tool_per_load)?;
     tools.register(EchoTool)?;
+    block_on(tools.initialize())?;
     println!(
         "{:?}",
         block_on(harness::r#loop::run(

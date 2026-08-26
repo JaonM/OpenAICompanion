@@ -15,7 +15,21 @@ pub trait Tool: Send + Sync {
 
 /// Execution seam for policy, sandbox, retries, and remote dispatch.
 pub trait ToolExecutor {
-    fn refresh<'a>(&'a mut self) -> ExecutorFuture<'a, Result<(), AgentError>> {
+    /// Loads the initial tool snapshot for a session.
+    fn initialize(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
+        self.refresh()
+    }
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn refresh(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Applies locally pushed tool snapshots without pulling from KMP again.
+    fn sync_if_changed(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -81,6 +95,8 @@ impl Tool for LoadMoreTools {
 pub struct ToolRegistry {
     tools: HashMap<String, RegisteredTool>,
     state: Arc<Mutex<DisclosureState>>,
+    mcp_snapshot_version: u64,
+    initialized: bool,
 }
 
 impl ToolRegistry {
@@ -98,6 +114,8 @@ impl ToolRegistry {
         let mut registry = Self {
             tools: HashMap::new(),
             state: Arc::clone(&state),
+            mcp_snapshot_version: 0,
+            initialized: false,
         };
         registry.tools.insert(
             "load_more_tools".into(),
@@ -212,11 +230,43 @@ impl ToolRegistry {
 }
 
 impl ToolExecutor for ToolRegistry {
+    fn initialize(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
+        Box::pin(async move {
+            self.refresh().await?;
+            self.initialized = true;
+            Ok(())
+        })
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
     fn refresh(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
         Box::pin(async move {
             crate::uniffi::register_all_mcp_tools(self)
                 .await
-                .map(|_| ())
+                .map(|_| {
+                    self.mcp_snapshot_version =
+                        crate::uniffi::current_mcp_tool_snapshot().0;
+                })
+        })
+    }
+
+    fn sync_if_changed(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
+        Box::pin(async move {
+            let (version, tools) = crate::uniffi::current_mcp_tool_snapshot();
+            if version == self.mcp_snapshot_version {
+                return Ok(());
+            }
+            let Some(provider) = crate::uniffi::current_tool_provider()? else {
+                self.clear_mcp_tools()?;
+                self.mcp_snapshot_version = version;
+                return Ok(());
+            };
+            self.replace_mcp_tools(provider, tools)?;
+            self.mcp_snapshot_version = version;
+            Ok(())
         })
     }
 

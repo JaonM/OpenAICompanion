@@ -19,13 +19,17 @@ pub use r#loop::run;
 pub use serving::{ModelFuture, ModelServing};
 pub use tool::{Tool, ToolExecutor, ToolRegistry};
 pub use types::{
-    AgentRun, Message, ModelRequest, ModelResponse, TerminationReason, ToolCall, ToolDefinition,
-    ToolOutput,
+    tool_definition_to_function_schema, AgentRun, Message, ModelRequest, ModelResponse,
+    TerminationReason, ToolCall, ToolDefinition, ToolOutput,
 };
 pub use uniffi::{register_all_mcp_tools, unregister_tool_provider_from_registry};
 
 pub fn register_tool_provider(provider: Arc<dyn ToolProvider>) {
     uniffi::store_tool_provider(provider);
+}
+
+pub fn update_mcp_tools(tools: Vec<McpTool>) {
+    uniffi::update_mcp_tools(tools);
 }
 
 pub fn unregister_tool_provider() {

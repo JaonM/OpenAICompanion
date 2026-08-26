@@ -1,5 +1,6 @@
 namespace harness {
     void register_tool_provider(ToolProvider provider);
+    void update_mcp_tools(sequence<McpTool> tools);
     void unregister_tool_provider();
 };
 
