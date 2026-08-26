@@ -30,6 +30,12 @@ class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
         })
     }
 
+    override fun updateMcpTools(tools: List<McpTool>) {
+        uniffi.harness.updateMcpTools(
+            tools.map { GeneratedMcpTool(it.name, it.description, it.inputSchemaJson, it.retryable) },
+        )
+    }
+
     override fun unregisterToolProvider() {
         unregisterToolProvider()
     }

@@ -7,12 +7,27 @@ package com.openai.companion.kmp
 interface GeneratedHarnessBindings {
     fun registerToolProvider(provider: RustToolProvider)
 
+    fun updateMcpTools(tools: List<McpTool>)
+
     fun unregisterToolProvider()
 }
 
-fun registerMcpProvider(
+suspend fun registerMcpProvider(
     bindings: GeneratedHarnessBindings,
     manager: McpServerManager,
 ) {
     bindings.registerToolProvider(McpToolProvider(manager))
+    manager.setToolsChangedListener {
+        bindings.updateMcpTools(manager.tools().map { tool ->
+            McpTool(
+                name = tool.name,
+                description = tool.description,
+                inputSchemaJson = tool.inputSchemaJson,
+                retryable = tool.retryable,
+            )
+        })
+    }
+    bindings.updateMcpTools(manager.tools().map { tool ->
+        McpTool(tool.name, tool.description, tool.inputSchemaJson, tool.retryable)
+    })
 }

@@ -755,6 +755,8 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -773,6 +775,8 @@ internal interface IntegrityCheckingUniffiLib : Library {
     fun uniffi_harness_checksum_func_register_tool_provider(
 ): Short
 fun uniffi_harness_checksum_func_unregister_tool_provider(
+): Short
+fun uniffi_harness_checksum_func_update_mcp_tools(
 ): Short
 fun uniffi_harness_checksum_method_toolprovider_get_tools(
 ): Short
@@ -841,6 +845,8 @@ fun uniffi_harness_fn_method_toolprovider_call_tool(`ptr`: Pointer,`name`: RustB
 fun uniffi_harness_fn_func_register_tool_provider(`provider`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun uniffi_harness_fn_func_unregister_tool_provider(uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_harness_fn_func_update_mcp_tools(`tools`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun ffi_harness_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -972,6 +978,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_unregister_tool_provider() != 23390.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_update_mcp_tools() != 7040.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_method_toolprovider_get_tools() != 40495.toShort()) {
@@ -1903,6 +1912,14 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_harness_fn_func_unregister_tool_provider(
         _status)
+}
+
+
+ fun `updateMcpTools`(`tools`: List<McpTool>)
+        =
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_update_mcp_tools(
+        FfiConverterSequenceTypeMcpTool.lower(`tools`),_status)
 }
 
 

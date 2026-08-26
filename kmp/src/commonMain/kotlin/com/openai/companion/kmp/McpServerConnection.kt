@@ -6,6 +6,8 @@ interface McpServerConnection {
 
     suspend fun callTool(name: String, argumentsJson: String): McpCallResult
 
+    fun setToolsChangedListener(listener: suspend () -> Unit) = Unit
+
     suspend fun close()
 }
 
