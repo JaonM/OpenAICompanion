@@ -7,7 +7,7 @@ use std::time::Duration;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Configuration {
     pub system_prompt: String,
-    pub max_steps: usize,
+    pub max_step: usize,
     pub num_tool_per_load: usize,
     /// Maximum number of tool calls that may be in flight in one model step.
     pub max_concurrent_tools: usize,
@@ -21,7 +21,7 @@ impl Default for Configuration {
     fn default() -> Self {
         Self {
             system_prompt: String::new(),
-            max_steps: 16,
+            max_step: 16,
             num_tool_per_load: 8,
             max_concurrent_tools: 4,
             tool_execute_timeout: Duration::from_secs(30),

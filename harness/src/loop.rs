@@ -17,7 +17,7 @@ where
     M: ModelServing,
     E: ToolExecutor + Sync,
 {
-    if config.max_steps == 0 {
+    if config.max_step == 0 {
         return Err(AgentError::InvalidConfig(
             "max_steps must be greater than zero",
         ));
@@ -53,7 +53,7 @@ where
         content: user_input.clone(),
     }];
 
-    for step in 0..config.max_steps {
+    for step in 0..config.max_step {
         executor.sync_if_changed().await?;
         let response = model
             .complete(ModelRequest {
@@ -100,7 +100,7 @@ where
     Ok(AgentRun {
         output: String::new(),
         history,
-        steps: config.max_steps,
+        steps: config.max_step,
         termination: TerminationReason::MaxStepsReached,
     })
 }
