@@ -19,8 +19,8 @@ pub use r#loop::run;
 pub use serving::{ModelFuture, ModelServing};
 pub use tool::{Tool, ToolExecutor, ToolRegistry};
 pub use types::{
-    tool_definition_to_function_schema, AgentRun, Message, ModelRequest, ModelResponse,
-    TerminationReason, ToolCall, ToolDefinition, ToolOutput,
+    AgentRun, Message, ModelRequest, ModelResponse, TerminationReason, ToolCall, ToolDefinition,
+    ToolOutput, tool_definition_to_function_schema,
 };
 pub use uniffi::{register_all_mcp_tools, unregister_tool_provider_from_registry};
 

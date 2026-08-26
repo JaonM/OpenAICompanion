@@ -31,39 +31,26 @@ impl Tool for EchoTool {
         ToolDefinition::new("echo", "Returns the supplied text", "text")
     }
 
-    fn execute<'a>(&'a self, call: &'a ToolCall) -> harness::tool::ToolFuture<'a> {
+    fn execute(&self, call: ToolCall) -> harness::tool::ToolFuture {
         Box::pin(async move { Ok(ToolOutput::success(call.arguments.clone())) })
     }
 }
 
 fn main() -> Result<(), AgentError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| AgentError::Model(format!("failed to create Tokio runtime: {error}")))?;
     let config = Configuration::default();
     let mut model = DemoModel { first_turn: true };
     let mut tools = ToolRegistry::new(config.num_tool_per_load)?;
     tools.register(EchoTool)?;
-    block_on(tools.initialize())?;
+    runtime.block_on(tools.initialize())?;
     println!(
         "{:?}",
-        block_on(harness::r#loop::run(
+        runtime.block_on(harness::r#loop::run(
             &mut model, &mut tools, &config, "run demo",
         ))?
     );
     Ok(())
-}
-
-fn block_on<F: std::future::Future>(mut future: F) -> F::Output {
-    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-    fn clone(_: *const ()) -> RawWaker {
-        RawWaker::new(std::ptr::null(), &VTABLE)
-    }
-    fn noop(_: *const ()) {}
-    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
-    let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
-    let mut context = Context::from_waker(&waker);
-    let mut future = unsafe { std::pin::Pin::new_unchecked(&mut future) };
-    loop {
-        if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
-            return value;
-        }
-    }
 }

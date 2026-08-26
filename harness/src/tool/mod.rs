@@ -5,12 +5,13 @@ use std::sync::{Arc, Mutex};
 
 use crate::{AgentError, McpTool, ToolCall, ToolDefinition, ToolOutput, ToolProvider};
 
-pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<ToolOutput, AgentError>> + Send + 'a>>;
+pub type ToolFuture =
+    Pin<Box<dyn Future<Output = Result<ToolOutput, AgentError>> + Send + 'static>>;
 pub type ExecutorFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
-    fn execute<'a>(&'a self, call: &'a ToolCall) -> ToolFuture<'a>;
+    fn execute(&self, call: ToolCall) -> ToolFuture;
 }
 
 /// Execution seam for policy, sandbox, retries, and remote dispatch.
@@ -40,15 +41,12 @@ pub trait ToolExecutor {
             .and_then(|tools| tools.into_iter().find(|tool| tool.name == call.name))
             .is_some_and(|tool| tool.retryable)
     }
-    fn execute<'a>(
-        &'a self,
-        call: &'a ToolCall,
-    ) -> ExecutorFuture<'a, Result<ToolOutput, AgentError>>;
+    fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>>;
 }
 
 enum RegisteredTool {
-    Builtin(Box<dyn Tool>),
-    Local(Box<dyn Tool>),
+    Builtin(Arc<dyn Tool>),
+    Local(Arc<dyn Tool>),
     KmpMcp {
         definition: ToolDefinition,
         provider: Arc<dyn ToolProvider>,
@@ -73,9 +71,10 @@ impl Tool for LoadMoreTools {
         )
     }
 
-    fn execute<'a>(&'a self, _: &'a ToolCall) -> ToolFuture<'a> {
+    fn execute(&self, _: ToolCall) -> ToolFuture {
+        let state = Arc::clone(&self.state);
         Box::pin(async move {
-            let mut state = self.state.lock().map_err(|_| AgentError::Tool {
+            let mut state = state.lock().map_err(|_| AgentError::Tool {
                 name: "load_more_tools".into(),
                 message: "tool registry lock poisoned".into(),
             })?;
@@ -119,14 +118,14 @@ impl ToolRegistry {
         };
         registry.tools.insert(
             "load_more_tools".into(),
-            RegisteredTool::Builtin(Box::new(LoadMoreTools { state })),
+            RegisteredTool::Builtin(Arc::new(LoadMoreTools { state })),
         );
         Ok(registry)
     }
 
     pub fn register(&mut self, tool: impl Tool + 'static) -> Result<(), AgentError> {
         let definition = tool.definition();
-        self.insert(definition, RegisteredTool::Local(Box::new(tool)))
+        self.insert(definition, RegisteredTool::Local(Arc::new(tool)))
     }
 
     /// Replaces all KMP-provided tools with the latest aggregate snapshot.
@@ -244,12 +243,9 @@ impl ToolExecutor for ToolRegistry {
 
     fn refresh(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
         Box::pin(async move {
-            crate::uniffi::register_all_mcp_tools(self)
-                .await
-                .map(|_| {
-                    self.mcp_snapshot_version =
-                        crate::uniffi::current_mcp_tool_snapshot().0;
-                })
+            crate::uniffi::register_all_mcp_tools(self).await.map(|_| {
+                self.mcp_snapshot_version = crate::uniffi::current_mcp_tool_snapshot().0;
+            })
         })
     }
 
@@ -295,33 +291,35 @@ impl ToolExecutor for ToolRegistry {
             .is_some_and(|definition| definition.retryable)
     }
 
-    fn execute<'a>(
-        &'a self,
-        call: &'a ToolCall,
-    ) -> ExecutorFuture<'a, Result<ToolOutput, AgentError>> {
+    fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>> {
+        let execution = match self.tools.get(&call.name) {
+            Some(RegisteredTool::Builtin(tool) | RegisteredTool::Local(tool)) => {
+                Arc::clone(tool).execute(call.clone())
+            }
+            Some(RegisteredTool::KmpMcp { provider, .. }) => {
+                let provider = Arc::clone(provider);
+                let call = call.clone();
+                Box::pin(async move {
+                    provider
+                        .call_tool(call.name.clone(), call.arguments.clone())
+                        .await
+                        .map(ToolOutput::success)
+                        .map_err(|error| AgentError::ToolExecution {
+                            name: call.name.clone(),
+                            message: error.to_string(),
+                            error,
+                        })
+                })
+            }
+            None => return Box::pin(async move { Err(AgentError::UnknownTool(call.name)) }),
+        };
+        let name = call.name.clone();
         Box::pin(async move {
-            let tool = self
-                .tools
-                .get(&call.name)
-                .ok_or_else(|| AgentError::UnknownTool(call.name.clone()))?;
-            let result = match tool {
-                RegisteredTool::Builtin(tool) | RegisteredTool::Local(tool) => {
-                    tool.execute(call).await
-                }
-                RegisteredTool::KmpMcp { provider, .. } => provider
-                    .call_tool(call.name.clone(), call.arguments.clone())
-                    .await
-                    .map(ToolOutput::success)
-                    .map_err(|error| AgentError::ToolExecution {
-                        name: call.name.clone(),
-                        message: error.to_string(),
-                        error,
-                    }),
-            };
+            let result = execution.await;
             result.map_err(|error| match error {
                 AgentError::ToolExecution { .. } => error,
                 error => AgentError::Tool {
-                    name: call.name.clone(),
+                    name,
                     message: error.to_string(),
                 },
             })
@@ -346,7 +344,7 @@ mod tests {
             ToolDefinition::new(self.0, self.0, "{}")
         }
 
-        fn execute<'a>(&'a self, _: &'a ToolCall) -> ToolFuture<'a> {
+        fn execute(&self, _: ToolCall) -> ToolFuture {
             Box::pin(async { Ok(ToolOutput::success("ok")) })
         }
     }
@@ -366,13 +364,13 @@ mod tests {
             vec!["one", "two", "load_more_tools"]
         );
 
-        block_on(registry.execute(&ToolCall::new("1", "load_more_tools", "{}"))).unwrap();
+        block_on(registry.execute(ToolCall::new("1", "load_more_tools", "{}"))).unwrap();
         assert_eq!(
             names(registry.list_tools().unwrap()),
             vec!["three", "four", "load_more_tools"]
         );
 
-        block_on(registry.execute(&ToolCall::new("2", "load_more_tools", "{}"))).unwrap();
+        block_on(registry.execute(ToolCall::new("2", "load_more_tools", "{}"))).unwrap();
         assert_eq!(names(registry.list_tools().unwrap()), vec!["five"]);
     }
 

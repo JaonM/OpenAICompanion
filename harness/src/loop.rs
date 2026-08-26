@@ -2,8 +2,8 @@ use crate::{
     AgentError, AgentRun, Configuration, Message, ModelRequest, ModelResponse, ModelServing,
     TerminationReason, ToolCall, ToolExecutor, ToolOutput,
 };
-use futures::{StreamExt, future::Either, future::select, stream};
-use futures_timer::Delay;
+use tokio::task::JoinSet;
+use tokio::time::timeout;
 
 /// Runs one tool-use loop. State and lifecycle are owned by the caller; this
 /// function only coordinates model requests and tool execution.
@@ -15,7 +15,7 @@ pub async fn run<M, E>(
 ) -> Result<AgentRun, AgentError>
 where
     M: ModelServing,
-    E: ToolExecutor,
+    E: ToolExecutor + Sync,
 {
     if config.max_steps == 0 {
         return Err(AgentError::InvalidConfig(
@@ -78,14 +78,7 @@ where
             tool_calls: response.tool_calls.clone(),
         });
         let calls = response.tool_calls;
-        let results = stream::iter(
-            calls
-                .iter()
-                .map(|call| execute_tool_with_policy(executor, call, config)),
-        )
-        .buffered(config.max_concurrent_tools)
-        .collect::<Vec<_>>()
-        .await;
+        let results = execute_tools(executor, &calls, config).await?;
 
         for (call, result) in calls.into_iter().zip(results) {
             let output = match result {
@@ -112,39 +105,85 @@ where
     })
 }
 
-async fn execute_tool_with_policy<E: ToolExecutor>(
+async fn execute_tools<E: ToolExecutor + Sync>(
     executor: &E,
-    call: &ToolCall,
+    calls: &[ToolCall],
     config: &Configuration,
-) -> Result<crate::ToolOutput, AgentError> {
-    let retryable = executor.is_retryable(call);
-    for attempt in 0..=config.max_tool_retries {
-        let tool_name = call.name.clone();
-        let execution = executor.execute(call);
-        let result = match select(execution, Delay::new(config.tool_execute_timeout)).await {
-            Either::Left((result, _)) => result,
-            Either::Right((_, _)) => Err(AgentError::ToolExecution {
-                name: tool_name,
-                error: crate::ToolExecutionError::Timeout,
-                message: format!(
-                    "timed out after {} ms",
-                    config.tool_execute_timeout.as_millis()
-                ),
-            }),
-        };
+) -> Result<Vec<Result<ToolOutput, AgentError>>, AgentError> {
+    let mut tasks = JoinSet::new();
+    let mut attempts = vec![0usize; calls.len()];
+    let mut results: Vec<Option<Result<ToolOutput, AgentError>>> =
+        (0..calls.len()).map(|_| None).collect();
+    let mut next_to_start = 0;
+    let mut completed = 0;
 
-        match result {
-            Ok(output) => return Ok(output),
-            Err(error)
-                if attempt < config.max_tool_retries && retryable && error.is_retryable() =>
-            {
-                let multiplier = 1u32.checked_shl(attempt as u32).unwrap_or(u32::MAX);
-                Delay::new(config.retry_backoff.saturating_mul(multiplier)).await;
-            }
-            Err(error) => return Err(error),
+    while completed < calls.len() {
+        while tasks.len() < config.max_concurrent_tools && next_to_start < calls.len() {
+            spawn_tool_attempt(
+                &mut tasks,
+                executor,
+                calls[next_to_start].clone(),
+                next_to_start,
+                config.tool_execute_timeout,
+            );
+            next_to_start += 1;
         }
+
+        let Some(joined) = tasks.join_next().await else {
+            return Err(AgentError::Model(
+                "tool task scheduler stopped unexpectedly".into(),
+            ));
+        };
+        let (index, result) =
+            joined.map_err(|error| AgentError::Model(format!("tool task failed: {error}")))?;
+        if let Err(error) = &result {
+            if attempts[index] < config.max_tool_retries
+                && executor.is_retryable(&calls[index])
+                && error.is_retryable()
+            {
+                let multiplier = 1u32.checked_shl(attempts[index] as u32).unwrap_or(u32::MAX);
+                attempts[index] += 1;
+                tokio::time::sleep(config.retry_backoff.saturating_mul(multiplier)).await;
+                spawn_tool_attempt(
+                    &mut tasks,
+                    executor,
+                    calls[index].clone(),
+                    index,
+                    config.tool_execute_timeout,
+                );
+                continue;
+            }
+        }
+        results[index] = Some(result);
+        completed += 1;
     }
-    unreachable!("tool retry loop always returns")
+
+    Ok(results
+        .into_iter()
+        .map(|result| result.expect("all tool calls completed"))
+        .collect())
+}
+
+fn spawn_tool_attempt<E: ToolExecutor>(
+    tasks: &mut JoinSet<(usize, Result<ToolOutput, AgentError>)>,
+    executor: &E,
+    call: ToolCall,
+    index: usize,
+    timeout_duration: std::time::Duration,
+) {
+    let execution = executor.execute(call.clone());
+    let tool_name = call.name;
+    tasks.spawn(async move {
+        let result = timeout(timeout_duration, execution)
+            .await
+            .map_err(|_| AgentError::ToolExecution {
+                name: tool_name.clone(),
+                error: crate::ToolExecutionError::Timeout,
+                message: format!("timed out after {} ms", timeout_duration.as_millis()),
+            })
+            .and_then(|result| result);
+        (index, result)
+    });
 }
 
 fn validate_response(response: &ModelResponse) -> Result<(), AgentError> {
@@ -178,7 +217,7 @@ mod tests {
         fn definition(&self) -> ToolDefinition {
             ToolDefinition::new("echo", "Echo", "text")
         }
-        fn execute<'a>(&'a self, call: &'a ToolCall) -> crate::tool::ToolFuture<'a> {
+        fn execute(&self, call: ToolCall) -> crate::tool::ToolFuture {
             Box::pin(async move { Ok(ToolOutput::success(&call.arguments)) })
         }
     }
@@ -189,7 +228,7 @@ mod tests {
             ToolDefinition::new("hang", "Never completes", "{}")
         }
 
-        fn execute<'a>(&'a self, _: &'a ToolCall) -> crate::tool::ToolFuture<'a> {
+        fn execute(&self, _: ToolCall) -> crate::tool::ToolFuture {
             Box::pin(async { std::future::pending().await })
         }
     }
@@ -209,22 +248,23 @@ mod tests {
             ToolDefinition::new(self.name, "Waits while recording concurrency", "{}")
         }
 
-        fn execute<'a>(&'a self, _: &'a ToolCall) -> crate::tool::ToolFuture<'a> {
+        fn execute(&self, _: ToolCall) -> crate::tool::ToolFuture {
+            let state = std::sync::Arc::clone(&self.state);
             Box::pin(async move {
                 {
-                    let mut state = self.state.lock().unwrap();
+                    let mut state = state.lock().unwrap();
                     state.active += 1;
                     state.max_active = state.max_active.max(state.active);
                 }
-                futures_timer::Delay::new(std::time::Duration::from_millis(10)).await;
-                self.state.lock().unwrap().active -= 1;
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                state.lock().unwrap().active -= 1;
                 Ok(ToolOutput::success("done"))
             })
         }
     }
 
     struct FlakyTool {
-        attempts: std::sync::Mutex<usize>,
+        attempts: std::sync::Arc<std::sync::Mutex<usize>>,
     }
 
     impl Tool for FlakyTool {
@@ -232,9 +272,10 @@ mod tests {
             ToolDefinition::new("flaky", "Fails once", "{}").with_retryable(true)
         }
 
-        fn execute<'a>(&'a self, _: &'a ToolCall) -> crate::tool::ToolFuture<'a> {
+        fn execute(&self, _: ToolCall) -> crate::tool::ToolFuture {
+            let attempts = std::sync::Arc::clone(&self.attempts);
             Box::pin(async move {
-                let mut attempts = self.attempts.lock().unwrap();
+                let mut attempts = attempts.lock().unwrap();
                 *attempts += 1;
                 if *attempts == 1 {
                     Err(AgentError::ToolExecution {
@@ -259,8 +300,8 @@ mod tests {
         };
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor.register(Echo).unwrap();
-        block_on(executor.initialize()).unwrap();
-        let result = block_on(run(
+        runtime().block_on(executor.initialize()).unwrap();
+        let result = runtime().block_on(run(
             &mut model,
             &mut executor,
             &Configuration::default(),
@@ -283,14 +324,13 @@ mod tests {
             .push(ModelResponse::final_text("timeout explained"));
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor.register(HangingTool).unwrap();
-        block_on(executor.initialize()).unwrap();
+        runtime().block_on(executor.initialize()).unwrap();
         let config = Configuration {
             tool_execute_timeout: std::time::Duration::from_millis(5),
             ..Configuration::default()
         };
 
-        let result =
-            futures::executor::block_on(run(&mut model, &mut executor, &config, "question"));
+        let result = runtime().block_on(run(&mut model, &mut executor, &config, "question"));
 
         let run = result.unwrap();
         assert_eq!(run.output, "timeout explained");
@@ -311,19 +351,19 @@ mod tests {
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor
             .register(FlakyTool {
-                attempts: std::sync::Mutex::new(0),
+                attempts: std::sync::Arc::new(std::sync::Mutex::new(0)),
             })
             .unwrap();
-        block_on(executor.initialize()).unwrap();
+        runtime().block_on(executor.initialize()).unwrap();
         let config = Configuration {
             max_tool_retries: 1,
             retry_backoff: std::time::Duration::from_millis(1),
             ..Configuration::default()
         };
 
-        let result =
-            futures::executor::block_on(run(&mut model, &mut executor, &config, "question"))
-                .unwrap();
+        let result = runtime()
+            .block_on(run(&mut model, &mut executor, &config, "question"))
+            .unwrap();
 
         assert_eq!(result.output, "done");
     }
@@ -368,37 +408,28 @@ mod tests {
                 state: std::sync::Arc::clone(&state),
             })
             .unwrap();
-        futures::executor::block_on(executor.initialize()).unwrap();
+        runtime().block_on(executor.initialize()).unwrap();
 
-        let result = futures::executor::block_on(run(
-            &mut model,
-            &mut executor,
-            &Configuration {
-                max_concurrent_tools,
-                ..Configuration::default()
-            },
-            "question",
-        ))
-        .unwrap();
+        let result = runtime()
+            .block_on(run(
+                &mut model,
+                &mut executor,
+                &Configuration {
+                    max_concurrent_tools,
+                    ..Configuration::default()
+                },
+                "question",
+            ))
+            .unwrap();
 
         assert_eq!(result.output, "done");
         state.lock().unwrap().max_active
     }
 
-    fn block_on<F: std::future::Future>(mut future: F) -> F::Output {
-        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-        fn clone(_: *const ()) -> RawWaker {
-            RawWaker::new(std::ptr::null(), &VTABLE)
-        }
-        fn noop(_: *const ()) {}
-        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
-        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
-        let mut context = Context::from_waker(&waker);
-        let mut future = unsafe { std::pin::Pin::new_unchecked(&mut future) };
-        loop {
-            if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
-                return value;
-            }
-        }
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("test Tokio runtime should be created")
     }
 }
