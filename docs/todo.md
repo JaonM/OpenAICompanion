@@ -22,5 +22,6 @@
 - [x] 在 CI 中执行 `cargo run --manifest-path harness/Cargo.toml --features cli --bin uniffi-bindgen` 并验证 Kotlin 绑定生成。
 - [ ] 接入目标平台的 UniFFI Kotlin 生成物与 Rust 动态库构建产物。
 - [ ] 为 KMP 端到端连接远程/端侧 MCP Server 增加平台测试。
+- [ ] 在真实 iOS/Android/macOS App 中补充日历权限申请和端到端测试。
 - [ ] 建立成本、延迟、工具成功率和循环终止原因指标。
 - [ ] 定义版本化 API 和兼容性策略。
