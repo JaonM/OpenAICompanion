@@ -1,4 +1,4 @@
-package com.harness.kmp
+package com.harness.kmp.models
 
 import kotlinx.serialization.Serializable
 

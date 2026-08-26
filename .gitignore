@@ -20,6 +20,7 @@ Cargo.lock
 .gradle/
 local.properties
 gradle-wrapper.properties
+!**/gradle-wrapper.properties
 *.class
 *.log
 *.hprof
