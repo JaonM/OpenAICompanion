@@ -16,7 +16,9 @@ pub use uniffi::{McpTool, ToolExecutionError, ToolProvider};
 pub use configuration::Configuration;
 pub use error::AgentError;
 pub use r#loop::run;
-pub use serving::{ModelFuture, ModelServing};
+pub use serving::{
+    AgentEventSink, ModelServeCallback, ModelServeError, ModelServeWrapper, ModelStreamCallback,
+};
 pub use tool::{Tool, ToolExecutor, ToolRegistry};
 pub use types::{
     AgentRun, Message, ModelRequest, ModelResponse, TerminationReason, ToolCall, ToolDefinition,
@@ -34,4 +36,20 @@ pub fn update_mcp_tools(tools: Vec<McpTool>) {
 
 pub fn unregister_tool_provider() {
     uniffi::clear_tool_provider();
+}
+
+pub fn register_model_serve_callback(provider: Arc<dyn ModelServeCallback>) {
+    serving::register_model_serve_callback(provider);
+}
+
+pub fn unregister_model_serve_callback() {
+    serving::unregister_model_serve_callback();
+}
+
+pub fn register_agent_event_sink(sink: Arc<dyn AgentEventSink>) {
+    serving::register_agent_event_sink(sink);
+}
+
+pub fn unregister_agent_event_sink() {
+    serving::unregister_agent_event_sink();
 }

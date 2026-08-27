@@ -2,6 +2,10 @@ namespace harness {
     void register_tool_provider(ToolProvider provider);
     void update_mcp_tools(sequence<McpTool> tools);
     void unregister_tool_provider();
+    void register_model_serve_callback(ModelServeCallback provider);
+    void unregister_model_serve_callback();
+    void register_agent_event_sink(AgentEventSink sink);
+    void unregister_agent_event_sink();
 };
 
 [Error]
@@ -16,5 +20,15 @@ enum ToolExecutionError {
     "Unknown"
 };
 
+[Error]
+enum ModelServeError {
+    "RequestFailed",
+    "Cancelled",
+    "Unknown"
+};
+
 typedef record McpTool;
 typedef trait_with_foreign ToolProvider;
+typedef trait_with_foreign ModelServeCallback;
+typedef trait_with_foreign ModelStreamCallback;
+typedef trait_with_foreign AgentEventSink;

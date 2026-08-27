@@ -1,5 +1,5 @@
 use crate::{
-    AgentError, AgentRun, Configuration, Message, ModelRequest, ModelResponse, ModelServing,
+    AgentError, AgentRun, Configuration, Message, ModelRequest, ModelResponse, ModelServeWrapper,
     TerminationReason, ToolCall, ToolExecutor, ToolOutput,
 };
 use tokio::task::JoinSet;
@@ -7,14 +7,13 @@ use tokio::time::timeout;
 
 /// Runs one tool-use loop. State and lifecycle are owned by the caller; this
 /// function only coordinates model requests and tool execution.
-pub async fn run<M, E>(
-    model: &mut M,
+pub async fn run<E>(
+    model: &ModelServeWrapper,
     executor: &mut E,
     config: &Configuration,
     user_input: impl Into<String>,
 ) -> Result<AgentRun, AgentError>
 where
-    M: ModelServing,
     E: ToolExecutor + Sync,
 {
     if config.max_step == 0 {
@@ -52,6 +51,7 @@ where
     let mut history = vec![Message::User {
         content: user_input.clone(),
     }];
+    let mut reasoning = String::new();
 
     for step in 0..config.max_step {
         executor.sync_if_changed().await?;
@@ -63,9 +63,16 @@ where
                 tools: executor.list_tools()?,
             })
             .await?;
+        if !response.reasoning.is_empty() {
+            if !reasoning.is_empty() {
+                reasoning.push('\n');
+            }
+            reasoning.push_str(&response.reasoning);
+        }
 
         if response.tool_calls.is_empty() {
             return Ok(AgentRun {
+                reasoning,
                 output: response.content,
                 history,
                 steps: step + 1,
@@ -98,6 +105,7 @@ where
     }
 
     Ok(AgentRun {
+        reasoning,
         output: String::new(),
         history,
         steps: config.max_step,
@@ -137,10 +145,7 @@ async fn execute_tools<E: ToolExecutor + Sync>(
         let (index, result) =
             joined.map_err(|error| AgentError::Model(format!("tool task failed: {error}")))?;
         if let Err(error) = &result {
-            if attempts[index] < config.max_tool_retries
-                && executor.is_retryable(&calls[index])
-                && error.is_retryable()
-            {
+            if attempts[index] < config.max_tool_retries && error.is_retryable() {
                 let multiplier = 1u32.checked_shl(attempts[index] as u32).unwrap_or(u32::MAX);
                 attempts[index] += 1;
                 tokio::time::sleep(config.retry_backoff.saturating_mul(multiplier)).await;
@@ -205,17 +210,49 @@ mod tests {
     use crate::{Tool, ToolCall, ToolDefinition, ToolOutput};
 
     struct ScriptedModel {
-        responses: Vec<ModelResponse>,
+        responses: std::sync::Mutex<Vec<ModelResponse>>,
     }
-    impl ModelServing for ScriptedModel {
-        fn complete<'a>(&'a mut self, _: ModelRequest) -> crate::ModelFuture<'a> {
-            Box::pin(async move { Ok(self.responses.remove(0)) })
+    #[async_trait::async_trait]
+    impl crate::ModelServeCallback for ScriptedModel {
+        async fn complete(
+            &self,
+            _: String,
+            callback: std::sync::Arc<dyn crate::ModelStreamCallback>,
+        ) -> Result<(), crate::ModelServeError> {
+            let response = self.responses.lock().unwrap().remove(0);
+            let tool_calls = response
+                .tool_calls
+                .iter()
+                .map(|call| {
+                    serde_json::json!({
+                        "id": call.id,
+                        "type": "function",
+                        "function": { "name": call.name, "arguments": call.arguments },
+                    })
+                })
+                .collect::<Vec<_>>();
+            callback.on_chunk(
+                serde_json::json!({
+                    "choices": [{ "message": {
+                        "content": response.content,
+                        "tool_calls": tool_calls,
+                    }}]
+                })
+                .to_string(),
+            );
+            Ok(())
         }
+    }
+
+    fn model(responses: Vec<ModelResponse>) -> ModelServeWrapper {
+        ModelServeWrapper::new(std::sync::Arc::new(ScriptedModel {
+            responses: std::sync::Mutex::new(responses),
+        }))
     }
     struct Echo;
     impl Tool for Echo {
         fn definition(&self) -> ToolDefinition {
-            ToolDefinition::new("echo", "Echo", "text")
+            ToolDefinition::new("echo", "Echo", "{}")
         }
         fn execute(&self, call: ToolCall) -> crate::tool::ToolFuture {
             Box::pin(async move { Ok(ToolOutput::success(&call.arguments)) })
@@ -269,7 +306,7 @@ mod tests {
 
     impl Tool for FlakyTool {
         fn definition(&self) -> ToolDefinition {
-            ToolDefinition::new("flaky", "Fails once", "{}").with_retryable(true)
+            ToolDefinition::new("flaky", "Fails once", "{}")
         }
 
         fn execute(&self, _: ToolCall) -> crate::tool::ToolFuture {
@@ -292,17 +329,15 @@ mod tests {
 
     #[test]
     fn runs_tool_then_returns_model_answer() {
-        let mut model = ScriptedModel {
-            responses: vec![
-                ModelResponse::with_tool_calls("", vec![ToolCall::new("1", "echo", "hello")]),
-                ModelResponse::final_text("done"),
-            ],
-        };
+        let model = model(vec![
+            ModelResponse::with_tool_calls("", vec![ToolCall::new("1", "echo", "hello")]),
+            ModelResponse::final_text("done"),
+        ]);
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor.register(Echo).unwrap();
         runtime().block_on(executor.initialize()).unwrap();
         let result = runtime().block_on(run(
-            &mut model,
+            &model,
             &mut executor,
             &Configuration::default(),
             "question",
@@ -313,15 +348,10 @@ mod tests {
 
     #[test]
     fn returns_timeout_when_tool_does_not_complete() {
-        let mut model = ScriptedModel {
-            responses: vec![ModelResponse::with_tool_calls(
-                "",
-                vec![ToolCall::new("1", "hang", "{}")],
-            )],
-        };
-        model
-            .responses
-            .push(ModelResponse::final_text("timeout explained"));
+        let model = model(vec![
+            ModelResponse::with_tool_calls("", vec![ToolCall::new("1", "hang", "{}")]),
+            ModelResponse::final_text("timeout explained"),
+        ]);
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor.register(HangingTool).unwrap();
         runtime().block_on(executor.initialize()).unwrap();
@@ -330,7 +360,7 @@ mod tests {
             ..Configuration::default()
         };
 
-        let result = runtime().block_on(run(&mut model, &mut executor, &config, "question"));
+        let result = runtime().block_on(run(&model, &mut executor, &config, "question"));
 
         let run = result.unwrap();
         assert_eq!(run.output, "timeout explained");
@@ -342,12 +372,10 @@ mod tests {
 
     #[test]
     fn retries_retryable_tool_errors() {
-        let mut model = ScriptedModel {
-            responses: vec![
-                ModelResponse::with_tool_calls("", vec![ToolCall::new("1", "flaky", "{}")]),
-                ModelResponse::final_text("done"),
-            ],
-        };
+        let model = model(vec![
+            ModelResponse::with_tool_calls("", vec![ToolCall::new("1", "flaky", "{}")]),
+            ModelResponse::final_text("done"),
+        ]);
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor
             .register(FlakyTool {
@@ -362,7 +390,7 @@ mod tests {
         };
 
         let result = runtime()
-            .block_on(run(&mut model, &mut executor, &config, "question"))
+            .block_on(run(&model, &mut executor, &config, "question"))
             .unwrap();
 
         assert_eq!(result.output, "done");
@@ -383,18 +411,16 @@ mod tests {
             active: 0,
             max_active: 0,
         }));
-        let mut model = ScriptedModel {
-            responses: vec![
-                ModelResponse::with_tool_calls(
-                    "",
-                    vec![
-                        ToolCall::new("1", "first", "{}"),
-                        ToolCall::new("2", "second", "{}"),
-                    ],
-                ),
-                ModelResponse::final_text("done"),
-            ],
-        };
+        let model = model(vec![
+            ModelResponse::with_tool_calls(
+                "",
+                vec![
+                    ToolCall::new("1", "first", "{}"),
+                    ToolCall::new("2", "second", "{}"),
+                ],
+            ),
+            ModelResponse::final_text("done"),
+        ]);
         let mut executor = crate::ToolRegistry::new(2).unwrap();
         executor
             .register(WaitingTool {
@@ -412,7 +438,7 @@ mod tests {
 
         let result = runtime()
             .block_on(run(
-                &mut model,
+                &model,
                 &mut executor,
                 &Configuration {
                     max_concurrent_tools,
