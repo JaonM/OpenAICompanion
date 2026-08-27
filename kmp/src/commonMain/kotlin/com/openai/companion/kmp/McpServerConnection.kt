@@ -37,5 +37,4 @@ data class McpToolDescriptor(
     val name: String,
     val description: String,
     val inputSchemaJson: String,
-    val retryable: Boolean = false,
 )

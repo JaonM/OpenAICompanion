@@ -35,12 +35,6 @@ pub trait ToolExecutor {
     }
 
     fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError>;
-    fn is_retryable(&self, call: &ToolCall) -> bool {
-        self.list_tools()
-            .ok()
-            .and_then(|tools| tools.into_iter().find(|tool| tool.name == call.name))
-            .is_some_and(|tool| tool.retryable)
-    }
     fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>>;
 }
 
@@ -161,8 +155,7 @@ impl ToolRegistry {
         }
         for tool in tools {
             let definition =
-                ToolDefinition::new(&tool.name, &tool.description, &tool.input_schema_json)
-                    .with_retryable(tool.retryable);
+                ToolDefinition::new(&tool.name, &tool.description, &tool.input_schema_json);
             self.insert(
                 definition.clone(),
                 RegisteredTool::KmpMcp {
@@ -284,11 +277,6 @@ impl ToolExecutor for ToolRegistry {
             );
         }
         Ok(result)
-    }
-
-    fn is_retryable(&self, call: &ToolCall) -> bool {
-        self.definition(&call.name)
-            .is_some_and(|definition| definition.retryable)
     }
 
     fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>> {

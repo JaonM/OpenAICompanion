@@ -27,7 +27,6 @@ pub struct McpTool {
     pub name: String,
     pub description: String,
     pub input_schema_json: String,
-    pub retryable: bool,
 }
 
 #[::uniffi::export(with_foreign)]

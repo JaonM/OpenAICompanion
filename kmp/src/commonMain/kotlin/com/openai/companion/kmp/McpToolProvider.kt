@@ -10,7 +10,6 @@ data class McpTool(
     val name: String,
     val description: String,
     val inputSchemaJson: String,
-    val retryable: Boolean = false,
 )
 
 /** Async UniFFI callback over the manager's current aggregate snapshot. */
@@ -18,7 +17,7 @@ class McpToolProvider(private val manager: McpServerManager) : RustToolProvider 
     /** Reads the current aggregate so server attach/detach is immediately visible to Rust. */
     override suspend fun getTools(): List<McpTool> = try {
         manager.tools().map {
-        McpTool(it.name, it.description, it.inputSchemaJson, it.retryable)
+        McpTool(it.name, it.description, it.inputSchemaJson)
         }
     } catch (error: ToolExecutionException) {
         throw error
