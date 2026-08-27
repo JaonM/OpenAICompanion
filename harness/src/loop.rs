@@ -71,6 +71,7 @@ where
         }
 
         if response.tool_calls.is_empty() {
+            crate::serving::notify_agent_completed(response.content.clone());
             return Ok(AgentRun {
                 reasoning,
                 output: response.content,

@@ -95,16 +95,10 @@ impl ModelServeWrapper {
             }
             return Err(error);
         }
-        let sink = stream.sink.clone();
         match stream.into_response() {
-            Ok(response) => {
-                if let Some(sink) = sink {
-                    sink.on_completed(response.content.clone());
-                }
-                Ok(response)
-            }
+            Ok(response) => Ok(response),
             Err(error) => {
-                if let Some(sink) = sink {
+                if let Some(sink) = current_agent_event_sink()? {
                     sink.on_error(serde_json::json!({"error": error.to_string()}).to_string());
                 }
                 Err(error)
@@ -243,6 +237,14 @@ pub fn unregister_agent_event_sink() {
     *agent_event_sink_slot()
         .lock()
         .expect("agent event sink lock poisoned") = None;
+}
+
+pub fn notify_agent_completed(final_text: String) {
+    if let Ok(sink) = agent_event_sink_slot().lock() {
+        if let Some(sink) = sink.as_ref() {
+            sink.on_completed(final_text);
+        }
+    }
 }
 
 fn current_agent_event_sink() -> Result<Option<Arc<dyn AgentEventSink>>, AgentError> {
