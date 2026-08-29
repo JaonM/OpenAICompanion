@@ -861,6 +861,12 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 
 
 
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -876,7 +882,13 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
     // Integrity check functions only
-    fun uniffi_harness_checksum_func_register_agent_event_sink(
+    fun uniffi_harness_checksum_func_cancel_agent_loop(
+): Short
+fun uniffi_harness_checksum_func_clear_context_directories(
+): Short
+fun uniffi_harness_checksum_func_configure_context_directories(
+): Short
+fun uniffi_harness_checksum_func_register_agent_event_sink(
 ): Short
 fun uniffi_harness_checksum_func_register_model_serve_callback(
 ): Short
@@ -999,6 +1011,12 @@ fun uniffi_harness_fn_method_toolprovider_get_tools(`ptr`: Pointer,
 ): Long
 fun uniffi_harness_fn_method_toolprovider_call_tool(`ptr`: Pointer,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,
 ): Long
+fun uniffi_harness_fn_func_cancel_agent_loop(uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_harness_fn_func_clear_context_directories(uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_harness_fn_func_configure_context_directories(`agentsDirectory`: RustBuffer.ByValue,`personaDirectory`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
 fun uniffi_harness_fn_func_register_agent_event_sink(`sink`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun uniffi_harness_fn_func_register_model_serve_callback(`provider`: Pointer,uniffi_out_err: UniffiRustCallStatus,
@@ -1139,6 +1157,15 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_harness_checksum_func_cancel_agent_loop() != 53073.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_clear_context_directories() != 24030.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_configure_context_directories() != 15966.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_harness_checksum_func_register_agent_event_sink() != 46438.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3061,6 +3088,30 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
 
 
 
+
+
+ fun `cancelAgentLoop`()
+        =
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_cancel_agent_loop(
+        _status)
+}
+
+
+ fun `clearContextDirectories`()
+        =
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_clear_context_directories(
+        _status)
+}
+
+
+ fun `configureContextDirectories`(`agentsDirectory`: kotlin.String, `personaDirectory`: kotlin.String)
+        =
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_configure_context_directories(
+        FfiConverterString.lower(`agentsDirectory`),FfiConverterString.lower(`personaDirectory`),_status)
+}
 
 
  fun `registerAgentEventSink`(`sink`: AgentEventSink)
