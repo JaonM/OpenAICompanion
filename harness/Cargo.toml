@@ -16,7 +16,8 @@ cli = ["uniffi/cli"]
 [dependencies]
 async-trait = "0.1"
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 uniffi = "0.29"
 
 [build-dependencies]

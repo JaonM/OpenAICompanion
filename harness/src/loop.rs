@@ -1,9 +1,10 @@
 use crate::{
     AgentError, AgentRun, Configuration, Message, ModelRequest, ModelResponse, ModelServeWrapper,
-    TerminationReason, ToolCall, ToolExecutor, ToolOutput,
+    SessionContext, TerminationReason, ToolCall, ToolExecutor, ToolOutput,
 };
 use tokio::task::JoinSet;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 
 /// Runs one tool-use loop. State and lifecycle are owned by the caller; this
 /// function only coordinates model requests and tool execution.
@@ -11,11 +12,13 @@ pub async fn run<E>(
     model: &ModelServeWrapper,
     executor: &mut E,
     config: &Configuration,
+    session: &SessionContext,
     user_input: impl Into<String>,
 ) -> Result<AgentRun, AgentError>
 where
     E: ToolExecutor + Sync,
 {
+    let cancellation = crate::cancellation::begin();
     if config.max_step == 0 {
         return Err(AgentError::InvalidConfig(
             "max_steps must be greater than zero",
@@ -54,15 +57,17 @@ where
     let mut reasoning = String::new();
 
     for step in 0..config.max_step {
-        executor.sync_if_changed().await?;
-        let response = model
-            .complete(ModelRequest {
-                system_prompt: config.system_prompt.clone(),
+        cancelable(&cancellation, executor.sync_if_changed()).await??;
+        let response = cancelable(
+            &cancellation,
+            model.complete(ModelRequest {
+                system_prompt: session.system_prompt.clone(),
                 user_input: user_input.clone(),
                 history: history.clone(),
                 tools: executor.list_tools()?,
-            })
-            .await?;
+            }),
+        )
+        .await??;
         if !response.reasoning.is_empty() {
             if !reasoning.is_empty() {
                 reasoning.push('\n');
@@ -86,7 +91,7 @@ where
             tool_calls: response.tool_calls.clone(),
         });
         let calls = response.tool_calls;
-        let results = execute_tools(executor, &calls, config).await?;
+        let results = execute_tools(executor, &calls, config, &cancellation).await?;
 
         for (call, result) in calls.into_iter().zip(results) {
             let output = match result {
@@ -118,6 +123,7 @@ async fn execute_tools<E: ToolExecutor + Sync>(
     executor: &E,
     calls: &[ToolCall],
     config: &Configuration,
+    cancellation: &CancellationToken,
 ) -> Result<Vec<Result<ToolOutput, AgentError>>, AgentError> {
     let mut tasks = JoinSet::new();
     let mut attempts = vec![0usize; calls.len()];
@@ -134,11 +140,12 @@ async fn execute_tools<E: ToolExecutor + Sync>(
                 calls[next_to_start].clone(),
                 next_to_start,
                 config.tool_execute_timeout,
+                cancellation.clone(),
             );
             next_to_start += 1;
         }
 
-        let Some(joined) = tasks.join_next().await else {
+        let Some(joined) = cancelable(cancellation, tasks.join_next()).await? else {
             return Err(AgentError::Model(
                 "tool task scheduler stopped unexpectedly".into(),
             ));
@@ -149,13 +156,18 @@ async fn execute_tools<E: ToolExecutor + Sync>(
             if attempts[index] < config.max_tool_retries && error.is_retryable() {
                 let multiplier = 1u32.checked_shl(attempts[index] as u32).unwrap_or(u32::MAX);
                 attempts[index] += 1;
-                tokio::time::sleep(config.retry_backoff.saturating_mul(multiplier)).await;
+                cancelable(
+                    cancellation,
+                    tokio::time::sleep(config.retry_backoff.saturating_mul(multiplier)),
+                )
+                .await?;
                 spawn_tool_attempt(
                     &mut tasks,
                     executor,
                     calls[index].clone(),
                     index,
                     config.tool_execute_timeout,
+                    cancellation.clone(),
                 );
                 continue;
             }
@@ -176,20 +188,34 @@ fn spawn_tool_attempt<E: ToolExecutor>(
     call: ToolCall,
     index: usize,
     timeout_duration: std::time::Duration,
+    cancellation: CancellationToken,
 ) {
     let execution = executor.execute(call.clone());
     let tool_name = call.name;
     tasks.spawn(async move {
-        let result = timeout(timeout_duration, execution)
+        let result = cancelable(&cancellation, timeout(timeout_duration, execution))
             .await
-            .map_err(|_| AgentError::ToolExecution {
-                name: tool_name.clone(),
-                error: crate::ToolExecutionError::Timeout,
-                message: format!("timed out after {} ms", timeout_duration.as_millis()),
-            })
-            .and_then(|result| result);
+            .and_then(|result| {
+                result
+                    .map_err(|_| AgentError::ToolExecution {
+                        name: tool_name.clone(),
+                        error: crate::ToolExecutionError::Timeout,
+                        message: format!("timed out after {} ms", timeout_duration.as_millis()),
+                    })
+                    .and_then(|result| result)
+            });
         (index, result)
     });
+}
+
+async fn cancelable<F, T>(token: &CancellationToken, future: F) -> Result<T, AgentError>
+where
+    F: std::future::Future<Output = T>,
+{
+    token
+        .run_until_cancelled(future)
+        .await
+        .ok_or(AgentError::Cancelled)
 }
 
 fn validate_response(response: &ModelResponse) -> Result<(), AgentError> {
@@ -337,10 +363,12 @@ mod tests {
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor.register(Echo).unwrap();
         runtime().block_on(executor.initialize()).unwrap();
+        let session = SessionContext::initialize("").unwrap();
         let result = runtime().block_on(run(
             &model,
             &mut executor,
             &Configuration::default(),
+            &session,
             "question",
         ));
         let result = result.unwrap();
@@ -360,8 +388,9 @@ mod tests {
             tool_execute_timeout: std::time::Duration::from_millis(5),
             ..Configuration::default()
         };
+        let session = SessionContext::initialize("").unwrap();
 
-        let result = runtime().block_on(run(&model, &mut executor, &config, "question"));
+        let result = runtime().block_on(run(&model, &mut executor, &config, &session, "question"));
 
         let run = result.unwrap();
         assert_eq!(run.output, "timeout explained");
@@ -389,9 +418,10 @@ mod tests {
             retry_backoff: std::time::Duration::from_millis(1),
             ..Configuration::default()
         };
+        let session = SessionContext::initialize("").unwrap();
 
         let result = runtime()
-            .block_on(run(&model, &mut executor, &config, "question"))
+            .block_on(run(&model, &mut executor, &config, &session, "question"))
             .unwrap();
 
         assert_eq!(result.output, "done");
@@ -436,6 +466,7 @@ mod tests {
             })
             .unwrap();
         runtime().block_on(executor.initialize()).unwrap();
+        let session = SessionContext::initialize("").unwrap();
 
         let result = runtime()
             .block_on(run(
@@ -445,6 +476,7 @@ mod tests {
                     max_concurrent_tools,
                     ..Configuration::default()
                 },
+                &session,
                 "question",
             ))
             .unwrap();

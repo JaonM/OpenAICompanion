@@ -6,7 +6,6 @@ use std::time::Duration;
 /// the embedding layer; this type only contains loop-level policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Configuration {
-    pub system_prompt: String,
     pub max_step: usize,
     pub num_tool_per_load: usize,
     /// Maximum number of tool calls that may be in flight in one model step.
@@ -20,7 +19,6 @@ pub struct Configuration {
 impl Default for Configuration {
     fn default() -> Self {
         Self {
-            system_prompt: String::new(),
             max_step: 16,
             num_tool_per_load: 8,
             max_concurrent_tools: 4,

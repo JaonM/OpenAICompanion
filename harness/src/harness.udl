@@ -6,6 +6,9 @@ namespace harness {
     void unregister_model_serve_callback();
     void register_agent_event_sink(AgentEventSink sink);
     void unregister_agent_event_sink();
+    void configure_context_directories(string agents_directory, string persona_directory);
+    void clear_context_directories();
+    void cancel_agent_loop();
 };
 
 [Error]

@@ -10,6 +10,7 @@ pub enum AgentError {
     EmptyToolName,
     UnknownTool(String),
     Model(String),
+    Cancelled,
     Tool {
         name: String,
         message: String,
@@ -31,6 +32,7 @@ impl fmt::Display for AgentError {
             Self::EmptyToolName => write!(f, "tool name must not be empty"),
             Self::UnknownTool(name) => write!(f, "unknown tool: {name}"),
             Self::Model(message) => write!(f, "model error: {message}"),
+            Self::Cancelled => f.write_str("agent loop cancelled by user"),
             Self::Tool { name, message } => write!(f, "tool '{name}' failed: {message}"),
             Self::ToolExecution {
                 name,

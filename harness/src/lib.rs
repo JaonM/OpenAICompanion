@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
+mod cancellation;
 mod configuration;
+pub mod context;
 mod error;
 pub mod r#loop;
 pub mod serving;
@@ -14,6 +16,7 @@ pub use uniffi::{McpTool, ToolExecutionError, ToolProvider};
 ::uniffi::include_scaffolding!("harness");
 
 pub use configuration::Configuration;
+pub use context::{ContextDirectories, SessionContext};
 pub use error::AgentError;
 pub use r#loop::run;
 pub use serving::{
@@ -52,4 +55,17 @@ pub fn register_agent_event_sink(sink: Arc<dyn AgentEventSink>) {
 
 pub fn unregister_agent_event_sink() {
     serving::unregister_agent_event_sink();
+}
+
+pub fn configure_context_directories(agents_directory: String, persona_directory: String) {
+    context::configure_context_directories(agents_directory, persona_directory);
+}
+
+pub fn clear_context_directories() {
+    context::clear_context_directories();
+}
+
+/// Cancels the currently running Agent Loop, if one exists.
+pub fn cancel_agent_loop() {
+    cancellation::cancel();
 }
