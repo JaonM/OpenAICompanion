@@ -1,6 +1,6 @@
 use crate::{
     AgentError, AgentRun, Configuration, Message, ModelRequest, ModelResponse, ModelServeWrapper,
-    SessionContext, TerminationReason, ToolCall, ToolExecutor, ToolOutput,
+    TerminationReason, ToolCall, ToolExecutor, ToolOutput,
 };
 use tokio::task::JoinSet;
 use tokio::time::timeout;
@@ -12,7 +12,7 @@ pub async fn run<E>(
     model: &ModelServeWrapper,
     executor: &mut E,
     config: &Configuration,
-    session: &SessionContext,
+    system_prompt: &str,
     user_input: impl Into<String>,
 ) -> Result<AgentRun, AgentError>
 where
@@ -61,7 +61,7 @@ where
         let response = cancelable(
             &cancellation,
             model.complete(ModelRequest {
-                system_prompt: session.system_prompt.clone(),
+                system_prompt: system_prompt.to_owned(),
                 user_input: user_input.clone(),
                 history: history.clone(),
                 tools: executor.list_tools()?,
@@ -234,7 +234,7 @@ fn validate_response(response: &ModelResponse) -> Result<(), AgentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Tool, ToolCall, ToolDefinition, ToolOutput};
+    use crate::{SessionContext, Tool, ToolCall, ToolDefinition, ToolOutput};
 
     struct ScriptedModel {
         responses: std::sync::Mutex<Vec<ModelResponse>>,
@@ -363,12 +363,11 @@ mod tests {
         let mut executor = crate::ToolRegistry::new(1).unwrap();
         executor.register(Echo).unwrap();
         runtime().block_on(executor.initialize()).unwrap();
-        let session = SessionContext::initialize("").unwrap();
         let result = runtime().block_on(run(
             &model,
             &mut executor,
             &Configuration::default(),
-            &session,
+            &SessionContext::initialize("").unwrap().system_prompt,
             "question",
         ));
         let result = result.unwrap();
@@ -388,9 +387,14 @@ mod tests {
             tool_execute_timeout: std::time::Duration::from_millis(5),
             ..Configuration::default()
         };
-        let session = SessionContext::initialize("").unwrap();
 
-        let result = runtime().block_on(run(&model, &mut executor, &config, &session, "question"));
+        let result = runtime().block_on(run(
+            &model,
+            &mut executor,
+            &config,
+            &SessionContext::initialize("").unwrap().system_prompt,
+            "question",
+        ));
 
         let run = result.unwrap();
         assert_eq!(run.output, "timeout explained");
@@ -418,10 +422,15 @@ mod tests {
             retry_backoff: std::time::Duration::from_millis(1),
             ..Configuration::default()
         };
-        let session = SessionContext::initialize("").unwrap();
 
         let result = runtime()
-            .block_on(run(&model, &mut executor, &config, &session, "question"))
+            .block_on(run(
+                &model,
+                &mut executor,
+                &config,
+                &SessionContext::initialize("").unwrap().system_prompt,
+                "question",
+            ))
             .unwrap();
 
         assert_eq!(result.output, "done");
@@ -466,7 +475,6 @@ mod tests {
             })
             .unwrap();
         runtime().block_on(executor.initialize()).unwrap();
-        let session = SessionContext::initialize("").unwrap();
 
         let result = runtime()
             .block_on(run(
@@ -476,7 +484,7 @@ mod tests {
                     max_concurrent_tools,
                     ..Configuration::default()
                 },
-                &session,
+                &SessionContext::initialize("").unwrap().system_prompt,
                 "question",
             ))
             .unwrap();

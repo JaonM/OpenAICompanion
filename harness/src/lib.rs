@@ -8,6 +8,7 @@ pub mod context;
 mod error;
 pub mod r#loop;
 pub mod serving;
+pub mod session;
 pub mod tool;
 mod types;
 pub mod uniffi;
@@ -22,6 +23,7 @@ pub use r#loop::run;
 pub use serving::{
     AgentEventSink, ModelServeCallback, ModelServeError, ModelServeWrapper, ModelStreamCallback,
 };
+pub use session::{Session, Turn};
 pub use tool::{Tool, ToolExecutor, ToolRegistry};
 pub use types::{
     AgentRun, Message, ModelRequest, ModelResponse, TerminationReason, ToolCall, ToolDefinition,

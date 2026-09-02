@@ -1,7 +1,6 @@
 use harness::{
-    AgentError, Configuration, ModelResponse, ModelServeCallback, ModelServeError,
-    ModelServeWrapper, SessionContext, Tool, ToolCall, ToolDefinition, ToolExecutor, ToolOutput,
-    ToolRegistry,
+    AgentError, Configuration, ModelResponse, ModelServeCallback, ModelServeError, Session, Tool,
+    ToolCall, ToolDefinition, ToolOutput, register_model_serve_callback,
 };
 
 // This binary is intentionally small: real model and tool adapters belong in
@@ -63,18 +62,19 @@ fn main() -> Result<(), AgentError> {
         .build()
         .map_err(|error| AgentError::Model(format!("failed to create Tokio runtime: {error}")))?;
     let config = Configuration::default();
-    let session =
-        SessionContext::initialize("").map_err(|error| AgentError::Model(error.to_string()))?;
-    let model = ModelServeWrapper::new(std::sync::Arc::new(DemoModel {
+    register_model_serve_callback(std::sync::Arc::new(DemoModel {
         first_turn: std::sync::Mutex::new(true),
     }));
-    let mut tools = ToolRegistry::new(config.num_tool_per_load)?;
-    tools.register(EchoTool)?;
-    runtime.block_on(tools.initialize())?;
+    let mut session = runtime.block_on(Session::initialize(config, ""))?;
+    session.tool_registry.register(EchoTool)?;
     println!(
         "{:?}",
         runtime.block_on(harness::r#loop::run(
-            &model, &mut tools, &config, &session, "run demo",
+            &session.model_serve,
+            &mut session.tool_registry,
+            &session.configuration,
+            &session.system_prompt,
+            "run demo",
         ))?
     );
     Ok(())
