@@ -13,6 +13,9 @@ import uniffi.harness.unregisterModelServeCallback as unregisterModelServeCallba
 import uniffi.harness.unregisterToolProvider
 import uniffi.harness.registerAgentEventSink as registerAgentEventSinkNative
 import uniffi.harness.unregisterAgentEventSink as unregisterAgentEventSinkNative
+import uniffi.harness.cancelAgentLoop as cancelAgentLoopNative
+import uniffi.harness.clearContextDirectories as clearContextDirectoriesNative
+import uniffi.harness.configureContextDirectories as configureContextDirectoriesNative
 import kotlinx.coroutines.CancellationException
 
 /** Adapter over the JVM binding generated from harness.udl. */
@@ -80,6 +83,18 @@ class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
 
     override fun unregisterAgentEventSink() {
         unregisterAgentEventSinkNative()
+    }
+
+    override fun configureContextDirectories(agentsDirectory: String, personaDirectory: String) {
+        configureContextDirectoriesNative(agentsDirectory, personaDirectory)
+    }
+
+    override fun clearContextDirectories() {
+        clearContextDirectoriesNative()
+    }
+
+    override fun cancelAgentLoop() {
+        cancelAgentLoopNative()
     }
 }
 

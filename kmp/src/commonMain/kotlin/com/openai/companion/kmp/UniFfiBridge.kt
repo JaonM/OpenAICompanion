@@ -18,6 +18,12 @@ interface GeneratedHarnessBindings {
     fun registerAgentEventSink(sink: AppAgentEventSink)
 
     fun unregisterAgentEventSink()
+
+    fun configureContextDirectories(agentsDirectory: String, personaDirectory: String)
+
+    fun clearContextDirectories()
+
+    fun cancelAgentLoop()
 }
 
 suspend fun registerMcpProvider(
