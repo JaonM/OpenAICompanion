@@ -14,18 +14,31 @@ class McpServerManager {
     private val mutex = Mutex()
     private val servers = linkedMapOf<String, McpServerConnection>()
     private val cachedTools = linkedMapOf<String, McpToolDescriptor>()
+    private var toolsChangedListener: (suspend () -> Unit)? = null
 
     suspend fun attach(id: String, connection: McpServerConnection) {
         require(id.isNotBlank()) { "MCP server id must not be blank" }
+        connection.setToolsChangedListener {
+            refresh()
+            notifyToolsChanged()
+        }
         val old = mutex.withLock { servers.put(id, connection) }
         old?.close()
         refresh()
+        notifyToolsChanged()
     }
 
     suspend fun detach(id: String) {
         val removed = mutex.withLock { servers.remove(id) }
         removed?.close()
         refresh()
+        notifyToolsChanged()
+    }
+
+    suspend fun setToolsChangedListener(listener: suspend () -> Unit) {
+        mutex.withLock {
+            toolsChangedListener = listener
+        }
     }
 
     suspend fun refresh() {
@@ -48,7 +61,7 @@ class McpServerManager {
 
     suspend fun tools(): List<McpToolDescriptor> = mutex.withLock { cachedTools.values.toList() }
 
-    suspend fun callTool(name: String, argumentsJson: String): String {
+    suspend fun callTool(name: String, argumentsJson: String): McpCallResult {
         val (serverId, toolName) = mutex.withLock {
             cachedTools.entries.firstOrNull { it.value.name == name }
                 ?.let { it.key.substringBeforeLast('/') to it.value.name }
@@ -57,5 +70,10 @@ class McpServerManager {
         val connection = mutex.withLock { servers[serverId] }
             ?: error("MCP server is no longer connected: $serverId")
         return connection.callTool(toolName, argumentsJson)
+    }
+
+    private suspend fun notifyToolsChanged() {
+        val listener = mutex.withLock { toolsChangedListener }
+        listener?.invoke()
     }
 }

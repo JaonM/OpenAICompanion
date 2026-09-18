@@ -1,6 +1,9 @@
 mod mcp;
 
 pub use mcp::{
-    McpTool, ToolProvider, register_all_mcp_tools, unregister_tool_provider_from_registry,
+    McpTool, ToolExecutionError, ToolProvider, register_all_mcp_tools,
+    unregister_tool_provider_from_registry, update_mcp_tools,
 };
-pub(crate) use mcp::{clear_tool_provider, store_tool_provider};
+pub(crate) use mcp::{
+    clear_tool_provider, current_mcp_tool_snapshot, current_tool_provider, store_tool_provider,
+};

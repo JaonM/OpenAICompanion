@@ -5,28 +5,42 @@ use std::sync::{Arc, Mutex};
 
 use crate::{AgentError, McpTool, ToolCall, ToolDefinition, ToolOutput, ToolProvider};
 
-pub type ToolFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<ToolOutput, AgentError>> + Send + 'a>>;
+pub type ToolFuture =
+    Pin<Box<dyn Future<Output = Result<ToolOutput, AgentError>> + Send + 'static>>;
 pub type ExecutorFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
-    fn execute<'a>(&'a self, call: &'a ToolCall) -> ToolFuture<'a>;
+    fn execute(&self, call: ToolCall) -> ToolFuture;
 }
 
 /// Execution seam for policy, sandbox, retries, and remote dispatch.
 pub trait ToolExecutor {
-    fn refresh<'a>(&'a mut self) -> ExecutorFuture<'a, Result<(), AgentError>> {
+    /// Loads the initial tool snapshot for a session.
+    fn initialize(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
+        self.refresh()
+    }
+
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn refresh(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Applies locally pushed tool snapshots without pulling from KMP again.
+    fn sync_if_changed(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
         Box::pin(async { Ok(()) })
     }
 
     fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError>;
-    fn execute<'a>(&'a mut self, call: &'a ToolCall) -> ExecutorFuture<'a, Result<ToolOutput, AgentError>>;
+    fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>>;
 }
 
 enum RegisteredTool {
-    Builtin(Box<dyn Tool>),
-    Local(Box<dyn Tool>),
+    Builtin(Arc<dyn Tool>),
+    Local(Arc<dyn Tool>),
     KmpMcp {
         definition: ToolDefinition,
         provider: Arc<dyn ToolProvider>,
@@ -35,7 +49,7 @@ enum RegisteredTool {
 
 struct DisclosureState {
     order: Vec<String>,
-    loaded_tools: usize,
+    page_start: usize,
     num_tool_per_load: usize,
 }
 
@@ -51,20 +65,22 @@ impl Tool for LoadMoreTools {
         )
     }
 
-    fn execute<'a>(&'a self, _: &'a ToolCall) -> ToolFuture<'a> {
+    fn execute(&self, _: ToolCall) -> ToolFuture {
+        let state = Arc::clone(&self.state);
         Box::pin(async move {
-        let mut state = self.state.lock().map_err(|_| AgentError::Tool {
-            name: "load_more_tools".into(),
-            message: "tool registry lock poisoned".into(),
-        })?;
-        let before = state.loaded_tools;
-        state.loaded_tools = (before + state.num_tool_per_load).min(state.order.len());
-        let names = state.order[before..state.loaded_tools].join(", ");
-        Ok(ToolOutput::success(if names.is_empty() {
-            "No more tools are available".into()
-        } else {
-            format!("Loaded tools: {names}")
-        }))
+            let mut state = state.lock().map_err(|_| AgentError::Tool {
+                name: "load_more_tools".into(),
+                message: "tool registry lock poisoned".into(),
+            })?;
+            let before = state.page_start;
+            let page_end = (before + state.num_tool_per_load).min(state.order.len());
+            state.page_start = page_end;
+            let names = state.order[before..page_end].join(", ");
+            Ok(ToolOutput::success(if names.is_empty() {
+                "No more tools are available".into()
+            } else {
+                format!("Loaded tools: {names}")
+            }))
         })
     }
 }
@@ -72,6 +88,8 @@ impl Tool for LoadMoreTools {
 pub struct ToolRegistry {
     tools: HashMap<String, RegisteredTool>,
     state: Arc<Mutex<DisclosureState>>,
+    mcp_snapshot_version: u64,
+    initialized: bool,
 }
 
 impl ToolRegistry {
@@ -83,23 +101,25 @@ impl ToolRegistry {
         }
         let state = Arc::new(Mutex::new(DisclosureState {
             order: Vec::new(),
-            loaded_tools: 0,
+            page_start: 0,
             num_tool_per_load,
         }));
         let mut registry = Self {
             tools: HashMap::new(),
             state: Arc::clone(&state),
+            mcp_snapshot_version: 0,
+            initialized: false,
         };
         registry.tools.insert(
             "load_more_tools".into(),
-            RegisteredTool::Builtin(Box::new(LoadMoreTools { state })),
+            RegisteredTool::Builtin(Arc::new(LoadMoreTools { state })),
         );
         Ok(registry)
     }
 
     pub fn register(&mut self, tool: impl Tool + 'static) -> Result<(), AgentError> {
         let definition = tool.definition();
-        self.insert(definition, RegisteredTool::Local(Box::new(tool)))
+        self.insert(definition, RegisteredTool::Local(Arc::new(tool)))
     }
 
     /// Replaces all KMP-provided tools with the latest aggregate snapshot.
@@ -131,7 +151,7 @@ impl ToolRegistry {
                 .lock()
                 .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
             state.order.retain(|name| self.tools.contains_key(name));
-            state.loaded_tools = state.loaded_tools.min(state.order.len());
+            state.page_start = state.page_start.min(state.order.len());
         }
         for tool in tools {
             let definition =
@@ -155,7 +175,7 @@ impl ToolRegistry {
             .lock()
             .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
         state.order.retain(|name| self.tools.contains_key(name));
-        state.loaded_tools = state.loaded_tools.min(state.order.len());
+        state.page_start = state.page_start.min(state.order.len());
         Ok(())
     }
 
@@ -202,8 +222,41 @@ impl ToolRegistry {
 }
 
 impl ToolExecutor for ToolRegistry {
+    fn initialize(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
+        Box::pin(async move {
+            self.refresh().await?;
+            self.initialized = true;
+            Ok(())
+        })
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
     fn refresh(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
-        Box::pin(async move { crate::uniffi::register_all_mcp_tools(self).await.map(|_| ()) })
+        Box::pin(async move {
+            crate::uniffi::register_all_mcp_tools(self).await.map(|_| {
+                self.mcp_snapshot_version = crate::uniffi::current_mcp_tool_snapshot().0;
+            })
+        })
+    }
+
+    fn sync_if_changed(&mut self) -> ExecutorFuture<'_, Result<(), AgentError>> {
+        Box::pin(async move {
+            let (version, tools) = crate::uniffi::current_mcp_tool_snapshot();
+            if version == self.mcp_snapshot_version {
+                return Ok(());
+            }
+            let Some(provider) = crate::uniffi::current_tool_provider()? else {
+                self.clear_mcp_tools()?;
+                self.mcp_snapshot_version = version;
+                return Ok(());
+            };
+            self.replace_mcp_tools(provider, tools)?;
+            self.mcp_snapshot_version = version;
+            Ok(())
+        })
     }
 
     fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
@@ -211,8 +264,9 @@ impl ToolExecutor for ToolRegistry {
             .state
             .lock()
             .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
-        let end = state.loaded_tools.min(state.order.len());
-        let mut result = state.order[..end]
+        let start = state.page_start.min(state.order.len());
+        let end = (start + state.num_tool_per_load).min(state.order.len());
+        let mut result = state.order[start..end]
             .iter()
             .filter_map(|name| self.definition(name))
             .collect::<Vec<_>>();
@@ -225,22 +279,38 @@ impl ToolExecutor for ToolRegistry {
         Ok(result)
     }
 
-    fn execute<'a>(&'a mut self, call: &'a ToolCall) -> ExecutorFuture<'a, Result<ToolOutput, AgentError>> {
-        Box::pin(async move {
-        let tool = self
-            .tools
-            .get(&call.name)
-            .ok_or_else(|| AgentError::UnknownTool(call.name.clone()))?;
-        let result = match tool {
-            RegisteredTool::Builtin(tool) | RegisteredTool::Local(tool) => tool.execute(call).await,
-            RegisteredTool::KmpMcp { provider, .. } => Ok(ToolOutput::success(
-                provider.call_tool(call.name.clone(), call.arguments.clone()).await,
-            )),
+    fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>> {
+        let execution = match self.tools.get(&call.name) {
+            Some(RegisteredTool::Builtin(tool) | RegisteredTool::Local(tool)) => {
+                Arc::clone(tool).execute(call.clone())
+            }
+            Some(RegisteredTool::KmpMcp { provider, .. }) => {
+                let provider = Arc::clone(provider);
+                let call = call.clone();
+                Box::pin(async move {
+                    provider
+                        .call_tool(call.name.clone(), call.arguments.clone())
+                        .await
+                        .map(ToolOutput::success)
+                        .map_err(|error| AgentError::ToolExecution {
+                            name: call.name.clone(),
+                            message: error.to_string(),
+                            error,
+                        })
+                })
+            }
+            None => return Box::pin(async move { Err(AgentError::UnknownTool(call.name)) }),
         };
-        result.map_err(|error| AgentError::Tool {
-            name: call.name.clone(),
-            message: error.to_string(),
-        })
+        let name = call.name.clone();
+        Box::pin(async move {
+            let result = execution.await;
+            result.map_err(|error| match error {
+                AgentError::ToolExecution { .. } => error,
+                error => AgentError::Tool {
+                    name,
+                    message: error.to_string(),
+                },
+            })
         })
     }
 }
@@ -248,5 +318,64 @@ impl ToolExecutor for ToolRegistry {
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new(8).expect("default tool page size is valid")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NamedTool(&'static str);
+
+    impl Tool for NamedTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition::new(self.0, self.0, "{}")
+        }
+
+        fn execute(&self, _: ToolCall) -> ToolFuture {
+            Box::pin(async { Ok(ToolOutput::success("ok")) })
+        }
+    }
+
+    #[test]
+    fn load_more_tools_replaces_the_visible_page() {
+        let mut registry = ToolRegistry::new(2).unwrap();
+        for name in ["one", "two", "three", "four", "five"] {
+            registry.register(NamedTool(name)).unwrap();
+        }
+
+        let names = |tools: Vec<ToolDefinition>| {
+            tools.into_iter().map(|tool| tool.name).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(registry.list_tools().unwrap()),
+            vec!["one", "two", "load_more_tools"]
+        );
+
+        block_on(registry.execute(ToolCall::new("1", "load_more_tools", "{}"))).unwrap();
+        assert_eq!(
+            names(registry.list_tools().unwrap()),
+            vec!["three", "four", "load_more_tools"]
+        );
+
+        block_on(registry.execute(ToolCall::new("2", "load_more_tools", "{}"))).unwrap();
+        assert_eq!(names(registry.list_tools().unwrap()), vec!["five"]);
+    }
+
+    fn block_on<F: Future>(mut future: F) -> F::Output {
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+        fn noop(_: *const ()) {}
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+        let mut context = Context::from_waker(&waker);
+        let mut future = unsafe { Pin::new_unchecked(&mut future) };
+        loop {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
+                return value;
+            }
+        }
     }
 }

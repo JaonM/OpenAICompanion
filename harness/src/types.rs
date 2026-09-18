@@ -2,7 +2,7 @@
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
-    /// Kept as text until a serialization/schema dependency is selected.
+    /// Provider-neutral JSON Schema encoded as a string at the core boundary.
     pub parameters_schema: String,
 }
 
@@ -17,6 +17,64 @@ impl ToolDefinition {
             description: description.into(),
             parameters_schema: parameters_schema.into(),
         }
+    }
+}
+
+/// Converts an internal tool definition into the function-tool schema expected
+/// by model providers such as OpenAI-compatible APIs.
+///
+/// `parameters_schema` remains a JSON string at the Harness boundary so that
+/// callers can provide provider-neutral JSON Schema without coupling the core
+/// types to a particular schema model.
+pub fn tool_definition_to_function_schema(
+    definition: &ToolDefinition,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let parameters = serde_json::from_str::<serde_json::Value>(&definition.parameters_schema)?;
+    Ok(serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": parameters,
+        }
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ToolDefinition, tool_definition_to_function_schema};
+
+    #[test]
+    fn converts_tool_definition_to_function_schema() {
+        let definition = ToolDefinition::new(
+            "get_current_weather",
+            "获取指定城市的当前天气情况",
+            r#"{
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "城市或地区名称"
+                    },
+                    "unit": {
+                        "type": "string",
+                        "enum": ["celsius", "fahrenheit"]
+                    }
+                },
+                "required": ["location"]
+            }"#,
+        );
+
+        let schema = tool_definition_to_function_schema(&definition).unwrap();
+        assert_eq!(schema["type"], "function");
+        assert_eq!(schema["function"]["name"], "get_current_weather");
+        assert_eq!(schema["function"]["parameters"]["required"][0], "location");
+    }
+
+    #[test]
+    fn rejects_invalid_parameter_schema() {
+        let definition = ToolDefinition::new("broken", "Broken", "not-json");
+        assert!(tool_definition_to_function_schema(&definition).is_err());
     }
 }
 
@@ -66,8 +124,76 @@ pub struct ModelRequest {
     pub tools: Vec<ToolDefinition>,
 }
 
+impl ModelRequest {
+    /// Encodes the internal request as an OpenAI-compatible Chat Completions body.
+    pub fn to_chat_completions_json(&self) -> Result<String, serde_json::Error> {
+        let mut messages = Vec::with_capacity(self.history.len() + 1);
+        if !self.system_prompt.is_empty() {
+            messages.push(serde_json::json!({
+                "role": "system",
+                "content": self.system_prompt,
+            }));
+        }
+        messages.extend(
+            self.history
+                .iter()
+                .map(message_to_chat_json)
+                .collect::<Vec<_>>(),
+        );
+        let tools = self
+            .tools
+            .iter()
+            .map(crate::tool_definition_to_function_schema)
+            .collect::<Result<Vec<_>, _>>()?;
+        serde_json::to_string(&serde_json::json!({
+            "messages": messages,
+            "tools": tools,
+        }))
+    }
+}
+
+fn message_to_chat_json(message: &Message) -> serde_json::Value {
+    match message {
+        Message::User { content } => serde_json::json!({
+            "role": "user",
+            "content": content,
+        }),
+        Message::Assistant {
+            content,
+            tool_calls,
+        } => serde_json::json!({
+            "role": "assistant",
+            "content": content,
+            "tool_calls": tool_calls.iter().map(tool_call_to_chat_json).collect::<Vec<_>>(),
+        }),
+        Message::Tool {
+            call_id,
+            name,
+            content,
+            ..
+        } => serde_json::json!({
+            "role": "tool",
+            "tool_call_id": call_id,
+            "name": name,
+            "content": content,
+        }),
+    }
+}
+
+fn tool_call_to_chat_json(call: &ToolCall) -> serde_json::Value {
+    serde_json::json!({
+        "id": call.id,
+        "type": "function",
+        "function": {
+            "name": call.name,
+            "arguments": call.arguments,
+        },
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelResponse {
+    pub reasoning: String,
     pub content: String,
     pub tool_calls: Vec<ToolCall>,
 }
@@ -75,6 +201,7 @@ pub struct ModelResponse {
 impl ModelResponse {
     pub fn final_text(content: impl Into<String>) -> Self {
         Self {
+            reasoning: String::new(),
             content: content.into(),
             tool_calls: Vec::new(),
         }
@@ -82,6 +209,7 @@ impl ModelResponse {
 
     pub fn with_tool_calls(content: impl Into<String>, tool_calls: Vec<ToolCall>) -> Self {
         Self {
+            reasoning: String::new(),
             content: content.into(),
             tool_calls,
         }
@@ -117,6 +245,7 @@ pub enum TerminationReason {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRun {
+    pub reasoning: String,
     pub output: String,
     pub history: Vec<Message>,
     pub steps: usize,
