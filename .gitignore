@@ -11,8 +11,12 @@ Cargo.lock
 # ============================================
 **/build/
 **/bin/
+!/harness/src/bin/
+!/harness/src/bin/uniffi-bindgen.rs
 **/out/
 **/generated/
+!/ios/Generated/
+!/ios/Generated/**
 .idea/
 *.iml
 *.iws
@@ -34,6 +38,8 @@ gradle-wrapper.properties
 *.keystore
 *.jks
 **/jniLibs/
+kmp/appResources/**/*.dylib
+kmp/appResources/*.dylib
 **/src/main/assets/
 google-services.json
 

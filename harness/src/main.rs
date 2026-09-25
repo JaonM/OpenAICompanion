@@ -1,6 +1,6 @@
 use harness::{
-    AgentError, Configuration, ModelResponse, ModelServeCallback, ModelServeError, Session, Tool,
-    ToolCall, ToolDefinition, ToolOutput, register_model_serve_callback,
+    AgentError, Configuration, MemoryStore, ModelResponse, ModelServeCallback, ModelServeError,
+    Session, Tool, ToolCall, ToolDefinition, ToolOutput, register_model_serve_callback,
 };
 
 // This binary is intentionally small: real model and tool adapters belong in
@@ -65,17 +65,9 @@ fn main() -> Result<(), AgentError> {
     register_model_serve_callback(std::sync::Arc::new(DemoModel {
         first_turn: std::sync::Mutex::new(true),
     }));
-    let mut session = runtime.block_on(Session::initialize(config, ""))?;
+    let memory = MemoryStore::in_memory().map_err(|error| AgentError::Memory(error.to_string()))?;
+    let mut session = runtime.block_on(Session::initialize_with_memory(config, "", memory))?;
     session.tool_registry.register(EchoTool)?;
-    println!(
-        "{:?}",
-        runtime.block_on(harness::r#loop::run(
-            &session.model_serve,
-            &mut session.tool_registry,
-            &session.configuration,
-            &session.system_prompt,
-            "run demo",
-        ))?
-    );
+    println!("{:?}", runtime.block_on(session.run_turn("run demo"))?);
     Ok(())
 }

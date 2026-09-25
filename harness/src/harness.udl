@@ -9,6 +9,13 @@ namespace harness {
     void configure_context_directories(string agents_directory, string persona_directory);
     void clear_context_directories();
     void cancel_agent_loop();
+    AppResult app_open_store(string database_path);
+    AppResult app_start_session();
+    AppResult app_resume_session(i64 session_id);
+    AppResult app_send_message(string user_input);
+    AppResult app_list_sessions();
+    AppResult app_load_session(i64 session_id);
+    AppResult app_delete_session(i64 session_id);
 };
 
 [Error]
@@ -31,6 +38,7 @@ enum ModelServeError {
 };
 
 typedef record McpTool;
+typedef record AppResult;
 typedef trait_with_foreign ToolProvider;
 typedef trait_with_foreign ModelServeCallback;
 typedef trait_with_foreign ModelStreamCallback;

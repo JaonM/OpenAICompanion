@@ -137,6 +137,10 @@ impl ModelStreamCallback for StreamAccumulator {
             return;
         };
         let mut state = self.state.lock().expect("stream lock poisoned");
+        if let Some(error) = chunk["error"].as_str() {
+            state.error = Some(error.to_owned());
+            return;
+        }
         state.received = true;
         let choice = &chunk["choices"][0];
         let is_delta = choice.get("delta").is_some();
@@ -274,5 +278,16 @@ mod tests {
         let response = stream.into_response().unwrap();
         assert_eq!(response.reasoning, "先分析，再回答");
         assert_eq!(response.content, "你好，世界");
+    }
+
+    #[test]
+    fn stream_error_is_reported_without_foreign_callback_error() {
+        let stream = Arc::new(StreamAccumulator {
+            state: Mutex::new(StreamState::default()),
+            sink: None,
+        });
+        stream.on_chunk(r#"{"error":"model offline"}"#.into());
+        let error = stream.into_response().unwrap_err();
+        assert!(error.to_string().contains("model offline"));
     }
 }

@@ -18,6 +18,47 @@ pub async fn run<E>(
 where
     E: ToolExecutor + Sync,
 {
+    run_with_history(model, executor, config, system_prompt, &[], user_input).await
+}
+
+/// Runs a turn with earlier messages from the same session. The returned
+/// history includes the complete final assistant message for the next turn.
+pub async fn run_with_history<E>(
+    model: &ModelServeWrapper,
+    executor: &mut E,
+    config: &Configuration,
+    system_prompt: &str,
+    previous_history: &[Message],
+    user_input: impl Into<String>,
+) -> Result<AgentRun, AgentError>
+where
+    E: ToolExecutor + Sync,
+{
+    run_with_history_observed(
+        model,
+        executor,
+        config,
+        system_prompt,
+        previous_history,
+        user_input,
+        |_| Ok(()),
+    )
+    .await
+}
+
+pub(crate) async fn run_with_history_observed<E, O>(
+    model: &ModelServeWrapper,
+    executor: &mut E,
+    config: &Configuration,
+    system_prompt: &str,
+    previous_history: &[Message],
+    user_input: impl Into<String>,
+    mut observe: O,
+) -> Result<AgentRun, AgentError>
+where
+    E: ToolExecutor + Sync,
+    O: FnMut(&Message) -> Result<(), AgentError>,
+{
     let cancellation = crate::cancellation::begin();
     if config.max_step == 0 {
         return Err(AgentError::InvalidConfig(
@@ -51,9 +92,10 @@ where
     }
 
     let user_input = user_input.into();
-    let mut history = vec![Message::User {
+    let mut history = previous_history.to_vec();
+    history.push(Message::User {
         content: user_input.clone(),
-    }];
+    });
     let mut reasoning = String::new();
 
     for step in 0..config.max_step {
@@ -76,6 +118,11 @@ where
         }
 
         if response.tool_calls.is_empty() {
+            history.push(Message::Assistant {
+                content: response.content.clone(),
+                tool_calls: Vec::new(),
+            });
+            observe(history.last().expect("assistant message just appended"))?;
             crate::serving::notify_agent_completed(response.content.clone());
             return Ok(AgentRun {
                 reasoning,
@@ -90,6 +137,7 @@ where
             content: response.content,
             tool_calls: response.tool_calls.clone(),
         });
+        observe(history.last().expect("assistant message just appended"))?;
         let calls = response.tool_calls;
         let results = execute_tools(executor, &calls, config, &cancellation).await?;
 
@@ -107,6 +155,7 @@ where
                 content: output.content,
                 is_error: output.is_error,
             });
+            observe(history.last().expect("tool message just appended"))?;
         }
     }
 

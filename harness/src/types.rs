@@ -78,7 +78,7 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
@@ -99,7 +99,7 @@ impl ToolCall {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Message {
     User {
         content: String,
@@ -161,11 +161,17 @@ fn message_to_chat_json(message: &Message) -> serde_json::Value {
         Message::Assistant {
             content,
             tool_calls,
-        } => serde_json::json!({
-            "role": "assistant",
-            "content": content,
-            "tool_calls": tool_calls.iter().map(tool_call_to_chat_json).collect::<Vec<_>>(),
-        }),
+        } => {
+            if tool_calls.is_empty() {
+                serde_json::json!({ "role": "assistant", "content": content })
+            } else {
+                serde_json::json!({
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls.iter().map(tool_call_to_chat_json).collect::<Vec<_>>(),
+                })
+            }
+        }
         Message::Tool {
             call_id,
             name,
