@@ -1,22 +1,25 @@
 package com.openai.companion.kmp
 
+import kotlinx.cinterop.BetaInteropApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import platform.EventKit.EKAuthorizationStatusAuthorized
-import platform.EventKit.EKEntityTypeEvent
+import platform.EventKit.EKEntityType
 import platform.EventKit.EKEvent
 import platform.EventKit.EKEventStore
 import platform.EventKit.EKEventStatusCanceled
 import platform.Foundation.NSDate
+import platform.Foundation.create
 import platform.Foundation.timeIntervalSince1970
 import kotlin.coroutines.resume
 
+@OptIn(BetaInteropApi::class)
 class IosCalendarEventDataSource(
     private val eventStore: EKEventStore = EKEventStore(),
 ) : CalendarEventDataSource {
     override suspend fun getEvents(query: CalendarQuery): List<CalendarEvent> {
         ensurePermission()
-        val start = NSDate.dateWithTimeIntervalSince1970(query.startTimeMs / 1000.0)
-        val end = NSDate.dateWithTimeIntervalSince1970(query.endTimeMs / 1000.0)
+        val start = NSDate.create(timeIntervalSince1970 = query.startTimeMs / 1000.0)
+        val end = NSDate.create(timeIntervalSince1970 = query.endTimeMs / 1000.0)
         val predicate = eventStore.predicateForEventsWithStartDate(start, end, null)
         return eventStore.eventsMatchingPredicate(predicate)
             .toList()
@@ -28,11 +31,11 @@ class IosCalendarEventDataSource(
     }
 
     private suspend fun ensurePermission() {
-        if (EKEventStore.authorizationStatusForEntityType(EKEntityTypeEvent) == EKAuthorizationStatusAuthorized) {
+        if (EKEventStore.authorizationStatusForEntityType(EKEntityType.EKEntityTypeEvent) == EKAuthorizationStatusAuthorized) {
             return
         }
         val granted = suspendCancellableCoroutine { continuation ->
-            eventStore.requestAccessToEntityType(EKEntityTypeEvent) { value, _ ->
+            eventStore.requestAccessToEntityType(EKEntityType.EKEntityTypeEvent) { value, _ ->
                 continuation.resume(value)
             }
         }

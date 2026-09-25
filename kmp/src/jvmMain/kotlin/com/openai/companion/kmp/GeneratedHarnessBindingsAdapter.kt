@@ -6,7 +6,6 @@ import uniffi.harness.ModelStreamCallback as GeneratedModelStreamCallback
 import uniffi.harness.AgentEventSink as GeneratedAgentEventSink
 import uniffi.harness.ToolProvider as GeneratedToolProvider
 import uniffi.harness.ToolExecutionException as GeneratedToolExecutionException
-import uniffi.harness.ModelServeException as GeneratedModelServeException
 import uniffi.harness.registerModelServeCallback as registerModelServeCallbackNative
 import uniffi.harness.registerToolProvider
 import uniffi.harness.unregisterModelServeCallback as unregisterModelServeCallbackNative
@@ -16,7 +15,8 @@ import uniffi.harness.unregisterAgentEventSink as unregisterAgentEventSinkNative
 import uniffi.harness.cancelAgentLoop as cancelAgentLoopNative
 import uniffi.harness.clearContextDirectories as clearContextDirectoriesNative
 import uniffi.harness.configureContextDirectories as configureContextDirectoriesNative
-import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 /** Adapter over the JVM binding generated from harness.udl. */
 class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
@@ -26,12 +26,12 @@ class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
                 provider.complete(requestJson, object : ModelStreamCallback {
                     override fun onChunk(chunkJson: String) = callback.onChunk(chunkJson)
                 })
-            } catch (error: GeneratedModelServeException) {
-                throw error
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                throw GeneratedModelServeException.Unknown(error.message.orEmpty())
+            } catch (error: Exception) {
+                // UniFFI flat foreign errors cannot be lifted on the Rust side.
+                // Deliver request failures through the stream instead.
+                callback.onChunk(buildJsonObject {
+                    put("error", JsonPrimitive(error.message ?: error.toString()))
+                }.toString())
             }
         })
     }

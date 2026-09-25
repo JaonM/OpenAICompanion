@@ -1,0 +1,129 @@
+<div id="companion-macos-mock" class="oc-mock">
+  <div class="oc-window">
+    <div class="oc-titlebar">
+      <div class="oc-traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="oc-window-title">OpenAICompanion</div>
+      <div class="oc-title-actions"><span class="oc-local"><span class="oc-local-dot"></span> 本地会话</span><button type="button" class="oc-icon-button cursor-interaction" id="oc-settings" aria-label="打开设置"><i data-lucide="settings-2" aria-hidden="true"></i></button></div>
+    </div>
+    <div class="oc-body">
+      <aside class="oc-sidebar" aria-label="会话列表">
+        <div class="oc-sidebar-top"><div class="oc-brand"><span class="oc-brand-mark">✦</span><span>Companion</span></div><button type="button" class="oc-new cursor-interaction" id="oc-new"><i data-lucide="plus" aria-hidden="true"></i> 新建会话</button></div>
+        <div class="oc-section-label">最近会话</div>
+        <nav class="oc-sessions" aria-label="最近会话">
+          <button type="button" class="oc-session oc-selected cursor-interaction" data-session="0"><i data-lucide="message-circle" aria-hidden="true"></i><span>规划 macOS 客户端 MVP</span></button>
+          <button type="button" class="oc-session cursor-interaction" data-session="1"><i data-lucide="message-circle" aria-hidden="true"></i><span>Memory 方案与实现</span></button>
+          <button type="button" class="oc-session cursor-interaction" data-session="2"><i data-lucide="message-circle" aria-hidden="true"></i><span>Rust Harness 接口设计</span></button>
+        </nav>
+        <div class="oc-sidebar-bottom"><span class="oc-status-dot"></span><span>Harness 已连接</span><span class="oc-side-version">MVP</span></div>
+      </aside>
+      <main class="oc-main">
+        <div class="oc-chat-head"><div><div class="oc-chat-title" id="oc-chat-title">规划 macOS 客户端 MVP</div><div class="oc-chat-subtitle">会话轨迹与记忆已保存在本机</div></div><button type="button" class="oc-icon-button cursor-interaction" id="oc-chat-menu" aria-label="会话操作"><i data-lucide="ellipsis" aria-hidden="true"></i></button></div>
+        <div class="oc-thread" id="oc-thread" aria-live="polite">
+          <div class="oc-message oc-user"><div class="oc-bubble">我们先做一个可用的 macOS MVP。桌面端需要和 Rust Harness 打通，并保留跨会话记忆。</div><span class="oc-time">10:24</span></div>
+          <div class="oc-message oc-assistant"><div class="oc-avatar">✦</div><div class="oc-answer"><div class="oc-speaker">Companion</div><p>可以。首版采用 <strong>KMP + Compose Desktop</strong> 构建 macOS 界面，Rust Harness 继续负责 Agent Loop、记忆与会话轨迹。</p><div class="oc-note"><i data-lucide="database" aria-hidden="true"></i><span>会话与记忆已写入本地 SQLite</span></div><p>我们先完成聊天、会话恢复、模型配置和 MCP 连接这四个核心流程。</p><span class="oc-time">10:25</span></div></div>
+        </div>
+        <div class="oc-composer-wrap"><div class="oc-composer"><textarea id="oc-input" rows="2" aria-label="输入消息" placeholder="给 Companion 发送消息…"></textarea><div class="oc-compose-bottom"><div class="oc-compose-hint"><i data-lucide="sparkles" aria-hidden="true"></i><span id="oc-model-label">本地模型 · 未配置</span></div><button type="button" id="oc-send" class="oc-send cursor-interaction" aria-label="发送消息"><i data-lucide="arrow-up" aria-hidden="true"></i></button></div></div><div class="oc-footnote">Companion 可能出错，请核对重要内容。</div></div>
+      </main>
+    </div>
+    <div class="oc-overlay" id="oc-overlay" hidden><div class="oc-dialog" role="dialog" aria-modal="true" aria-labelledby="oc-dialog-title"><div class="oc-dialog-head"><div><div class="oc-dialog-title" id="oc-dialog-title">模型与连接</div><div class="oc-dialog-sub">连接你的模型服务和可选的 MCP 工具</div></div><button type="button" class="oc-icon-button cursor-interaction" id="oc-close" aria-label="关闭设置"><i data-lucide="x" aria-hidden="true"></i></button></div><div class="oc-dialog-body"><label class="oc-label" for="oc-endpoint">Chat Completions 地址</label><input id="oc-endpoint" value="http://localhost:11434/v1/chat/completions" /><label class="oc-label" for="oc-model">模型名称</label><input id="oc-model" placeholder="例如 qwen3:8b" /><label class="oc-label" for="oc-key">API Key</label><input id="oc-key" type="password" placeholder="仅本次运行保存" /><div class="oc-divider"></div><label class="oc-label" for="oc-mcp">远程 MCP 地址 <span>可选</span></label><input id="oc-mcp" placeholder="https://example.com/mcp" /><div class="oc-data-note"><i data-lucide="lock-keyhole" aria-hidden="true"></i><span>会话存储在本机；模型请求会发送到你设置的地址。</span></div></div><div class="oc-dialog-actions"><button type="button" class="oc-cancel cursor-interaction" id="oc-cancel">取消</button><button type="button" class="oc-save cursor-interaction" id="oc-save">保存设置</button></div></div></div>
+  </div>
+</div>
+<style>
+#companion-macos-mock { --oc-bg:light-dark(#f7f8fa,#1c1e22); --oc-panel:light-dark(#ffffff,#25282d); --oc-sidebar:light-dark(#f0f2f5,#202329); --oc-text:light-dark(#20252c,#f4f5f6); --oc-muted:light-dark(#7b838d,#a5acb4); --oc-line:light-dark(#e4e7eb,#383d44); --oc-selected:light-dark(#e5e9ee,#343a42); --oc-blue:light-dark(#316ad9,#75a2ff); --oc-blue-text:light-dark(#ffffff,#10141c); --oc-user:light-dark(#eaf1ff,#31476b); --oc-note:light-dark(#f5f7fa,#2d333b); --oc-shadow:light-dark(0 20px 55px #14223824,0 20px 55px #0008); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",sans-serif; color:var(--oc-text); background:transparent; width:100%; }
+#companion-macos-mock * { box-sizing:border-box; }
+#companion-macos-mock .oc-window { width:100%; min-height:640px; background:var(--oc-panel); border:1px solid var(--oc-line); border-radius:14px; overflow:hidden; box-shadow:var(--oc-shadow); position:relative; }
+#companion-macos-mock .oc-titlebar { height:45px; display:flex; align-items:center; justify-content:space-between; padding:0 15px; background:var(--oc-bg); border-bottom:1px solid var(--oc-line); position:relative; }
+#companion-macos-mock .oc-traffic { display:flex; gap:7px; width:100px; }
+#companion-macos-mock .oc-traffic span { width:12px; height:12px; border-radius:50%; background:#ff5f57; border:1px solid #0002; }
+#companion-macos-mock .oc-traffic span:nth-child(2) { background:#febc2e; }
+#companion-macos-mock .oc-traffic span:nth-child(3) { background:#28c840; }
+#companion-macos-mock .oc-window-title { font-size:12px; font-weight:500; color:var(--oc-muted); position:absolute; left:50%; transform:translateX(-50%); }
+#companion-macos-mock .oc-title-actions { display:flex; align-items:center; gap:14px; }
+#companion-macos-mock .oc-local { display:flex; align-items:center; gap:6px; color:var(--oc-muted); font-size:11px; }
+#companion-macos-mock .oc-local-dot,#companion-macos-mock .oc-status-dot { width:7px; height:7px; border-radius:50%; background:#31b57a; display:inline-block; flex:none; }
+#companion-macos-mock button { font:inherit; }
+#companion-macos-mock .oc-icon-button { width:28px; height:28px; border:0; background:transparent; color:var(--oc-muted); border-radius:7px; display:grid; place-items:center; }
+#companion-macos-mock .oc-icon-button:hover { background:var(--oc-selected); color:var(--oc-text); }
+#companion-macos-mock .oc-body { display:flex; min-height:595px; }
+#companion-macos-mock .oc-sidebar { width:244px; flex:none; background:var(--oc-sidebar); border-right:1px solid var(--oc-line); display:flex; flex-direction:column; padding:22px 12px 14px; }
+#companion-macos-mock .oc-brand { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:500; padding:0 10px; margin-bottom:22px; }
+#companion-macos-mock .oc-brand-mark,#companion-macos-mock .oc-avatar { display:grid; place-items:center; background:var(--oc-blue); color:var(--oc-blue-text); font-size:17px; border-radius:9px; width:28px; height:28px; flex:none; }
+#companion-macos-mock .oc-new { width:100%; border:1px solid var(--oc-line); border-radius:9px; background:var(--oc-panel); color:var(--oc-text); padding:9px 11px; display:flex; align-items:center; gap:8px; text-align:left; font-size:13px; font-weight:500; }
+#companion-macos-mock .oc-new:hover { border-color:var(--oc-blue); }
+#companion-macos-mock .oc-section-label { font-size:11px; color:var(--oc-muted); padding:24px 10px 9px; }
+#companion-macos-mock .oc-sessions { display:grid; gap:3px; }
+#companion-macos-mock .oc-session { border:0; background:transparent; color:var(--oc-muted); width:100%; text-align:left; padding:10px; border-radius:8px; display:flex; align-items:center; gap:9px; font-size:12px; }
+#companion-macos-mock .oc-session span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#companion-macos-mock .oc-session.oc-selected,#companion-macos-mock .oc-session:hover { color:var(--oc-text); background:var(--oc-selected); }
+#companion-macos-mock .oc-sidebar-bottom { margin-top:auto; display:flex; align-items:center; gap:8px; border-top:1px solid var(--oc-line); padding:14px 10px 2px; font-size:11px; color:var(--oc-muted); }
+#companion-macos-mock .oc-side-version { margin-left:auto; }
+#companion-macos-mock .oc-main { min-width:0; flex:1; display:flex; flex-direction:column; background:var(--oc-panel); }
+#companion-macos-mock .oc-chat-head { min-height:74px; border-bottom:1px solid var(--oc-line); padding:17px 24px; display:flex; justify-content:space-between; align-items:center; }
+#companion-macos-mock .oc-chat-title { font-size:15px; font-weight:500; }
+#companion-macos-mock .oc-chat-subtitle { font-size:11px; color:var(--oc-muted); margin-top:4px; }
+#companion-macos-mock .oc-thread { flex:1; padding:29px clamp(20px,7%,70px) 15px; min-height:338px; }
+#companion-macos-mock .oc-message { display:flex; margin:0 auto 28px; max-width:650px; }
+#companion-macos-mock .oc-user { align-items:flex-end; flex-direction:column; }
+#companion-macos-mock .oc-bubble { background:var(--oc-user); border-radius:14px 14px 4px 14px; padding:12px 16px; max-width:78%; font-size:13px; line-height:1.65; }
+#companion-macos-mock .oc-time { font-size:11px; color:var(--oc-muted); margin-top:7px; }
+#companion-macos-mock .oc-assistant { gap:12px; }
+#companion-macos-mock .oc-avatar { width:27px; height:27px; font-size:16px; }
+#companion-macos-mock .oc-answer { min-width:0; flex:1; font-size:13px; line-height:1.75; }
+#companion-macos-mock .oc-speaker { font-size:12px; font-weight:500; margin:2px 0 7px; }
+#companion-macos-mock .oc-answer p { margin:0 0 11px; }
+#companion-macos-mock .oc-answer strong { font-weight:500; }
+#companion-macos-mock .oc-note { background:var(--oc-note); border-radius:8px; padding:9px 11px; display:flex; align-items:center; gap:8px; color:var(--oc-muted); font-size:11px; margin:13px 0; width:fit-content; }
+#companion-macos-mock .oc-composer-wrap { padding:0 clamp(20px,7%,70px) 18px; }
+#companion-macos-mock .oc-composer { max-width:650px; margin:auto; border:1px solid var(--oc-line); border-radius:13px; background:var(--oc-bg); padding:13px 14px 10px; }
+#companion-macos-mock .oc-composer:focus-within { border-color:var(--oc-blue); }
+#companion-macos-mock textarea { resize:vertical; min-height:43px; width:100%; border:0; outline:0; background:transparent; color:var(--oc-text); font:inherit; font-size:13px; line-height:1.5; }
+#companion-macos-mock textarea::placeholder { color:var(--oc-muted); }
+#companion-macos-mock .oc-compose-bottom { display:flex; justify-content:space-between; align-items:center; }
+#companion-macos-mock .oc-compose-hint { color:var(--oc-muted); display:flex; align-items:center; gap:6px; font-size:11px; }
+#companion-macos-mock .oc-send { border:0; width:28px; height:28px; border-radius:8px; display:grid; place-items:center; color:var(--oc-blue-text); background:var(--oc-blue); }
+#companion-macos-mock .oc-footnote { text-align:center; color:var(--oc-muted); font-size:11px; padding-top:9px; }
+#companion-macos-mock .oc-overlay { position:absolute; inset:45px 0 0; z-index:5; display:grid; place-items:center; background:light-dark(#14182166,#05070aaa); padding:20px; }
+#companion-macos-mock .oc-overlay[hidden] { display:none; }
+#companion-macos-mock .oc-dialog { width:min(450px,100%); background:var(--oc-panel); border:1px solid var(--oc-line); border-radius:14px; box-shadow:var(--oc-shadow); }
+#companion-macos-mock .oc-dialog-head { padding:20px 22px 15px; display:flex; justify-content:space-between; align-items:flex-start; }
+#companion-macos-mock .oc-dialog-title { font-size:16px; font-weight:500; }
+#companion-macos-mock .oc-dialog-sub { font-size:11px; color:var(--oc-muted); margin-top:5px; }
+#companion-macos-mock .oc-dialog-body { padding:0 22px 15px; display:flex; flex-direction:column; }
+#companion-macos-mock .oc-label { font-size:11px; font-weight:500; margin:12px 0 6px; }
+#companion-macos-mock .oc-label span { color:var(--oc-muted); font-weight:400; }
+#companion-macos-mock .oc-dialog input { width:100%; border:1px solid var(--oc-line); background:var(--oc-bg); color:var(--oc-text); border-radius:8px; padding:9px 10px; font:inherit; font-size:12px; }
+#companion-macos-mock .oc-dialog input::placeholder { color:var(--oc-muted); }
+#companion-macos-mock .oc-divider { height:1px; background:var(--oc-line); margin-top:20px; }
+#companion-macos-mock .oc-data-note { display:flex; gap:8px; align-items:center; color:var(--oc-muted); font-size:11px; margin-top:18px; line-height:1.5; }
+#companion-macos-mock .oc-dialog-actions { border-top:1px solid var(--oc-line); padding:13px 22px; display:flex; justify-content:flex-end; gap:8px; }
+#companion-macos-mock .oc-cancel,#companion-macos-mock .oc-save { border-radius:8px; padding:8px 14px; font-size:12px; }
+#companion-macos-mock .oc-cancel { background:var(--oc-panel); color:var(--oc-text); border:1px solid var(--oc-line); }
+#companion-macos-mock .oc-save { background:var(--oc-blue); color:var(--oc-blue-text); border:1px solid var(--oc-blue); }
+@media (max-width:650px) { #companion-macos-mock .oc-sidebar { width:64px; padding-left:8px; padding-right:8px; } #companion-macos-mock .oc-brand { padding:0 9px; } #companion-macos-mock .oc-brand span:last-child,#companion-macos-mock .oc-new,#companion-macos-mock .oc-section-label,#companion-macos-mock .oc-session span,#companion-macos-mock .oc-sidebar-bottom span:not(.oc-status-dot) { display:none; } #companion-macos-mock .oc-session { justify-content:center; } #companion-macos-mock .oc-sidebar-bottom { justify-content:center; } #companion-macos-mock .oc-window-title { display:none; } }
+@media (max-width:420px) { #companion-macos-mock .oc-local { display:none; } #companion-macos-mock .oc-chat-head { padding:14px; } #companion-macos-mock .oc-thread { padding:20px 14px; } #companion-macos-mock .oc-composer-wrap { padding:0 14px 15px; } }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('companion-macos-mock');
+  const overlay = root.querySelector('#oc-overlay');
+  const title = root.querySelector('#oc-chat-title');
+  const thread = root.querySelector('#oc-thread');
+  const input = root.querySelector('#oc-input');
+  const modelLabel = root.querySelector('#oc-model-label');
+  const names = ['规划 macOS 客户端 MVP', 'Memory 方案与实现', 'Rust Harness 接口设计'];
+  const state = { accent:'#316ad9', sidebar:true };
+  const openSettings = () => { overlay.hidden = false; root.querySelector('#oc-endpoint').focus(); };
+  const closeSettings = () => { overlay.hidden = true; };
+  root.querySelector('#oc-settings').addEventListener('click', openSettings);
+  root.querySelector('#oc-close').addEventListener('click', closeSettings);
+  root.querySelector('#oc-cancel').addEventListener('click', closeSettings);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeSettings(); });
+  root.querySelector('#oc-save').addEventListener('click', () => { const model = root.querySelector('#oc-model').value.trim(); modelLabel.textContent = model ? `模型 · ${model}` : '本地模型 · 未配置'; closeSettings(); });
+  root.querySelectorAll('.oc-session').forEach(button => button.addEventListener('click', () => { root.querySelectorAll('.oc-session').forEach(item => item.classList.remove('oc-selected')); button.classList.add('oc-selected'); title.textContent = names[Number(button.dataset.session)]; }));
+  root.querySelector('#oc-new').addEventListener('click', () => { title.textContent = '新会话'; root.querySelectorAll('.oc-session').forEach(item => item.classList.remove('oc-selected')); thread.innerHTML = '<div class="oc-message oc-assistant"><div class="oc-avatar">✦</div><div class="oc-answer"><div class="oc-speaker">Companion</div><p>你好，今天想一起处理什么？</p></div></div>'; input.focus(); });
+  root.querySelector('#oc-send').addEventListener('click', () => { const value = input.value.trim(); if (!value) return; const item = document.createElement('div'); item.className = 'oc-message oc-user'; const bubble = document.createElement('div'); bubble.className = 'oc-bubble'; bubble.textContent = value; item.appendChild(bubble); thread.appendChild(item); input.value = ''; });
+  root.querySelector('#oc-chat-menu').addEventListener('click', openSettings);
+  function renderTweak() { root.style.setProperty('--oc-blue', state.accent); root.querySelector('.oc-sidebar').style.display = state.sidebar ? 'flex' : 'none'; }
+  if (globalThis.Tweak) { const tweak = new Tweak({ container: root, onChange: renderTweak }); tweak.addColorPicker(state, 'accent', { label:'强调色', reference:'--oc-blue' }); tweak.addToggle(state, 'sidebar', { label:'显示侧边栏' }); }
+})();
+</script>

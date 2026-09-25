@@ -11,7 +11,6 @@ import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -21,34 +20,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
-
-@Serializable
-data class CalendarEvent(
-    val id: String,
-    val title: String,
-    val startTimeMs: Long,
-    val endTimeMs: Long,
-    val calendarName: String? = null,
-    val location: String? = null,
-    val notes: String? = null,
-)
-
-data class CalendarQuery(
-    val startTimeMs: Long,
-    val endTimeMs: Long,
-    val query: String? = null,
-    val limit: Int = 20,
-    val sortOrder: CalendarSortOrder = CalendarSortOrder.ASC,
-)
-
-enum class CalendarSortOrder {
-    ASC,
-    DESC,
-}
-
-interface CalendarEventDataSource {
-    suspend fun getEvents(query: CalendarQuery): List<CalendarEvent>
-}
 
 class DeviceToolsServerHandle internal constructor(
     private val manager: McpServerManager,

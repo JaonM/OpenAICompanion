@@ -11,6 +11,12 @@ The Gradle distribution is pinned in `gradle/wrapper/gradle-wrapper.properties`.
 Once the wrapper scripts are generated, use `./gradlew` instead of the global
 `gradle` command.
 
+The Compose Desktop macOS MVP uses the installed JDK 21 through
+`-PkmpJvmToolchain=21`; the existing multiplatform baseline remains JDK 22.
+See [the macOS MVP guide](../docs/macos_mvp.md) for run and packaging commands.
+The iOS app links this module as an Apple framework; see
+[the iOS MVP guide](../docs/ios_mvp.md) for Xcode and Rust target requirements.
+
 ## Apple Silicon setup
 
 ```bash

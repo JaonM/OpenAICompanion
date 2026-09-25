@@ -867,6 +867,20 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -882,7 +896,21 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
     // Integrity check functions only
-    fun uniffi_harness_checksum_func_cancel_agent_loop(
+    fun uniffi_harness_checksum_func_app_delete_session(
+): Short
+fun uniffi_harness_checksum_func_app_list_sessions(
+): Short
+fun uniffi_harness_checksum_func_app_load_session(
+): Short
+fun uniffi_harness_checksum_func_app_open_store(
+): Short
+fun uniffi_harness_checksum_func_app_resume_session(
+): Short
+fun uniffi_harness_checksum_func_app_send_message(
+): Short
+fun uniffi_harness_checksum_func_app_start_session(
+): Short
+fun uniffi_harness_checksum_func_cancel_agent_loop(
 ): Short
 fun uniffi_harness_checksum_func_clear_context_directories(
 ): Short
@@ -1011,6 +1039,20 @@ fun uniffi_harness_fn_method_toolprovider_get_tools(`ptr`: Pointer,
 ): Long
 fun uniffi_harness_fn_method_toolprovider_call_tool(`ptr`: Pointer,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,
 ): Long
+fun uniffi_harness_fn_func_app_delete_session(`sessionId`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_list_sessions(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_load_session(`sessionId`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_open_store(`databasePath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_resume_session(`sessionId`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_send_message(`userInput`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_start_session(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_harness_fn_func_cancel_agent_loop(uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun uniffi_harness_fn_func_clear_context_directories(uniffi_out_err: UniffiRustCallStatus,
@@ -1157,6 +1199,27 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_harness_checksum_func_app_delete_session() != 39588.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_list_sessions() != 54672.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_load_session() != 15716.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_open_store() != 47244.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_resume_session() != 36427.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_send_message() != 10298.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_start_session() != 37257.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_harness_checksum_func_cancel_agent_loop() != 53073.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1510,6 +1573,52 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterLong: FfiConverter<Long, Long> {
+    override fun lift(value: Long): Long {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Long {
+        return buf.getLong()
+    }
+
+    override fun lower(value: Long): Long {
+        return value
+    }
+
+    override fun allocationSize(value: Long) = 8UL
+
+    override fun write(value: Long, buf: ByteBuffer) {
+        buf.putLong(value)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
+    override fun lift(value: Byte): Boolean {
+        return value.toInt() != 0
+    }
+
+    override fun read(buf: ByteBuffer): Boolean {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: Boolean): Byte {
+        return if (value) 1.toByte() else 0.toByte()
+    }
+
+    override fun allocationSize(value: Boolean) = 1UL
+
+    override fun write(value: Boolean, buf: ByteBuffer) {
+        buf.put(lower(value))
+    }
 }
 
 /**
@@ -2875,6 +2984,42 @@ public object FfiConverterTypeToolProvider: FfiConverter<ToolProvider, Pointer> 
 
 
 
+data class AppResult (
+    var `ok`: kotlin.Boolean,
+    var `valueJson`: kotlin.String,
+    var `error`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAppResult: FfiConverterRustBuffer<AppResult> {
+    override fun read(buf: ByteBuffer): AppResult {
+        return AppResult(
+            FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AppResult) = (
+            FfiConverterBoolean.allocationSize(value.`ok`) +
+            FfiConverterString.allocationSize(value.`valueJson`) +
+            FfiConverterString.allocationSize(value.`error`)
+    )
+
+    override fun write(value: AppResult, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`ok`, buf)
+            FfiConverterString.write(value.`valueJson`, buf)
+            FfiConverterString.write(value.`error`, buf)
+    }
+}
+
+
+
 data class McpTool (
     var `name`: kotlin.String,
     var `description`: kotlin.String,
@@ -3089,6 +3234,69 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
 
 
 
+
+ fun `appDeleteSession`(`sessionId`: kotlin.Long): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_delete_session(
+        FfiConverterLong.lower(`sessionId`),_status)
+}
+    )
+    }
+
+ fun `appListSessions`(): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_list_sessions(
+        _status)
+}
+    )
+    }
+
+ fun `appLoadSession`(`sessionId`: kotlin.Long): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_load_session(
+        FfiConverterLong.lower(`sessionId`),_status)
+}
+    )
+    }
+
+ fun `appOpenStore`(`databasePath`: kotlin.String): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_open_store(
+        FfiConverterString.lower(`databasePath`),_status)
+}
+    )
+    }
+
+ fun `appResumeSession`(`sessionId`: kotlin.Long): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_resume_session(
+        FfiConverterLong.lower(`sessionId`),_status)
+}
+    )
+    }
+
+ fun `appSendMessage`(`userInput`: kotlin.String): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_send_message(
+        FfiConverterString.lower(`userInput`),_status)
+}
+    )
+    }
+
+ fun `appStartSession`(): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_start_session(
+        _status)
+}
+    )
+    }
 
  fun `cancelAgentLoop`()
         =

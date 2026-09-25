@@ -15,3 +15,6 @@ cargo run \
   --library target/release/libharness.dylib \
   --language kotlin \
   --out-dir "$out_dir"
+
+# UniFFI currently emits trailing spaces in generated declarations/comments.
+sed -i '' 's/[[:blank:]]*$//' "$out_dir/uniffi/harness/harness.kt"
