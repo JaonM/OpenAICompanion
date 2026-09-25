@@ -12,6 +12,9 @@
 - [x] 增加 `max_concurrent_tools` 并发上限配置。
 - [ ] 完善工具状态一致性和依赖约束。
 - [ ] 增加持久化 session、memory 和 trace store。
+  - [x] Rust 侧短期会话消息、中期/长期 SQLite 记忆、检索及显式删除。
+  - [x] Rust 侧本地 Session/Turn/消息轨迹写入、读取、恢复及删除。
+  - [ ] 会话摘要自动提取、记忆去重/冲突处理、存储加密及 KMP 会话桥接。
 - [ ] 增加权限检查、sandbox 和 process spawn 边界。
 - [ ] 为模型适配器、工具适配器和 observer 增加集成测试。
 - [ ] 评估 `async` runtime、错误库、序列化库等依赖；在接口稳定前保持依赖留白。
