@@ -1,0 +1,305 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* OpenAICompanionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* OpenAICompanionApp.swift */; };
+		A10000000000000000000002 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* Views.swift */; };
+		A10000000000000000000003 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* ChatStore.swift */; };
+		A10000000000000000000004 /* HarnessBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* HarnessBridge.swift */; };
+		A10000000000000000000005 /* ModelEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* ModelEndpoint.swift */; };
+		A10000000000000000000006 /* harness.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* harness.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* OpenAICompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompanionApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* HarnessBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessBridge.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* ModelEndpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelEndpoint.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* harness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = harness.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000000000008 /* OpenAICompanion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenAICompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000009 /* harnessFFI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = harnessFFI.h; sourceTree = "<group>"; };
+		A2000000000000000000000A /* module.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; path = module.modulemap; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* OpenAICompanion */,
+				A40000000000000000000003 /* Generated */,
+				A40000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* OpenAICompanion */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* OpenAICompanionApp.swift */,
+				A20000000000000000000002 /* Views.swift */,
+				A20000000000000000000003 /* ChatStore.swift */,
+				A20000000000000000000004 /* HarnessBridge.swift */,
+				A20000000000000000000005 /* ModelEndpoint.swift */,
+				A20000000000000000000007 /* Info.plist */,
+			);
+			path = OpenAICompanion;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* Generated */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000006 /* harness.swift */,
+				A20000000000000000000009 /* harnessFFI.h */,
+				A2000000000000000000000A /* module.modulemap */,
+			);
+			path = Generated;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000008 /* OpenAICompanion.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* OpenAICompanion */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000002 /* Build configuration list for PBXNativeTarget "OpenAICompanion" */;
+			buildPhases = (
+				A70000000000000000000001 /* Build KMP framework */,
+				A70000000000000000000002 /* Build Rust Harness */,
+				A30000000000000000000002 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenAICompanion;
+			productName = OpenAICompanion;
+			productReference = A20000000000000000000008 /* OpenAICompanion.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A60000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					A50000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = A80000000000000000000001 /* Build configuration list for PBXProject "OpenAICompanion" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh-Hans;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				zh-Hans,
+				en,
+				Base,
+			);
+			mainGroup = A40000000000000000000001;
+			productRefGroup = A40000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A50000000000000000000001 /* OpenAICompanion */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A70000000000000000000001 /* Build KMP framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Build KMP framework";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nif [ \"$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED\" = \"YES\" ]; then exit 0; fi\ncd \"$SRCROOT/../kmp\"\n./gradlew -PkmpJvmToolchain=21 embedAndSignAppleFrameworkForXcode\n";
+		};
+		A70000000000000000000002 /* Build Rust Harness */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Harness";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n\"$SRCROOT/../scripts/ios-rust.sh\" \"$PLATFORM_NAME\" \"$ARCHS\" \"$DERIVED_FILE_DIR/libharness.a\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A30000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* OpenAICompanionApp.swift in Sources */,
+				A10000000000000000000002 /* Views.swift in Sources */,
+				A10000000000000000000003 /* ChatStore.swift in Sources */,
+				A10000000000000000000004 /* HarnessBridge.swift in Sources */,
+				A10000000000000000000005 /* ModelEndpoint.swift in Sources */,
+				A10000000000000000000006 /* harness.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A90000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A90000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A90000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 0.1.0;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Generated",
+				);
+				INFOPLIST_FILE = OpenAICompanion/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					OpenAICompanionShared,
+					"-force_load",
+					"$(DERIVED_FILE_DIR)/libharness.a",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.openai.companion.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Generated";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A90000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 0.1.0;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Generated",
+				);
+				INFOPLIST_FILE = OpenAICompanion/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					OpenAICompanionShared,
+					"-force_load",
+					"$(DERIVED_FILE_DIR)/libharness.a",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.openai.companion.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Generated";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A80000000000000000000001 /* Build configuration list for PBXProject "OpenAICompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000001 /* Debug */,
+				A90000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A80000000000000000000002 /* Build configuration list for PBXNativeTarget "OpenAICompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000003 /* Debug */,
+				A90000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A60000000000000000000001 /* Project object */;
+}
