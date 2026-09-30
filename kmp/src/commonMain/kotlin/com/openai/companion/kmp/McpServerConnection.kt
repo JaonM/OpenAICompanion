@@ -31,6 +31,7 @@ class ToolExecutionException(
     val code: ToolExecutionErrorCode,
     message: String,
     cause: Throwable? = null,
+    val authorizationChallenge: McpAuthorizationChallenge? = null,
 ) : Exception(message, cause)
 
 data class McpToolDescriptor(

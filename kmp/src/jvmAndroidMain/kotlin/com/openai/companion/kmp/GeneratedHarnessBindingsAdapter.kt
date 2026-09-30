@@ -1,15 +1,18 @@
 package com.openai.companion.kmp
 
+import kotlinx.coroutines.CancellationException
+
 import uniffi.harness.McpTool as GeneratedMcpTool
 import uniffi.harness.ModelServeCallback as GeneratedModelServeCallback
 import uniffi.harness.ModelStreamCallback as GeneratedModelStreamCallback
 import uniffi.harness.AgentEventSink as GeneratedAgentEventSink
 import uniffi.harness.ToolProvider as GeneratedToolProvider
-import uniffi.harness.ToolExecutionException as GeneratedToolExecutionException
+import uniffi.harness.ToolCallReply as GeneratedToolCallReply
+import uniffi.harness.ToolListReply as GeneratedToolListReply
 import uniffi.harness.registerModelServeCallback as registerModelServeCallbackNative
-import uniffi.harness.registerToolProvider
+import uniffi.harness.registerToolProvider as registerToolProviderNative
 import uniffi.harness.unregisterModelServeCallback as unregisterModelServeCallbackNative
-import uniffi.harness.unregisterToolProvider
+import uniffi.harness.unregisterToolProvider as unregisterToolProviderNative
 import uniffi.harness.registerAgentEventSink as registerAgentEventSinkNative
 import uniffi.harness.unregisterAgentEventSink as unregisterAgentEventSinkNative
 import uniffi.harness.cancelAgentLoop as cancelAgentLoopNative
@@ -37,23 +40,20 @@ class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
     }
 
     override fun registerToolProvider(provider: RustToolProvider) {
-        registerToolProvider(object : GeneratedToolProvider {
-            override suspend fun getTools(): List<GeneratedMcpTool> = try {
-                provider.getTools().map {
+        registerToolProviderNative(object : GeneratedToolProvider {
+            override suspend fun getTools(): GeneratedToolListReply = try {
+                GeneratedToolListReply(provider.getTools().map {
                     GeneratedMcpTool(it.name, it.description, it.inputSchemaJson)
-                }
-            } catch (error: ToolExecutionException) {
-                throw error.toGeneratedError()
+                }, null, null)
             } catch (error: Throwable) {
-                throw GeneratedToolExecutionException.Unknown(error.message.orEmpty())
+                GeneratedToolListReply(emptyList(), error.callbackCode(), error.message)
             }
 
-            override suspend fun callTool(name: String, argumentsJson: String): String = try {
-                provider.callTool(name, argumentsJson)
-            } catch (error: ToolExecutionException) {
-                throw error.toGeneratedError()
+            override suspend fun callTool(name: String, argumentsJson: String): GeneratedToolCallReply = try {
+                val result = provider.callTool(name, argumentsJson)
+                GeneratedToolCallReply(result.contentJson, result.isError, null, null)
             } catch (error: Throwable) {
-                throw GeneratedToolExecutionException.Unknown(error.message.orEmpty())
+                GeneratedToolCallReply("", false, error.callbackCode(), error.message)
             }
         })
     }
@@ -65,7 +65,7 @@ class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
     }
 
     override fun unregisterToolProvider() {
-        unregisterToolProvider()
+        unregisterToolProviderNative()
     }
 
     override fun unregisterModelServeCallback() {
@@ -98,14 +98,9 @@ class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
     }
 }
 
-private fun ToolExecutionException.toGeneratedError(): GeneratedToolExecutionException =
-    when (code) {
-        ToolExecutionErrorCode.TIMEOUT -> GeneratedToolExecutionException.Timeout(message.orEmpty())
-        ToolExecutionErrorCode.PERMISSION_DENIED -> GeneratedToolExecutionException.PermissionDenied(message.orEmpty())
-        ToolExecutionErrorCode.NETWORK_UNREACHABLE -> GeneratedToolExecutionException.NetworkUnreachable(message.orEmpty())
-        ToolExecutionErrorCode.INVALID_ARGUMENTS -> GeneratedToolExecutionException.InvalidArguments(message.orEmpty())
-        ToolExecutionErrorCode.RESOURCE_NOT_FOUND -> GeneratedToolExecutionException.ResourceNotFound(message.orEmpty())
-        ToolExecutionErrorCode.SERVER_INTERNAL_ERROR -> GeneratedToolExecutionException.ServerInternalException(message.orEmpty())
-        ToolExecutionErrorCode.CANCELLED -> GeneratedToolExecutionException.Cancelled(message.orEmpty())
-        ToolExecutionErrorCode.UNKNOWN -> GeneratedToolExecutionException.Unknown(message.orEmpty())
+private fun Throwable.callbackCode(): String =
+    when (this) {
+        is ToolExecutionException -> code.name
+        is CancellationException -> ToolExecutionErrorCode.CANCELLED.name
+        else -> ToolExecutionErrorCode.UNKNOWN.name
     }

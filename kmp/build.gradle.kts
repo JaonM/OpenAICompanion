@@ -38,21 +38,44 @@ kotlin {
     macosArm64()
 
     sourceSets {
+        val jvmAndroidMain by creating {
+            dependsOn(commonMain.get())
+            dependencies {
+                compileOnly("net.java.dev.jna:jna:5.15.0")
+            }
+        }
+        jvmMain.get().dependsOn(jvmAndroidMain)
+        androidMain.get().dependsOn(jvmAndroidMain)
+        val iosMain by creating { dependsOn(commonMain.get()) }
+        iosX64Main.get().dependsOn(iosMain)
+        iosArm64Main.get().dependsOn(iosMain)
+        iosSimulatorArm64Main.get().dependsOn(iosMain)
+        val macosMain by creating { dependsOn(commonMain.get()) }
+        macosX64Main.get().dependsOn(macosMain)
+        macosArm64Main.get().dependsOn(macosMain)
         commonMain.dependencies {
             implementation(compose.runtime)
+            implementation(compose.foundation)
+            implementation(compose.material3)
+            implementation(compose.ui)
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
+            implementation("io.ktor:ktor-client-core:3.2.3")
         }
         jvmMain.dependencies {
+            implementation("net.java.dev.jna:jna:5.15.0")
             implementation("io.modelcontextprotocol:kotlin-sdk:$mcpSdkVersion")
             implementation("io.modelcontextprotocol:kotlin-sdk-testing:$mcpSdkVersion")
-            implementation("io.ktor:ktor-client-core:3.2.3")
             implementation(compose.desktop.currentOs)
             implementation(compose.material3)
             implementation("io.ktor:ktor-client-cio:3.2.3")
-            // UniFFI's generated JVM bindings use JNA to load and call libharness.
-            implementation("net.java.dev.jna:jna:5.15.0")
+        }
+        jvmTest.dependencies {
+            implementation("io.ktor:ktor-client-mock:3.2.3")
+        }
+        iosMain.dependencies {
+            implementation("io.ktor:ktor-client-darwin:3.2.3")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

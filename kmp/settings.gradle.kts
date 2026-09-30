@@ -17,3 +17,8 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "openai-companion-kmp"
+include(":iosRustBridge")
+include(":iosApp")
+if (!providers.gradleProperty("skipAndroidApp").map(String::toBoolean).getOrElse(false)) {
+    include(":androidApp")
+}

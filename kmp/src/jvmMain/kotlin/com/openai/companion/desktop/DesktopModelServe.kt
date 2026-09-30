@@ -16,6 +16,8 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -25,6 +27,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** The model adapter stays in the host app; Harness owns the agent loop. */
 class DesktopModelServe : AppModelServe {
+    private val requestGate = Mutex()
     private val defaults = CompanionModelDefaults()
     private val preferences = Preferences.userNodeForPackage(DesktopModelServe::class.java)
     private val client = HttpClient.newBuilder()
@@ -38,6 +41,9 @@ class DesktopModelServe : AppModelServe {
     @Volatile var apiKey: String = ""
     @Volatile var lastError: String? = null
     @Volatile private var cancelled = false
+
+    fun isLocalEndpoint(): Boolean = runCatching { URI.create(endpoint).host }
+        .getOrNull() in setOf("localhost", "127.0.0.1", "::1")
 
     fun save(endpoint: String, model: String, apiKey: String) {
         this.endpoint = endpoint.trim()
@@ -75,6 +81,7 @@ class DesktopModelServe : AppModelServe {
     }
 
     override suspend fun complete(requestJson: String, callback: ModelStreamCallback) {
+      requestGate.withLock {
         lastError = null
         cancelled = false
         try {
@@ -129,6 +136,7 @@ class DesktopModelServe : AppModelServe {
             lastError = if (cancelled) "生成已取消" else error.message ?: error.toString()
             throw error
         }
+      }
     }
 }
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-out_dir="$project_root/kmp/src/jvmMain/kotlin"
+out_dir="$project_root/kmp/src/jvmAndroidMain/kotlin"
 
 cd "$project_root/harness"
 
@@ -17,4 +17,4 @@ cargo run \
   --out-dir "$out_dir"
 
 # UniFFI currently emits trailing spaces in generated declarations/comments.
-sed -i '' 's/[[:blank:]]*$//' "$out_dir/uniffi/harness/harness.kt"
+perl -pi -e 's/[ \t]+$//' "$out_dir/uniffi/harness/harness.kt"

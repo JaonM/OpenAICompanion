@@ -29,18 +29,24 @@ interface GeneratedHarnessBindings {
 suspend fun registerMcpProvider(
     bindings: GeneratedHarnessBindings,
     manager: McpServerManager,
+    approve: suspend (String, String) -> Boolean,
+    onToolCountChanged: (Int) -> Unit = {},
 ) {
-    bindings.registerToolProvider(McpToolProvider(manager))
+    bindings.registerToolProvider(McpToolProvider(manager, approve))
     manager.setToolsChangedListener {
-        bindings.updateMcpTools(manager.tools().map { tool ->
+        val tools = manager.tools().map { tool ->
             McpTool(
                 name = tool.name,
                 description = tool.description,
                 inputSchemaJson = tool.inputSchemaJson,
             )
-        })
+        }
+        bindings.updateMcpTools(tools)
+        onToolCountChanged(tools.size)
     }
-    bindings.updateMcpTools(manager.tools().map { tool ->
+    val initialTools = manager.tools().map { tool ->
         McpTool(tool.name, tool.description, tool.inputSchemaJson)
-    })
+    }
+    bindings.updateMcpTools(initialTools)
+    onToolCountChanged(initialTools.size)
 }
