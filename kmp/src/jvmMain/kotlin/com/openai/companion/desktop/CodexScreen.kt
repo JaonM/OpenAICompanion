@@ -29,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -437,11 +438,37 @@ private fun CodexSettings(
 private fun ProactiveTasksDialog(backend: DesktopBackend, onClose: () -> Unit, onError: (String?) -> Unit) {
     val scope = rememberCoroutineScope()
     var tasks by remember { mutableStateOf(backend.proactiveTasks) }
+    var proactiveSettings by remember { mutableStateOf(backend.proactiveSettings) }
+    var memorySyncEndpoint by remember { mutableStateOf(backend.memorySyncEndpoint) }
+    var memorySyncToken by remember { mutableStateOf("") }
+    var memorySyncStatus by remember { mutableStateOf(backend.memorySyncStatus) }
     DialogWindow(onCloseRequest = onClose, title = "主动任务", state = DialogState(width = 560.dp, height = 500.dp)) {
         MaterialTheme {
             Column(Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("端侧模型会从对话和已有记忆主动发现任务。", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(proactiveSettings.enabled, { enabled -> scope.launch {
+                        try {
+                            backend.saveProactiveConfig(proactiveSettings.copy(enabled = enabled))
+                            proactiveSettings = backend.proactiveSettings
+                        } catch (cause: Exception) { onError(cause.message) }
+                    } })
+                    Text("开启主动推送")
+                }
+                Text("后台发现间隔")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(15L, 30L, 60L, 180L).forEach { minutes ->
+                        OutlinedButton(onClick = { scope.launch {
+                            try {
+                                backend.saveProactiveConfig(proactiveSettings.copy(discoveryIntervalMinutes = minutes))
+                                proactiveSettings = backend.proactiveSettings
+                            } catch (cause: Exception) { onError(cause.message) }
+                        } }, enabled = proactiveSettings.discoveryIntervalMinutes != minutes) {
+                            Text(if (minutes < 60) "${minutes} 分钟" else "${minutes / 60} 小时")
+                        }
+                    }
+                }
                 if (tasks.isEmpty()) Text("尚无主动任务")
                 tasks.forEach { task ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -455,6 +482,29 @@ private fun ProactiveTasksDialog(backend: DesktopBackend, onClose: () -> Unit, o
                             catch (cause: Exception) { onError(cause.message) }
                         } }) { Text("删除") }
                     }
+                }
+                Text("记忆点跨端同步", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(memorySyncEndpoint, { memorySyncEndpoint = it },
+                    label = { Text("HTTPS 同步接口地址") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(memorySyncToken, { memorySyncToken = it },
+                    label = { Text("访问令牌（留空保留）") },
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                Text(memorySyncStatus)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { scope.launch {
+                        try {
+                            backend.configureMemorySync(memorySyncEndpoint, memorySyncToken)
+                            memorySyncToken = ""
+                            memorySyncStatus = backend.memorySyncStatus
+                        } catch (cause: Exception) {
+                            memorySyncStatus = backend.memorySyncStatus
+                            onError(cause.message)
+                        }
+                    } }) { Text("保存并同步") }
+                    OutlinedButton(onClick = { scope.launch {
+                        try { backend.syncMemories(); memorySyncStatus = backend.memorySyncStatus }
+                        catch (cause: Exception) { memorySyncStatus = backend.memorySyncStatus; onError(cause.message) }
+                    } }) { Text("立即同步") }
                 }
             }
         }

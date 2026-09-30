@@ -121,6 +121,7 @@ impl MemoryStore {
                 ON memories(tier, expires_at);",
         )?;
         crate::trace::create_schema(&connection)?;
+        crate::memory_sync::create_schema(&connection)?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS memory_point_sources (
                 memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,

@@ -341,9 +341,66 @@ pub fn app_delete_proactive_task(id: String) -> AppResult {
     }
 }
 
+pub fn app_get_proactive_settings() -> AppResult {
+    match app_state().and_then(|state| state.store.proactive_settings().map_err(|e| e.to_string()))
+    {
+        Ok(settings) => AppResult::success(json!(settings)),
+        Err(error) => AppResult::failure(error),
+    }
+}
+
+pub fn app_set_proactive_settings(enabled: bool, discovery_interval_minutes: i64) -> AppResult {
+    let result = app_state().and_then(|state| {
+        state
+            .store
+            .set_proactive_settings(crate::proactive::ProactiveSettings {
+                enabled,
+                discovery_interval_minutes,
+            })
+            .map_err(|e| e.to_string())?;
+        state.store.proactive_settings().map_err(|e| e.to_string())
+    });
+    match result {
+        Ok(settings) => AppResult::success(json!(settings)),
+        Err(error) => AppResult::failure(error),
+    }
+}
+
+pub fn app_export_memory_sync() -> AppResult {
+    match app_state().and_then(|state| state.store.export_memory_sync().map_err(|e| e.to_string()))
+    {
+        Ok(records) => AppResult::success(json!(records)),
+        Err(error) => AppResult::failure(error),
+    }
+}
+
+pub fn app_merge_memory_sync(records_json: String) -> AppResult {
+    let result = (|| {
+        let records: Vec<crate::memory_sync::SyncRecord> =
+            serde_json::from_str(&records_json).map_err(|e| e.to_string())?;
+        let state = app_state()?;
+        state
+            .store
+            .merge_memory_sync(&records)
+            .map_err(|e| e.to_string())
+    })();
+    match result {
+        Ok(changed) => AppResult::success(json!({"changed":changed})),
+        Err(error) => AppResult::failure(error),
+    }
+}
+
 pub fn app_process_pending_proactive_plans(timezone_offset_minutes: i64) -> AppResult {
     let result = (|| {
         let state = app_state()?;
+        if !state
+            .store
+            .proactive_settings()
+            .map_err(|e| e.to_string())?
+            .enabled
+        {
+            return Ok::<_, String>(crate::proactive_planner::PlanOutcome::default());
+        }
         let model = crate::ModelServeWrapper::registered().map_err(|error| error.to_string())?;
         crate::proactive_planner::process_pending(&state.store, &model, timezone_offset_minutes)
             .map_err(|error| error.to_string())
@@ -357,6 +414,14 @@ pub fn app_process_pending_proactive_plans(timezone_offset_minutes: i64) -> AppR
 pub fn app_discover_proactive_tasks(timezone_offset_minutes: i64) -> AppResult {
     let result = (|| {
         let state = app_state()?;
+        if !state
+            .store
+            .proactive_settings()
+            .map_err(|e| e.to_string())?
+            .enabled
+        {
+            return Ok::<_, String>(crate::proactive_planner::PlanOutcome::default());
+        }
         let model = crate::ModelServeWrapper::registered().map_err(|error| error.to_string())?;
         crate::proactive_planner::discover_from_memories(
             &state.store,
@@ -385,6 +450,14 @@ pub fn app_list_proactive_rules() -> AppResult {
 
 pub fn app_next_proactive_wake_at() -> AppResult {
     match app_state().and_then(|state| {
+        if !state
+            .store
+            .proactive_settings()
+            .map_err(|e| e.to_string())?
+            .enabled
+        {
+            return Ok(None);
+        }
         state
             .store
             .next_proactive_wake_at()
@@ -410,6 +483,14 @@ pub fn app_rebase_proactive_rules(timezone_offset_minutes: i64) -> AppResult {
 pub fn app_run_due_proactive() -> AppResult {
     let result = (|| {
         let state = app_state()?;
+        if !state
+            .store
+            .proactive_settings()
+            .map_err(|e| e.to_string())?
+            .enabled
+        {
+            return Ok::<_, String>(0);
+        }
         let model = crate::ModelServeWrapper::registered().map_err(|error| error.to_string())?;
         state
             .runtime
@@ -424,6 +505,14 @@ pub fn app_run_due_proactive() -> AppResult {
 
 pub fn app_ready_proactive_notifications() -> AppResult {
     match app_state().and_then(|state| {
+        if !state
+            .store
+            .proactive_settings()
+            .map_err(|e| e.to_string())?
+            .enabled
+        {
+            return Ok(Vec::new());
+        }
         state
             .store
             .ready_proactive_notifications()

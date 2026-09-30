@@ -7,6 +7,11 @@ import com.openai.companion.kmp.KotlinSdkMcpClient
 import com.openai.companion.kmp.McpServerManager
 import com.openai.companion.kmp.McpTool
 import com.openai.companion.kmp.ProactiveTask
+import com.openai.companion.kmp.ProactiveSettings
+import com.openai.companion.kmp.MemorySyncClient
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
 import com.openai.companion.kmp.registerMcpProvider
 import java.io.File
 import java.net.URI
@@ -28,6 +33,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +47,8 @@ import uniffi.harness.appResumeSession
 import uniffi.harness.appSendMessage
 import uniffi.harness.appStartSession
 import uniffi.harness.appListProactiveRules
+import uniffi.harness.appGetProactiveSettings
+import uniffi.harness.appSetProactiveSettings
 import uniffi.harness.appNextProactiveWakeAt
 import uniffi.harness.appPutProactiveRule
 import uniffi.harness.appPutProactiveTask
@@ -51,6 +59,8 @@ import uniffi.harness.appRebaseProactiveRules
 import uniffi.harness.appRunDueProactive
 import uniffi.harness.appReadyProactiveNotifications
 import uniffi.harness.appMarkProactiveDelivered
+import uniffi.harness.appExportMemorySync
+import uniffi.harness.appMergeMemorySync
 import uniffi.harness.cancelAgentLoop
 
 data class DesktopSession(val id: Long, val preview: String)
@@ -67,12 +77,23 @@ data class McpApprovalRequest(val id: Long, val toolName: String, val argumentsJ
 class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
     private val proactiveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val proactiveWake = Channel<Unit>(Channel.CONFLATED)
+    private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
     private val notificationSink = DesktopNotificationSink()
     private val codec = CompanionConversationCodec()
     private val bindings = GeneratedHarnessBindingsAdapter()
     private val manager = McpServerManager()
     private val preferences = Preferences.userNodeForPackage(DesktopBackend::class.java)
     private val approvalGate = Mutex()
+    private val syncGate = Mutex()
+    private val syncHttp = HttpClient(CIO) {
+        followRedirects = false
+        install(HttpTimeout) { requestTimeoutMillis = 30_000 }
+    }
+    private val syncClient = MemorySyncClient(syncHttp)
+    @Volatile var memorySyncEndpoint: String = preferences.get("memorySyncEndpoint", "")
+        private set
+    @Volatile var memorySyncStatus: String = "未配置"
+        private set
     private val approvalIDs = AtomicLong()
     private val approvalState = MutableStateFlow<McpApprovalRequest?>(null)
     val pendingMcpApproval = approvalState.asStateFlow()
@@ -87,6 +108,8 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
     @Volatile var commuteTime: String = "18:30"
         private set
     @Volatile var proactiveTasks: List<ProactiveTask> = emptyList()
+        private set
+    @Volatile var proactiveSettings: ProactiveSettings = ProactiveSettings()
         private set
     @Volatile var mcpEndpoint: String = preferences.get("mcpEndpoint", "")
         private set
@@ -115,6 +138,7 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
         registerMcpProvider(bindings, manager, ::approveMcpTool)
         initialized = true
         loadProactiveRules()
+        proactiveSettings = Json.decodeFromString(appGetProactiveSettings().value())
         proactiveScope.launch {
             while (isActive) {
                 try {
@@ -143,8 +167,18 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
         proactiveScope.launch { processPendingProactivePlans() }
         proactiveScope.launch {
             while (isActive) {
-                discoverProactiveTasks()
-                delay(30 * 60 * 1_000L)
+                if (memorySyncEndpoint.isNotBlank()) runCatching { syncMemories() }
+                delay(15 * 60 * 1_000L)
+            }
+        }
+        proactiveScope.launch {
+            while (isActive) {
+                if (proactiveSettings.enabled) discoverProactiveTasks()
+                if (proactiveSettings.enabled) {
+                    withTimeoutOrNull(proactiveSettings.discoveryIntervalMinutes * 60_000L) {
+                        discoveryWake.receive()
+                    }
+                } else discoveryWake.receive()
             }
         }
     }
@@ -195,6 +229,49 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
         ))).value()
         loadProactiveRules()
         proactiveWake.trySend(Unit)
+    }
+
+    suspend fun saveProactiveConfig(settings: ProactiveSettings) = withContext(Dispatchers.IO) {
+        proactiveSettings = Json.decodeFromString(appSetProactiveSettings(
+            settings.enabled, settings.discoveryIntervalMinutes).value())
+        proactiveWake.trySend(Unit)
+        discoveryWake.trySend(Unit)
+        if (settings.enabled) proactiveScope.launch { processPendingProactivePlans() }
+    }
+
+    suspend fun configureMemorySync(endpoint: String, token: String) {
+        if (endpoint.isBlank()) {
+            preferences.remove("memorySyncEndpoint")
+            preferences.remove("memorySyncToken")
+            memorySyncEndpoint = ""
+            memorySyncStatus = "未配置"
+            return
+        }
+        val credential = token.ifBlank { preferences.get("memorySyncToken", "") }
+        exchangeMemories(endpoint.trim(), credential)
+        preferences.put("memorySyncEndpoint", endpoint.trim())
+        if (token.isNotBlank()) preferences.put("memorySyncToken", token)
+        memorySyncEndpoint = endpoint.trim()
+    }
+
+    suspend fun syncMemories() {
+        val endpoint = memorySyncEndpoint.takeIf(String::isNotBlank) ?: return
+        exchangeMemories(endpoint, preferences.get("memorySyncToken", ""))
+    }
+
+    private suspend fun exchangeMemories(endpoint: String, token: String) = syncGate.withLock {
+        memorySyncStatus = "同步中…"
+        try {
+            val local = withContext(Dispatchers.IO) { appExportMemorySync().value() }
+            val remote = syncClient.exchange(endpoint, token, local)
+            val merged = withContext(Dispatchers.IO) { appMergeMemorySync(remote).value() }
+            if (Json.parseToJsonElement(merged).jsonObject.getValue("changed").jsonPrimitive.content.toInt() > 0
+                && proactiveSettings.enabled) proactiveScope.launch { discoverProactiveTasks() }
+            memorySyncStatus = "已同步"
+        } catch (error: Exception) {
+            memorySyncStatus = "同步失败：${error.message ?: error}"
+            throw error
+        }
     }
 
     suspend fun deleteProactiveTask(id: String) = withContext(Dispatchers.IO) {
@@ -293,6 +370,10 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
             bindings.unregisterAgentEventSink()
         }
         proactiveScope.launch { processPendingProactivePlans() }
+        if (memorySyncEndpoint.isNotBlank()) proactiveScope.launch {
+            delay(15_000)
+            runCatching { syncMemories() }
+        }
         output
         }
     }

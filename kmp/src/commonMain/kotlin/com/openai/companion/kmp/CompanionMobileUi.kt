@@ -56,6 +56,9 @@ data class MobileUiState(
     val mealTime: String = "19:00",
     val commuteTime: String = "18:30",
     val proactiveTasks: List<ProactiveTask> = emptyList(),
+    val proactiveSettings: ProactiveSettings = ProactiveSettings(),
+    val memorySyncEndpoint: String = "",
+    val memorySyncStatus: String = "未配置",
     val mcpEndpoint: String = "",
     val mcpStatus: String = "未连接 MCP",
     val mcpBusy: Boolean = false,
@@ -82,6 +85,9 @@ interface MobileActions {
     fun saveProactiveSettings(mealEnabled: Boolean, mealTime: String,
         commuteEnabled: Boolean, commuteTime: String)
     fun saveProactiveTask(task: ProactiveTask) = Unit
+    fun saveProactiveConfig(settings: ProactiveSettings) = Unit
+    fun configureMemorySync(endpoint: String, token: String) = Unit
+    fun syncMemories() = Unit
     fun deleteProactiveTask(id: String) = Unit
     fun addA2aAgent(cardUrl: String)
     fun disableA2aAgent(id: String)
@@ -101,6 +107,8 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var endpointDraft by remember(state.mcpEndpoint) { mutableStateOf(state.mcpEndpoint) }
     var oauthClientId by remember { mutableStateOf("") }
     var a2aCardDraft by remember { mutableStateOf("") }
+    var memorySyncEndpointDraft by remember(state.memorySyncEndpoint) { mutableStateOf(state.memorySyncEndpoint) }
+    var memorySyncTokenDraft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val uiScope = rememberCoroutineScope()
     val approval = state.approval
@@ -123,7 +131,26 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         OutlinedButton(onClick = actions::importModel) { Text("导入 GGUF") }
                         Spacer(Modifier.height(20.dp))
                         Text("主动任务", style = MaterialTheme.typography.titleMedium)
-                        Text("端侧模型会在对话后及后台定期从已有记忆发现主动任务。可在这里停用或删除。")
+                        Row {
+                            Checkbox(state.proactiveSettings.enabled, { enabled ->
+                                actions.saveProactiveConfig(state.proactiveSettings.copy(enabled = enabled))
+                            })
+                            Text("开启主动推送")
+                        }
+                        Text("后台发现间隔")
+                        listOf(15L, 30L, 60L, 180L).chunked(2).forEach { pair ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                pair.forEach { minutes ->
+                                    OutlinedButton(onClick = {
+                                        actions.saveProactiveConfig(state.proactiveSettings.copy(discoveryIntervalMinutes = minutes))
+                                    }, enabled = state.proactiveSettings.discoveryIntervalMinutes != minutes,
+                                        modifier = Modifier.weight(1f)) {
+                                        Text(if (minutes < 60) "${minutes} 分钟" else "${minutes / 60} 小时")
+                                    }
+                                }
+                            }
+                        }
+                        Text("端侧模型根据记忆点和可用查询工具推理未来可帮助的任务；到点后再次查询实时信息。")
                         state.proactiveTasks.forEach { task ->
                             Row {
                                 Checkbox(task.enabled, { enabled ->
@@ -132,6 +159,29 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                 Text(task.title)
                                 TextButton(onClick = { actions.deleteProactiveTask(task.scenario) }) { Text("删除") }
                             }
+                        }
+                        Spacer(Modifier.height(20.dp))
+                        Text("记忆点跨端同步", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(
+                            value = memorySyncEndpointDraft,
+                            onValueChange = { memorySyncEndpointDraft = it },
+                            label = { Text("HTTPS 同步接口地址") },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = memorySyncTokenDraft,
+                            onValueChange = { memorySyncTokenDraft = it },
+                            label = { Text("访问令牌（留空保留已保存令牌）") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        )
+                        Text(state.memorySyncStatus)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                actions.configureMemorySync(memorySyncEndpointDraft, memorySyncTokenDraft)
+                                memorySyncTokenDraft = ""
+                            }) { Text("保存并同步") }
+                            OutlinedButton(onClick = actions::syncMemories) { Text("立即同步") }
                         }
                         Spacer(Modifier.height(20.dp))
                         Text("远程 MCP", style = MaterialTheme.typography.titleMedium)

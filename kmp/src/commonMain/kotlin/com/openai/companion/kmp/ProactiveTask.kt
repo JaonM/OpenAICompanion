@@ -3,6 +3,12 @@ package com.openai.companion.kmp
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+@Serializable
+data class ProactiveSettings(
+    val enabled: Boolean = false,
+    @SerialName("discovery_interval_minutes") val discoveryIntervalMinutes: Long = 30,
+)
+
 /** User-configured local task. `scenario` is a stable task ID kept for DB compatibility. */
 @Serializable
 data class ProactiveTask(

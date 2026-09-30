@@ -37,6 +37,13 @@ interface MobileBackend {
     suspend fun saveProactiveSettings(mealEnabled: Boolean, mealTime: String,
         commuteEnabled: Boolean, commuteTime: String) = Unit
     val proactiveTasks: List<ProactiveTask> get() = emptyList()
+    val proactiveSettings: ProactiveSettings get() = ProactiveSettings()
+    suspend fun saveProactiveConfig(settings: ProactiveSettings) = Unit
+    val memorySyncEndpoint: String get() = ""
+    val memorySyncStatus: String get() = "未配置"
+    val memorySyncStatusUpdates: StateFlow<String>? get() = null
+    suspend fun configureMemorySync(endpoint: String, token: String) = Unit
+    suspend fun syncMemories() = Unit
     val proactiveTaskUpdates: StateFlow<List<ProactiveTask>>? get() = null
     suspend fun saveProactiveTask(task: ProactiveTask) = Unit
     suspend fun deleteProactiveTask(id: String) = Unit
@@ -91,6 +98,11 @@ class MobileController(
             scope.launch {
                 updates.collect { value -> mutableState.update { it.copy(proactiveTasks = value) } }
             }
+        }
+        backend.memorySyncStatusUpdates?.let { updates ->
+            scope.launch { updates.collect { value ->
+                mutableState.update { it.copy(memorySyncStatus = value) }
+            } }
         }
         perform {
             backend.initialize()
@@ -222,6 +234,21 @@ class MobileController(
             perform { backend.saveProactiveTask(task) }
             syncSettings()
         }
+    }
+
+    override fun saveProactiveConfig(settings: ProactiveSettings) {
+        scope.launch {
+            perform { backend.saveProactiveConfig(settings) }
+            syncSettings()
+        }
+    }
+
+    override fun configureMemorySync(endpoint: String, token: String) {
+        scope.launch { perform { backend.configureMemorySync(endpoint, token) }; syncSettings() }
+    }
+
+    override fun syncMemories() {
+        scope.launch { perform { backend.syncMemories() }; syncSettings() }
     }
 
     override fun deleteProactiveTask(id: String) {
@@ -358,6 +385,9 @@ class MobileController(
                 mealTime = backend.mealTime,
                 commuteTime = backend.commuteTime,
                 proactiveTasks = backend.proactiveTasks,
+                proactiveSettings = backend.proactiveSettings,
+                memorySyncEndpoint = backend.memorySyncEndpoint,
+                memorySyncStatus = backend.memorySyncStatus,
             )
         }
     }

@@ -11,6 +11,13 @@ use crate::{
 };
 
 const DAY: i64 = 86_400;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProactiveSettings {
+    pub enabled: bool,
+    pub discovery_interval_minutes: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProactiveRule {
     pub scenario: String,
@@ -113,7 +120,14 @@ pub(crate) fn create_schema(connection: &rusqlite::Connection) -> Result<(), Mem
         );
         CREATE TABLE IF NOT EXISTS proactive_discovery_dismissals (
             source_memory_id INTEGER PRIMARY KEY
-        );"
+        );
+        CREATE TABLE IF NOT EXISTS proactive_settings (
+            id INTEGER PRIMARY KEY CHECK (id=1),
+            enabled INTEGER NOT NULL CHECK (enabled IN (0,1)),
+            discovery_interval_minutes INTEGER NOT NULL CHECK (discovery_interval_minutes BETWEEN 5 AND 1440)
+        );
+        INSERT OR IGNORE INTO proactive_settings (id,enabled,discovery_interval_minutes)
+            VALUES (1,0,30);"
     )?;
     if !planner_table_exists {
         // Upgrading an existing store must not infer reminders from old conversations.
@@ -164,6 +178,44 @@ pub(crate) fn create_schema(connection: &rusqlite::Connection) -> Result<(), Mem
         )?;
     }
     Ok(())
+}
+
+impl MemoryStore {
+    pub fn proactive_settings(&self) -> Result<ProactiveSettings, MemoryError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        connection
+            .query_row(
+                "SELECT enabled,discovery_interval_minutes FROM proactive_settings WHERE id=1",
+                [],
+                |row| {
+                    Ok(ProactiveSettings {
+                        enabled: row.get::<_, i64>(0)? != 0,
+                        discovery_interval_minutes: row.get(1)?,
+                    })
+                },
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn set_proactive_settings(&self, settings: ProactiveSettings) -> Result<(), MemoryError> {
+        if !(5..=1440).contains(&settings.discovery_interval_minutes) {
+            return Err(MemoryError::InvalidData(
+                "discovery interval must be 5–1440 minutes".into(),
+            ));
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        connection.execute(
+            "UPDATE proactive_settings SET enabled=?1,discovery_interval_minutes=?2 WHERE id=1",
+            params![settings.enabled, settings.discovery_interval_minutes],
+        )?;
+        Ok(())
+    }
 }
 
 fn read_proactive_rules(
@@ -788,6 +840,39 @@ mod tests {
     use super::*;
     use crate::{ModelServeCallback, ModelServeError, ModelStreamCallback};
     use std::sync::Arc;
+
+    #[test]
+    fn proactive_switch_is_opt_in_and_interval_is_persisted() {
+        let store = MemoryStore::in_memory().unwrap();
+        assert_eq!(
+            store.proactive_settings().unwrap(),
+            ProactiveSettings {
+                enabled: false,
+                discovery_interval_minutes: 30,
+            }
+        );
+        assert!(
+            store
+                .set_proactive_settings(ProactiveSettings {
+                    enabled: true,
+                    discovery_interval_minutes: 4,
+                })
+                .is_err()
+        );
+        store
+            .set_proactive_settings(ProactiveSettings {
+                enabled: true,
+                discovery_interval_minutes: 15,
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .proactive_settings()
+                .unwrap()
+                .discovery_interval_minutes,
+            15
+        );
+    }
 
     struct FixedModel;
 

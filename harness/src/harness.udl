@@ -22,6 +22,10 @@ namespace harness {
         i64 weekday_mask, i64 lead_minutes, i64 timezone_offset_minutes);
     AppResult app_put_proactive_task(string task_json);
     AppResult app_delete_proactive_task(string id);
+    AppResult app_get_proactive_settings();
+    AppResult app_set_proactive_settings(boolean enabled, i64 discovery_interval_minutes);
+    AppResult app_export_memory_sync();
+    AppResult app_merge_memory_sync(string records_json);
     AppResult app_process_pending_proactive_plans(i64 timezone_offset_minutes);
     AppResult app_discover_proactive_tasks(i64 timezone_offset_minutes);
     AppResult app_list_proactive_rules();

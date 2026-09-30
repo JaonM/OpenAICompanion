@@ -12,7 +12,9 @@ import com.openai.companion.kmp.IosA2aTokenStore
 import com.openai.companion.kmp.MobileBackend
 import com.openai.companion.kmp.MobileMessage
 import com.openai.companion.kmp.MobileSession
+import com.openai.companion.kmp.MemorySyncClient
 import com.openai.companion.kmp.ProactiveTask
+import com.openai.companion.kmp.ProactiveSettings
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSHomeDirectory
+import platform.Foundation.NSUserDefaults
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -60,6 +63,8 @@ import uniffi.harness.appResumeSession
 import uniffi.harness.appSendMessage
 import uniffi.harness.appStartSession
 import uniffi.harness.appListProactiveRules
+import uniffi.harness.appGetProactiveSettings
+import uniffi.harness.appSetProactiveSettings
 import uniffi.harness.appNextProactiveWakeAt
 import uniffi.harness.appPutProactiveRule
 import uniffi.harness.appPutProactiveTask
@@ -70,6 +75,8 @@ import uniffi.harness.appRebaseProactiveRules
 import uniffi.harness.appRunDueProactive
 import uniffi.harness.appReadyProactiveNotifications
 import uniffi.harness.appMarkProactiveDelivered
+import uniffi.harness.appExportMemorySync
+import uniffi.harness.appMergeMemorySync
 
 /** Kotlin/Native app backend: Compose → Harness, with the shared MCP provider registered once. */
 class IosMobileBackend(
@@ -91,7 +98,17 @@ class IosMobileBackend(
     private val a2a = A2aClient(a2aHttp, IosA2aStore(), IosA2aTokenStore(), CoroutineScope(SupervisorJob() + Dispatchers.Default), approveA2a)
     private val proactiveScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val proactiveWake = Channel<Unit>(Channel.CONFLATED)
+    private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
     private val agentGate = Mutex()
+    private val syncGate = Mutex()
+    private val syncDefaults = NSUserDefaults.standardUserDefaults
+    private val syncTokens = IosA2aTokenStore()
+    private val memorySyncClient = MemorySyncClient(a2aHttp)
+    override var memorySyncEndpoint: String = syncDefaults.stringForKey("memorySyncEndpoint") ?: ""
+        private set
+    private val mutableMemorySyncStatus = MutableStateFlow("未配置")
+    override val memorySyncStatusUpdates: StateFlow<String> = mutableMemorySyncStatus.asStateFlow()
+    override val memorySyncStatus: String get() = mutableMemorySyncStatus.value
     private var initialized = false
     override var mealReminderEnabled: Boolean = false
         private set
@@ -102,6 +119,8 @@ class IosMobileBackend(
     override var commuteTime: String = "18:30"
         private set
     override var proactiveTasks: List<ProactiveTask> = emptyList()
+        private set
+    override var proactiveSettings: ProactiveSettings = ProactiveSettings()
         private set
     private val mutableProactiveTasks = MutableStateFlow<List<ProactiveTask>>(emptyList())
     override val proactiveTaskUpdates: StateFlow<List<ProactiveTask>> = mutableProactiveTasks.asStateFlow()
@@ -129,6 +148,7 @@ class IosMobileBackend(
         a2a.start()
         bindings.registerA2aProvider(a2a::listForModel, a2a::delegate)
         loadProactiveRules()
+        proactiveSettings = Json.decodeFromString(appGetProactiveSettings().value())
         initialized = true
         proactiveScope.launch {
             while (isActive) {
@@ -151,8 +171,18 @@ class IosMobileBackend(
         proactiveScope.launch { processPendingProactivePlans() }
         proactiveScope.launch {
             while (isActive) {
-                discoverProactiveTasks()
-                delay(30 * 60 * 1_000L)
+                if (memorySyncEndpoint.isNotBlank()) runCatching { syncMemories() }
+                delay(15 * 60 * 1_000L)
+            }
+        }
+        proactiveScope.launch {
+            while (isActive) {
+                if (proactiveSettings.enabled) discoverProactiveTasks()
+                if (proactiveSettings.enabled) {
+                    withTimeoutOrNull(proactiveSettings.discoveryIntervalMinutes * 60_000L) {
+                        discoveryWake.receive()
+                    }
+                } else discoveryWake.receive()
             }
         }
     }
@@ -190,6 +220,10 @@ class IosMobileBackend(
         }
         }
         proactiveScope.launch { processPendingProactivePlans() }
+        if (memorySyncEndpoint.isNotBlank()) proactiveScope.launch {
+            delay(15_000)
+            runCatching { syncMemories() }
+        }
         Unit
     }
 
@@ -230,7 +264,7 @@ class IosMobileBackend(
         }
         val mealMinute = minute(mealTime)
         val commuteMinute = minute(commuteTime)
-        if ((mealEnabled || commuteEnabled) && !requestNotificationPermission()) {
+        if (proactiveSettings.enabled && (mealEnabled || commuteEnabled) && !requestNotificationPermission()) {
             error("请先允许 App 发送通知")
         }
         withContext(Dispatchers.Default) {
@@ -247,7 +281,7 @@ class IosMobileBackend(
     }
 
     override suspend fun saveProactiveTask(task: ProactiveTask) {
-        if (task.enabled && !requestNotificationPermission()) error("请先允许 App 发送通知")
+        if (proactiveSettings.enabled && task.enabled && !requestNotificationPermission()) error("请先允许 App 发送通知")
         withContext(Dispatchers.Default) {
             appPutProactiveTask(Json.encodeToString(task.copy(
                 timezoneOffsetMinutes = timezoneOffsetMinutes(),
@@ -256,6 +290,54 @@ class IosMobileBackend(
         }
         loadProactiveRules()
         proactiveWake.trySend(Unit)
+    }
+
+    override suspend fun saveProactiveConfig(settings: ProactiveSettings) {
+        if (settings.enabled && !requestNotificationPermission()) error("请先允许 App 发送通知")
+        proactiveSettings = Json.decodeFromString(appSetProactiveSettings(
+            settings.enabled, settings.discoveryIntervalMinutes).value())
+        proactiveWake.trySend(Unit)
+        discoveryWake.trySend(Unit)
+        if (settings.enabled) {
+            proactiveScope.launch { processPendingProactivePlans() }
+            if (proactiveTasks.any { it.enabled }) requestNotificationPermission()
+        }
+    }
+
+    override suspend fun configureMemorySync(endpoint: String, token: String) {
+        if (endpoint.isBlank()) {
+            syncDefaults.removeObjectForKey("memorySyncEndpoint")
+            syncTokens.delete("memory-sync")
+            memorySyncEndpoint = ""
+            mutableMemorySyncStatus.value = "未配置"
+            return
+        }
+        val credential = token.ifBlank { syncTokens.load("memory-sync") ?: "" }
+        exchangeMemories(endpoint.trim(), credential)
+        syncDefaults.setObject(endpoint.trim(), forKey = "memorySyncEndpoint")
+        if (token.isNotBlank()) syncTokens.save("memory-sync", token)
+        memorySyncEndpoint = endpoint.trim()
+    }
+
+    override suspend fun syncMemories() {
+        val endpoint = memorySyncEndpoint.takeIf(String::isNotBlank) ?: return
+        val token = syncTokens.load("memory-sync") ?: error("未设置记忆同步令牌")
+        exchangeMemories(endpoint, token)
+    }
+
+    private suspend fun exchangeMemories(endpoint: String, token: String) = syncGate.withLock {
+        mutableMemorySyncStatus.value = "同步中…"
+        try {
+            val local = agentGate.withLock { appExportMemorySync().value() }
+            val remote = memorySyncClient.exchange(endpoint, token, local)
+            val merged = agentGate.withLock { appMergeMemorySync(remote).value() }
+            if (Json.parseToJsonElement(merged).jsonObject.getValue("changed").jsonPrimitive.content.toInt() > 0
+                && proactiveSettings.enabled) proactiveScope.launch { discoverProactiveTasks() }
+            mutableMemorySyncStatus.value = "已同步"
+        } catch (error: Exception) {
+            mutableMemorySyncStatus.value = "同步失败：${error.message ?: error}"
+            throw error
+        }
     }
 
     override suspend fun deleteProactiveTask(id: String) {

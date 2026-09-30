@@ -949,6 +949,14 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 
 
 
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -980,6 +988,10 @@ fun uniffi_harness_checksum_func_app_delete_session(
 ): Short
 fun uniffi_harness_checksum_func_app_discover_proactive_tasks(
 ): Short
+fun uniffi_harness_checksum_func_app_export_memory_sync(
+): Short
+fun uniffi_harness_checksum_func_app_get_proactive_settings(
+): Short
 fun uniffi_harness_checksum_func_app_list_proactive_rules(
 ): Short
 fun uniffi_harness_checksum_func_app_list_sessions(
@@ -987,6 +999,8 @@ fun uniffi_harness_checksum_func_app_list_sessions(
 fun uniffi_harness_checksum_func_app_load_session(
 ): Short
 fun uniffi_harness_checksum_func_app_mark_proactive_delivered(
+): Short
+fun uniffi_harness_checksum_func_app_merge_memory_sync(
 ): Short
 fun uniffi_harness_checksum_func_app_next_proactive_wake_at(
 ): Short
@@ -1007,6 +1021,8 @@ fun uniffi_harness_checksum_func_app_resume_session(
 fun uniffi_harness_checksum_func_app_run_due_proactive(
 ): Short
 fun uniffi_harness_checksum_func_app_send_message(
+): Short
+fun uniffi_harness_checksum_func_app_set_proactive_settings(
 ): Short
 fun uniffi_harness_checksum_func_app_start_session(
 ): Short
@@ -1174,6 +1190,10 @@ fun uniffi_harness_fn_func_app_delete_session(`sessionId`: Long,uniffi_out_err: 
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_discover_proactive_tasks(`timezoneOffsetMinutes`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_export_memory_sync(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_get_proactive_settings(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_list_proactive_rules(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_list_sessions(uniffi_out_err: UniffiRustCallStatus,
@@ -1181,6 +1201,8 @@ fun uniffi_harness_fn_func_app_list_sessions(uniffi_out_err: UniffiRustCallStatu
 fun uniffi_harness_fn_func_app_load_session(`sessionId`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_mark_proactive_delivered(`id`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_merge_memory_sync(`recordsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_next_proactive_wake_at(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1201,6 +1223,8 @@ fun uniffi_harness_fn_func_app_resume_session(`sessionId`: Long,uniffi_out_err: 
 fun uniffi_harness_fn_func_app_run_due_proactive(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_send_message(`userInput`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_set_proactive_settings(`enabled`: Byte,`discoveryIntervalMinutes`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_start_session(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1378,6 +1402,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_harness_checksum_func_app_discover_proactive_tasks() != 29125.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_harness_checksum_func_app_export_memory_sync() != 6314.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_get_proactive_settings() != 57660.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_harness_checksum_func_app_list_proactive_rules() != 23183.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1388,6 +1418,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_app_mark_proactive_delivered() != 9824.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_merge_memory_sync() != 46447.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_app_next_proactive_wake_at() != 56321.toShort()) {
@@ -1418,6 +1451,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_app_send_message() != 10298.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_set_proactive_settings() != 53123.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_app_start_session() != 37257.toShort()) {
@@ -3986,6 +4022,24 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
     )
     }
 
+ fun `appExportMemorySync`(): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_export_memory_sync(
+        _status)
+}
+    )
+    }
+
+ fun `appGetProactiveSettings`(): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_get_proactive_settings(
+        _status)
+}
+    )
+    }
+
  fun `appListProactiveRules`(): AppResult {
             return FfiConverterTypeAppResult.lift(
     uniffiRustCall() { _status ->
@@ -4018,6 +4072,15 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_harness_fn_func_app_mark_proactive_delivered(
         FfiConverterLong.lower(`id`),_status)
+}
+    )
+    }
+
+ fun `appMergeMemorySync`(`recordsJson`: kotlin.String): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_merge_memory_sync(
+        FfiConverterString.lower(`recordsJson`),_status)
 }
     )
     }
@@ -4108,6 +4171,15 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_harness_fn_func_app_send_message(
         FfiConverterString.lower(`userInput`),_status)
+}
+    )
+    }
+
+ fun `appSetProactiveSettings`(`enabled`: kotlin.Boolean, `discoveryIntervalMinutes`: kotlin.Long): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_set_proactive_settings(
+        FfiConverterBoolean.lower(`enabled`),FfiConverterLong.lower(`discoveryIntervalMinutes`),_status)
 }
     )
     }

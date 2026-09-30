@@ -11,7 +11,6 @@ use crate::{
 };
 
 const DAY: i64 = 86_400;
-const DISCOVERY_INTERVAL: i64 = 30 * 60;
 static WORKER: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -113,7 +112,7 @@ pub(crate) fn discover_from_memories(
         "available_query_tools":available_tools,
         "now_unix_seconds":now_unix_seconds(),"timezone_offset_minutes":timezone_offset_minutes,
     });
-    let prompt = "后台主动发现：当前没有新用户 query。根据已确认记忆中的稳定时间、习惯和可用查询工具，判断是否值得建立一个未来自动检查任务。即使用户没有提过下雨，也可从通勤时间和天气工具推断出值得在出行前检查天气；但不能猜测地址或声称现在下雨。天气、交通、商家等实时条件只能在任务到点后查询。必须有可引用的记忆原文和明确帮助价值；没有稳定的检查时间、需要的查询工具或已有同义任务时输出 {\"action\":\"none\"}。每次最多创建一个任务，只允许 weekly；不得修改或取消已有任务。动态条件必须写入 instruction，且 required_tools 至少包含对应的 available_query_tools 工具。严格输出与 Turn 提取相同的 JSON 字段：action、evidence、time_evidence、schedule_evidence、condition_evidence、task_id、title、instruction、memory_query、recurrence、event_at、local_minute、weekday_mask、lead_minutes、deadline_lead_minutes、allowed_tools、required_tools。evidence、time_evidence、schedule_evidence 必须是已确认记忆中的连续原文；用户没有表达条件时 condition_evidence 为空。不要调用工具或输出额外内容。";
+    let prompt = "后台主动发现：当前没有新用户 query。根据已确认记忆中的稳定时间、习惯、地点和当前设备可用查询工具的用途及参数，泛化推理未来值得自动检查的具体帮助任务，不限于任何预设场景。只建立未来的检查计划，不声称实时条件已经成立；实时信息只能在任务到点后查询。必须有可引用的记忆原文、明确帮助价值和可核实的检查时间；没有合适工具、依据不足或已有同义任务时输出 {\"action\":\"none\"}。每次最多创建一个任务，只允许 weekly；不得修改或取消已有任务。动态条件必须写入 instruction，且 required_tools 至少包含对应的 available_query_tools 工具。严格输出与 Turn 提取相同的 JSON 字段：action、evidence、time_evidence、schedule_evidence、condition_evidence、task_id、title、instruction、memory_query、recurrence、event_at、local_minute、weekday_mask、lead_minutes、deadline_lead_minutes、allowed_tools、required_tools。evidence、time_evidence、schedule_evidence 必须是已确认记忆中的连续原文；用户没有表达条件时 condition_evidence 为空。不要调用工具或输出额外内容。";
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -194,7 +193,19 @@ fn available_query_tools() -> Vec<serde_json::Value> {
         .1
         .into_iter()
         .filter(|tool| query_tool_name(&tool.name))
-        .map(|tool| serde_json::json!({"name":tool.name,"description":tool.description}))
+        .take(30)
+        .map(|tool| {
+            let schema = if tool.input_schema_json.len() <= 4096 {
+                serde_json::from_str::<serde_json::Value>(&tool.input_schema_json).ok()
+            } else {
+                None
+            };
+            serde_json::json!({
+                "name":tool.name,
+                "description":tool.description.chars().take(300).collect::<String>(),
+                "input_schema":schema,
+            })
+        })
         .collect()
 }
 
@@ -476,9 +487,20 @@ fn has_clock_evidence(value: &str) -> bool {
 }
 
 fn query_tool_name(name: &str) -> bool {
-    ["get_", "list_", "search_", "query_", "fetch_", "estimate_"]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
+    [
+        "get_",
+        "list_",
+        "search_",
+        "query_",
+        "fetch_",
+        "estimate_",
+        "read_",
+        "lookup_",
+        "find_",
+        "forecast_",
+    ]
+    .iter()
+    .any(|prefix| name.starts_with(prefix))
 }
 
 fn stable_title_hash(title: &str) -> String {
@@ -516,6 +538,7 @@ impl MemoryStore {
     }
     fn claim_proactive_discovery(&self) -> Result<bool, MemoryError> {
         let now = now_unix_seconds();
+        let interval_seconds = self.proactive_settings()?.discovery_interval_minutes * 60;
         let connection = self
             .connection
             .lock()
@@ -527,7 +550,7 @@ impl MemoryStore {
         Ok(connection.execute(
             "UPDATE proactive_discovery_state SET last_attempt_at=?1
              WHERE id=1 AND last_attempt_at<=?2",
-            params![now, now - DISCOVERY_INTERVAL],
+            params![now, now - interval_seconds],
         )? == 1)
     }
     fn pending_proactive_turns(&self) -> Result<Vec<i64>, MemoryError> {

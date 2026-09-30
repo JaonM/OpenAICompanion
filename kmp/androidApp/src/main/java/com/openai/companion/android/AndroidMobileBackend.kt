@@ -42,7 +42,9 @@ class AndroidMobileBackend(
 ) : MobileBackend {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val wake = Channel<Unit>(Channel.CONFLATED)
+    private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
     private val gate = Mutex()
+    private val syncGate = Mutex()
     private val bindings = GeneratedHarnessBindingsAdapter()
     private val codec = CompanionConversationCodec()
     private val mcp = AndroidMcpService(context, oauthBrowser, bindings, approve, requestInput)
@@ -50,6 +52,14 @@ class AndroidMobileBackend(
         followRedirects = false
         install(HttpTimeout) { requestTimeoutMillis = 30_000 }
     }
+    private val memorySyncClient = MemorySyncClient(a2aHttp)
+    private val syncPreferences = context.getSharedPreferences("memory_sync", Context.MODE_PRIVATE)
+    private val syncSecrets = AndroidEncryptedPreferences(context)
+    override var memorySyncEndpoint: String = syncPreferences.getString("endpoint", "") ?: ""
+        private set
+    private val mutableMemorySyncStatus = MutableStateFlow("未配置")
+    override val memorySyncStatusUpdates: StateFlow<String> = mutableMemorySyncStatus.asStateFlow()
+    override val memorySyncStatus: String get() = mutableMemorySyncStatus.value
     private val a2a = A2aClient(a2aHttp, AndroidA2aStore(), AndroidA2aTokenStore(context),
         scope, approveA2a)
     private var initialized = false
@@ -63,6 +73,8 @@ class AndroidMobileBackend(
     override var commuteTime: String = "18:30"
         private set
     override var proactiveTasks: List<ProactiveTask> = emptyList()
+        private set
+    override var proactiveSettings: ProactiveSettings = ProactiveSettings()
         private set
     private val mutableProactiveTasks = MutableStateFlow<List<ProactiveTask>>(emptyList())
     override val proactiveTaskUpdates: StateFlow<List<ProactiveTask>> = mutableProactiveTasks.asStateFlow()
@@ -86,6 +98,7 @@ class AndroidMobileBackend(
             override suspend fun delegate(agentId: String, taskText: String) = a2a.delegate(agentId, taskText)
         })
         loadRules()
+        proactiveSettings = Json.decodeFromString(appGetProactiveSettings().value())
         initialized = true
         requestPermissionForEnabledTasks()
         scope.launch {
@@ -106,8 +119,18 @@ class AndroidMobileBackend(
         scope.launch { processPendingTurns() }
         scope.launch {
             while (isActive) {
-                discover()
-                delay(30 * 60 * 1_000L)
+                if (memorySyncEndpoint.isNotBlank()) runCatching { syncMemories() }
+                delay(15 * 60 * 1_000L)
+            }
+        }
+        scope.launch {
+            while (isActive) {
+                if (proactiveSettings.enabled) discover()
+                if (proactiveSettings.enabled) {
+                    withTimeoutOrNull(proactiveSettings.discoveryIntervalMinutes * 60_000L) {
+                        discoveryWake.receive()
+                    }
+                } else discoveryWake.receive()
             }
         }
     }
@@ -138,6 +161,10 @@ class AndroidMobileBackend(
             finally { bindings.unregisterAgentEventSink() }
         }
         scope.launch { processPendingTurns() }
+        if (memorySyncEndpoint.isNotBlank()) scope.launch {
+            delay(15_000)
+            runCatching { syncMemories() }
+        }
         Unit
     }
     override fun cancel() {
@@ -148,7 +175,53 @@ class AndroidMobileBackend(
         if (initialized) scope.launch { requestPermissionForEnabledTasks() }
     }
     private suspend fun requestPermissionForEnabledTasks() {
-        if (proactiveTasks.any { it.enabled }) notifications.requestPermission()
+        if (proactiveSettings.enabled && proactiveTasks.any { it.enabled }) notifications.requestPermission()
+    }
+    override suspend fun saveProactiveConfig(settings: ProactiveSettings) {
+        if (settings.enabled && !notifications.requestPermission()) error("请先允许 App 发送通知")
+        proactiveSettings = Json.decodeFromString(appSetProactiveSettings(
+            settings.enabled, settings.discoveryIntervalMinutes).value())
+        wake.trySend(Unit)
+        discoveryWake.trySend(Unit)
+        if (settings.enabled) {
+            scope.launch { processPendingTurns() }
+            requestPermissionForEnabledTasks()
+        }
+    }
+    override suspend fun configureMemorySync(endpoint: String, token: String) {
+        if (endpoint.isBlank()) {
+            syncPreferences.edit().remove("endpoint").apply()
+            syncSecrets.remove("memory-sync-token")
+            memorySyncEndpoint = ""
+            mutableMemorySyncStatus.value = "未配置"
+            return
+        }
+        val credential = token.ifBlank { syncSecrets.read("memory-sync-token") ?: "" }
+        exchangeMemories(endpoint.trim(), credential)
+        check(syncPreferences.edit().putString("endpoint", endpoint.trim()).commit())
+        if (token.isNotBlank()) syncSecrets.write("memory-sync-token", token)
+        memorySyncEndpoint = endpoint.trim()
+    }
+
+    override suspend fun syncMemories() {
+        val endpoint = memorySyncEndpoint.takeIf(String::isNotBlank) ?: return
+        val token = syncSecrets.read("memory-sync-token") ?: error("未设置记忆同步令牌")
+        exchangeMemories(endpoint, token)
+    }
+
+    private suspend fun exchangeMemories(endpoint: String, token: String) = syncGate.withLock {
+        mutableMemorySyncStatus.value = "同步中…"
+        try {
+            val local = gate.withLock { appExportMemorySync().value() }
+            val remote = memorySyncClient.exchange(endpoint, token, local)
+            val merged = gate.withLock { appMergeMemorySync(remote).value() }
+            if (Json.parseToJsonElement(merged).jsonObject.getValue("changed").jsonPrimitive.content.toInt() > 0
+                && proactiveSettings.enabled) scope.launch { discover() }
+            mutableMemorySyncStatus.value = "已同步"
+        } catch (error: Exception) {
+            mutableMemorySyncStatus.value = "同步失败：${error.message ?: error}"
+            throw error
+        }
     }
     override suspend fun configureMcp(endpoint: String) {
         mcp.connect(endpoint)
@@ -167,7 +240,7 @@ class AndroidMobileBackend(
 
     override suspend fun saveProactiveSettings(mealEnabled: Boolean, mealTime: String,
         commuteEnabled: Boolean, commuteTime: String) {
-        if ((mealEnabled || commuteEnabled) && !notifications.requestPermission()) error("请先允许 App 发送通知")
+        if (proactiveSettings.enabled && (mealEnabled || commuteEnabled) && !notifications.requestPermission()) error("请先允许 App 发送通知")
         withContext(Dispatchers.IO) {
             val offset = timezoneOffset()
             appPutProactiveRule("meal", mealEnabled, minute(mealTime), 127, 70, offset).value()
@@ -176,7 +249,7 @@ class AndroidMobileBackend(
         loadRules(); wake.trySend(Unit)
     }
     override suspend fun saveProactiveTask(task: ProactiveTask) {
-        if (task.enabled && !notifications.requestPermission()) error("请先允许 App 发送通知")
+        if (proactiveSettings.enabled && task.enabled && !notifications.requestPermission()) error("请先允许 App 发送通知")
         withContext(Dispatchers.IO) {
             appPutProactiveTask(Json.encodeToString(task.copy(timezoneOffsetMinutes = timezoneOffset(),
                 nextRunAt = null, nextEventAt = null))).value()
