@@ -93,6 +93,7 @@ iOS 的 KMP 核心代码可在 `kmp/` 下用 `./gradlew -PkmpJvmToolchain=21 :co
 - [macOS MVP](docs/macos_mvp.md)
 - [iOS MVP](docs/ios_mvp.md)
 - [Android MVP](docs/android_mvp.md)
+- [跨端记忆同步](docs/memory_sync.md)
 - [设备日历工具](docs/device_calendar_tool.md)
 - [待办与已知限制](docs/todo.md)
 
