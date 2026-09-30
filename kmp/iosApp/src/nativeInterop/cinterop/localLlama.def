@@ -1,0 +1,2 @@
+headers = LocalLlamaCBridge.h
+package = com.openai.companion.ios.llama

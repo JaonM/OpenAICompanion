@@ -14,14 +14,40 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>CFBundleDisplayName</key>
     <string>OpenAICompanion</string>
-    <key>LSRequiresIPhoneOS</key>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>连接同一局域网内的模型服务，以在设备上使用 OpenAICompanion。</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
         <true/>
+    </dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.openai.companion.ios.oauth</string>
+            <key>CFBundleURLSchemes</key>
+            <array><string>openai-companion</string></array>
+        </dict>
+    </array>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+        <key>UISceneConfigurations</key>
+        <dict>
+            <key>UIWindowSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneClassName</key>
+                    <string>UIWindowScene</string>
+                    <key>UISceneDelegateClassName</key>
+                    <string>OCSceneDelegate</string>
+                </dict>
+            </array>
+        </dict>
     </dict>
     <key>UILaunchScreen</key>
     <dict/>
