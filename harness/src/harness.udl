@@ -2,6 +2,8 @@ namespace harness {
     void register_tool_provider(ToolProvider provider);
     void update_mcp_tools(sequence<McpTool> tools);
     void unregister_tool_provider();
+    void register_a2a_provider(A2aProvider provider);
+    void unregister_a2a_provider();
     void register_model_serve_callback(ModelServeCallback provider);
     void unregister_model_serve_callback();
     void register_agent_event_sink(AgentEventSink sink);
@@ -16,6 +18,23 @@ namespace harness {
     AppResult app_list_sessions();
     AppResult app_load_session(i64 session_id);
     AppResult app_delete_session(i64 session_id);
+    AppResult app_put_proactive_rule(string scenario, boolean enabled, i64 local_minute,
+        i64 weekday_mask, i64 lead_minutes, i64 timezone_offset_minutes);
+    AppResult app_put_proactive_task(string task_json);
+    AppResult app_delete_proactive_task(string id);
+    AppResult app_process_pending_proactive_plans(i64 timezone_offset_minutes);
+    AppResult app_discover_proactive_tasks(i64 timezone_offset_minutes);
+    AppResult app_list_proactive_rules();
+    AppResult app_next_proactive_wake_at();
+    AppResult app_rebase_proactive_rules(i64 timezone_offset_minutes);
+    AppResult app_run_due_proactive();
+    AppResult app_ready_proactive_notifications();
+    AppResult app_mark_proactive_delivered(i64 id);
+    AppResult app_a2a_put_agent(string agent_json);
+    AppResult app_a2a_delete_agent(string agent_id);
+    AppResult app_a2a_list_agents();
+    AppResult app_a2a_put_task(string task_json);
+    AppResult app_a2a_list_tasks();
 };
 
 [Error]
@@ -38,8 +57,11 @@ enum ModelServeError {
 };
 
 typedef record McpTool;
+typedef record ToolListReply;
+typedef record ToolCallReply;
 typedef record AppResult;
 typedef trait_with_foreign ToolProvider;
+typedef trait_with_foreign A2aProvider;
 typedef trait_with_foreign ModelServeCallback;
 typedef trait_with_foreign ModelStreamCallback;
 typedef trait_with_foreign AgentEventSink;

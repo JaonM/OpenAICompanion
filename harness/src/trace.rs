@@ -60,6 +60,13 @@ pub struct TraceTurn {
     pub messages: Vec<Message>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MediumSummary {
+    pub first_turn_id: i64,
+    pub last_turn_id: i64,
+    pub content: String,
+}
+
 pub(crate) fn create_schema(connection: &Connection) -> Result<(), MemoryError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS trace_sessions (
@@ -85,12 +92,103 @@ pub(crate) fn create_schema(connection: &Connection) -> Result<(), MemoryError> 
             sequence INTEGER NOT NULL,
             message_json TEXT NOT NULL,
             PRIMARY KEY (turn_id, sequence)
+        );
+        CREATE TABLE IF NOT EXISTS medium_summary_blocks (
+            session_id INTEGER NOT NULL REFERENCES trace_sessions(id) ON DELETE CASCADE,
+            first_turn_id INTEGER NOT NULL REFERENCES trace_turns(id) ON DELETE CASCADE,
+            last_turn_id INTEGER NOT NULL REFERENCES trace_turns(id) ON DELETE CASCADE,
+            content TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (session_id, last_turn_id),
+            CHECK (first_turn_id <= last_turn_id)
         );",
     )?;
     Ok(())
 }
 
 impl MemoryStore {
+    /// Migrates older multi-session stores into one continuous conversation.
+    pub fn ensure_single_trace_session(&self) -> Result<TraceSession, MemoryError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        let transaction = connection.transaction()?;
+        let id: Option<i64> =
+            transaction.query_row("SELECT MIN(id) FROM trace_sessions", [], |row| row.get(0))?;
+        let id = match id {
+            Some(id) => {
+                transaction.execute(
+                    "UPDATE trace_turns SET session_id = ?1 WHERE session_id != ?1",
+                    [id],
+                )?;
+                transaction.execute("DELETE FROM trace_sessions WHERE id != ?1", [id])?;
+                id
+            }
+            None => {
+                transaction.execute(
+                    "INSERT INTO trace_sessions (created_at) VALUES (?1)",
+                    [now_unix_seconds()],
+                )?;
+                transaction.last_insert_rowid()
+            }
+        };
+        let created_at = transaction.query_row(
+            "SELECT created_at FROM trace_sessions WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        transaction.commit()?;
+        Ok(TraceSession { id, created_at })
+    }
+
+    pub(crate) fn medium_summaries(
+        &self,
+        session_id: i64,
+    ) -> Result<Vec<MediumSummary>, MemoryError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        let mut statement = connection.prepare(
+            "SELECT first_turn_id, last_turn_id, content FROM medium_summary_blocks WHERE session_id = ?1 ORDER BY last_turn_id",
+        )?;
+        let rows = statement.query_map([session_id], |row| {
+            Ok(MediumSummary {
+                first_turn_id: row.get(0)?,
+                last_turn_id: row.get(1)?,
+                content: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// A checkpoint advances only after the model output has been validated.
+    pub(crate) fn save_medium_summary(
+        &self,
+        session_id: i64,
+        first_turn_id: i64,
+        last_turn_id: i64,
+        content: &str,
+    ) -> Result<(), MemoryError> {
+        if content.trim().is_empty() || content.chars().count() > 1_200 {
+            return Err(MemoryError::InvalidData(
+                "summary must contain 1..1200 characters".into(),
+            ));
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        connection.execute(
+            "INSERT INTO medium_summary_blocks (session_id, first_turn_id, last_turn_id, content, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(session_id, last_turn_id) DO NOTHING",
+            params![session_id, first_turn_id, last_turn_id, content.trim(), now_unix_seconds()],
+        )?;
+        Ok(())
+    }
+
     pub fn create_trace_session(&self) -> Result<TraceSession, MemoryError> {
         let created_at = now_unix_seconds();
         let connection = self
@@ -254,6 +352,88 @@ impl MemoryStore {
         ids.into_iter().map(|id| self.get_trace_turn(id)).collect()
     }
 
+    pub(crate) fn recent_completed_turns(
+        &self,
+        session_id: i64,
+        after_id: i64,
+        limit: usize,
+    ) -> Result<Vec<TraceTurn>, MemoryError> {
+        let ids = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| MemoryError::LockPoisoned)?;
+            let mut statement = connection.prepare(
+                "SELECT id FROM trace_turns WHERE session_id = ?1 AND id > ?2
+                 AND status IN ('completed', 'max_steps') ORDER BY id DESC LIMIT ?3",
+            )?;
+            statement
+                .query_map(params![session_id, after_id, limit as i64], |row| {
+                    row.get::<_, i64>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        ids.into_iter()
+            .rev()
+            .map(|id| self.get_trace_turn(id))
+            .collect()
+    }
+
+    pub(crate) fn summary_target(
+        &self,
+        session_id: i64,
+        recent_limit: usize,
+        block_size: usize,
+    ) -> Result<Option<i64>, MemoryError> {
+        if block_size == 0 {
+            return Err(MemoryError::InvalidData(
+                "summary block size must be positive".into(),
+            ));
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        let completed_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM trace_turns WHERE session_id = ?1 AND status IN ('completed', 'max_steps')",
+            [session_id], |row| row.get(0),
+        )?;
+        let older_count = (completed_count as usize).saturating_sub(recent_limit);
+        if older_count == 0 {
+            return Ok(None);
+        }
+        let target_position = older_count.div_ceil(block_size) * block_size - 1;
+        connection.query_row(
+            "SELECT id FROM trace_turns WHERE session_id = ?1 AND status IN ('completed', 'max_steps')
+             ORDER BY id ASC LIMIT 1 OFFSET ?2",
+            params![session_id, target_position as i64], |row| row.get(0),
+        ).optional().map_err(Into::into)
+    }
+
+    pub(crate) fn completed_turns_between(
+        &self,
+        session_id: i64,
+        after_id: i64,
+        through_id: i64,
+    ) -> Result<Vec<TraceTurn>, MemoryError> {
+        let ids = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| MemoryError::LockPoisoned)?;
+            let mut statement = connection.prepare(
+                "SELECT id FROM trace_turns WHERE session_id = ?1 AND id > ?2 AND id <= ?3
+                 AND status IN ('completed', 'max_steps') ORDER BY id",
+            )?;
+            statement
+                .query_map(params![session_id, after_id, through_id], |row| {
+                    row.get::<_, i64>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        ids.into_iter().map(|id| self.get_trace_turn(id)).collect()
+    }
+
     pub fn get_trace_turn(&self, id: i64) -> Result<TraceTurn, MemoryError> {
         let connection = self
             .connection
@@ -374,6 +554,9 @@ mod tests {
                 None,
             )
             .unwrap();
+        store
+            .save_medium_summary(session.id, turn_id, turn_id, "日程已查询")
+            .unwrap();
         drop(store);
 
         let reopened = MemoryStore::open(&path).unwrap();
@@ -386,6 +569,10 @@ mod tests {
         assert_eq!(turn.reasoning.as_deref(), Some("reason"));
         assert_eq!(turn.output.as_deref(), Some("没有日程"));
         assert_eq!(turn.steps, Some(2));
+        assert_eq!(
+            reopened.medium_summaries(session.id).unwrap()[0].content,
+            "日程已查询"
+        );
         assert_eq!(turn.messages.len(), 4);
         assert!(
             matches!(&turn.messages[1], Message::Assistant { tool_calls, .. }
@@ -425,5 +612,60 @@ mod tests {
                 content: "请求二".into()
             }]
         );
+    }
+
+    #[test]
+    fn existing_sessions_merge_into_one_continuous_trace() {
+        let store = MemoryStore::in_memory().unwrap();
+        let first = store.create_trace_session().unwrap();
+        let second = store.create_trace_session().unwrap();
+        let old_turn = store.begin_trace_turn(first.id, "以前").unwrap();
+        let new_turn = store.begin_trace_turn(second.id, "现在").unwrap();
+        let canonical = store.ensure_single_trace_session().unwrap();
+        assert_eq!(canonical.id, first.id);
+        assert_eq!(store.list_trace_sessions().unwrap().len(), 1);
+        assert_eq!(
+            store.get_trace_turn(old_turn).unwrap().session_id,
+            canonical.id
+        );
+        assert_eq!(
+            store.get_trace_turn(new_turn).unwrap().session_id,
+            canonical.id
+        );
+        assert_eq!(
+            store.ensure_single_trace_session().unwrap().id,
+            canonical.id
+        );
+    }
+
+    #[test]
+    fn raw_window_and_summary_target_ignore_failed_turns() {
+        let store = MemoryStore::in_memory().unwrap();
+        let session = store.create_trace_session().unwrap();
+        let mut completed = Vec::new();
+        for index in 0..10 {
+            let id = store
+                .begin_trace_turn(session.id, &format!("{index}"))
+                .unwrap();
+            store
+                .finish_trace_turn(id, TraceStatus::Completed, None, Some("ok"), Some(1), None)
+                .unwrap();
+            completed.push(id);
+            if index == 3 {
+                let failed = store.begin_trace_turn(session.id, "failed").unwrap();
+                store
+                    .finish_trace_turn(failed, TraceStatus::Failed, None, None, None, Some("error"))
+                    .unwrap();
+            }
+        }
+        assert_eq!(
+            store.summary_target(session.id, 8, 4).unwrap(),
+            Some(completed[3])
+        );
+        let recent = store
+            .recent_completed_turns(session.id, completed[3], 8)
+            .unwrap();
+        assert_eq!(recent.first().unwrap().id, completed[4]);
+        assert_eq!(recent.last().unwrap().id, completed[9]);
     }
 }

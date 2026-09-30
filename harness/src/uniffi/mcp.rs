@@ -29,15 +29,63 @@ pub struct McpTool {
     pub input_schema_json: String,
 }
 
+#[derive(Debug, Clone, ::uniffi::Record)]
+pub struct ToolListReply {
+    pub tools: Vec<McpTool>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, ::uniffi::Record)]
+pub struct ToolCallReply {
+    pub output_json: String,
+    pub is_error: bool,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}
+
+impl ToolExecutionError {
+    fn from_callback_code(code: &str) -> Self {
+        match code {
+            "TIMEOUT" => Self::Timeout,
+            "PERMISSION_DENIED" => Self::PermissionDenied,
+            "NETWORK_UNREACHABLE" => Self::NetworkUnreachable,
+            "INVALID_ARGUMENTS" => Self::InvalidArguments,
+            "RESOURCE_NOT_FOUND" => Self::ResourceNotFound,
+            "SERVER_INTERNAL_ERROR" => Self::ServerInternalError,
+            "CANCELLED" => Self::Cancelled,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl ToolListReply {
+    pub fn into_result(self) -> Result<Vec<McpTool>, ToolExecutionError> {
+        match self.error_code {
+            Some(code) => Err(ToolExecutionError::from_callback_code(&code)),
+            None => Ok(self.tools),
+        }
+    }
+}
+
+impl ToolCallReply {
+    pub fn into_result(self) -> Result<(String, bool), (ToolExecutionError, String)> {
+        match self.error_code {
+            Some(code) => Err((
+                ToolExecutionError::from_callback_code(&code),
+                self.error_message
+                    .unwrap_or_else(|| "MCP callback failed".into()),
+            )),
+            None => Ok((self.output_json, self.is_error)),
+        }
+    }
+}
+
 #[::uniffi::export(with_foreign)]
 #[::async_trait::async_trait]
 pub trait ToolProvider: Send + Sync {
-    async fn get_tools(&self) -> Result<Vec<McpTool>, ToolExecutionError>;
-    async fn call_tool(
-        &self,
-        name: String,
-        arguments_json: String,
-    ) -> Result<String, ToolExecutionError>;
+    async fn get_tools(&self) -> ToolListReply;
+    async fn call_tool(&self, name: String, arguments_json: String) -> ToolCallReply;
 }
 
 static TOOL_PROVIDER: OnceLock<Mutex<Option<Arc<dyn ToolProvider>>>> = OnceLock::new();
@@ -88,6 +136,7 @@ pub async fn register_all_mcp_tools(
     let tools: Vec<McpTool> = provider
         .get_tools()
         .await
+        .into_result()
         .map_err(AgentError::ToolProvider)?;
     let count = tools.len();
     registry.replace_mcp_tools(provider, tools)?;
@@ -104,4 +153,40 @@ pub fn unregister_tool_provider_from_registry(
 ) -> Result<(), AgentError> {
     clear_tool_provider();
     registry.clear_mcp_tools()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ToolCallReply, ToolExecutionError, ToolListReply};
+
+    #[test]
+    fn foreign_callback_replies_preserve_tool_error_classification() {
+        let denied = ToolCallReply {
+            output_json: String::new(),
+            is_error: false,
+            error_code: Some("PERMISSION_DENIED".into()),
+            error_message: Some("user declined".into()),
+        };
+        assert_eq!(
+            denied.into_result(),
+            Err((ToolExecutionError::PermissionDenied, "user declined".into()))
+        );
+        let reported = ToolCallReply {
+            output_json: r#"{"content":[{"type":"text","text":"network timeout"}],"isError":true}"#
+                .into(),
+            is_error: true,
+            error_code: None,
+            error_message: None,
+        };
+        assert_eq!(reported.into_result().unwrap().1, true);
+        let unavailable = ToolListReply {
+            tools: Vec::new(),
+            error_code: Some("NETWORK_UNREACHABLE".into()),
+            error_message: None,
+        };
+        assert_eq!(
+            unavailable.into_result(),
+            Err(ToolExecutionError::NetworkUnreachable)
+        );
+    }
 }

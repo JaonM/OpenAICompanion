@@ -1,45 +1,21 @@
-# Memory（首版）
+# 单一会话的三层记忆
 
-Harness 目前有三层记忆：
+个人分身助理只保留一条持续增长的 SQLite 会话轨迹。首次打开数据库时创建它；旧版本留下的多条轨迹按原有 Turn ID 顺序合并。界面不再提供新建、切换或删除会话。
 
-| 层级 | 存储位置 | 生命周期 | 写入方式 |
-| --- | --- | --- | --- |
-| 短期 | `Session.turns`；原始轨迹也写入本地 SQLite | 当前 Session；每轮只向模型发送最近 8 轮 | `Session::run_turn` 自动维护 |
-| 中期 | App 指定路径的 SQLite | 跨 Session；默认 30 天，可指定到期时间 | App 明确调用 `remember`，例如保存任务摘要 |
-| 长期 | 同一 SQLite | 持久保存，直到更新或删除 | App 明确调用 `remember` 或 `promote` |
+每轮推理前，Harness 从 trace 读取**最多 8 轮**已成功完成的原始消息作为短期上下文。原始消息放入模型请求的 `messages` 历史，当前用户输入再追加为一条 `user` 消息；它们不写入 system prompt。
 
-## Rust 接入
+中期记忆以**连续 4 个成功 Turn 为一个摘要段**，由后台端侧模型一次推理生成一条摘要。每条记录保存覆盖区间的首尾 Turn ID、摘要正文和更新时间。每轮从中期记录读取两部分并加入 system prompt：紧挨原始窗口之前的最近一个 4 轮摘要段，以及从更早摘要段中按本轮用户输入做本地词面匹配、得分最高的一段。两部分互不重复；无正向匹配时省略第二部分。
 
-```rust
-use harness::{Configuration, MemoryStore, MemoryTier, NewMemory, Session};
+长期记忆读取 `MemoryTier::Long` 的有效记录，并作为用户画像数据加入 system prompt。每个返回结果的 Turn 后（包括达到最大步骤），后台线程使用已注册的模型从**用户输入**中提取最多 3 条候选记忆点。短期内容仍由原始消息窗口承担，不单独写入记忆表；有期限的计划和进行中的事项写入 `MemoryTier::Medium`（默认 30 天失效），明确且持续有效的事实、偏好和约束写入 `MemoryTier::Long`。模型输出必须是结构化 JSON，且每条候选须附有用户输入中的连续原文作为证据；不采纳缺少证据的候选。失败和取消的 Turn 不触发提取。
 
-# async fn example() -> Result<(), Box<dyn std::error::Error>> {
-// App 负责选择自己的私有数据目录，并在此之前注册模型回调。
-let memory = MemoryStore::open("/app-private-data/memory.sqlite")?;
-let mut session = Session::initialize_with_memory(
-    Configuration::default(),
-    "",
-    memory.clone(),
-).await?;
+提取进度存于 `memory_extracted_turns`，来源 Turn、类型与证据存于 `memory_point_sources`。写入与进度更新在同一事务内完成；下个成功 Turn 会补处理未完成的提取任务。相同内容不会重复写入；修改已有主题须引用原记忆 ID。用户明确完成或取消的中期事项可归档。中期记忆点按本轮输入做本地词面匹配后加入 prompt；原有 4 轮摘要仍单独负责保存对话脉络。显式 `remember` 接口继续可用。
 
-session.remember(NewMemory {
-    tier: MemoryTier::Medium,
-    topic_id: Some("travel-plan".into()),
-    content: "北京旅行的酒店尚未确认".into(),
-    source: "user:turn-123".into(),
-    expires_at: None,
-})?;
-let result = session.run_turn("继续讨论北京旅行").await?;
+## 4 轮检查点
 
-// 下一个 Session 用同一路径重新打开 MemoryStore，仍能检索这条中期记忆。
-memory.archive_topic("travel-plan")?; // 事项完成时退出主动检索
-let _ = result;
-# Ok(())
-# }
-```
+当旧 Turn 开始移出 8 轮原始窗口时，Harness 把最早的完整 4 轮交给后台线程，调用已注册的端侧模型生成一条摘要。压缩后原始窗口可能暂时只有 5～7 轮，随后增长到 8 轮；因此原始消息与摘要不会重叠，也不会遗漏。失败、取消及异常中断的 Turn 保留在轨迹中供查看，不参与窗口或摘要。
 
-`MemoryStore` 还提供 `update(id, content, source)`、`forget(id)`、`promote(id, source)`、`list_active()` 和 `search(query, limit)`。`forget` 物理删除；归档只让已完成的中期事项退出检索。每条记忆保留来源、创建时间和更新时间。检索是本地词面匹配，不调用模型或网络；每轮最多注入 8 条、合计约 4000 字符。
+例如第 9 轮完成后，后台摘要覆盖第 1～4 轮；下一轮推理使用该摘要与第 5～9 轮原始消息。第 13 轮完成后，再把第 5～8 轮压成第二条摘要。摘要请求不会产生用户可见的流事件，推理期间不持有数据库锁。
 
-本版不会自动从普通对话或原始工具结果中写入长期记忆。摘要提取、用户确认、去重、冲突处理，以及 SQLite 文件加密均需在宿主 App 接入时补齐。SQLite 文件目前未由 Harness 加密，应放在 App 私有目录；包含敏感个人信息的正式产品需要加密存储。当前 UniFFI 接口还没有暴露 `Session` 的创建和运行，所以这套入口目前供 Rust 宿主使用，KMP App 接入仍需补充会话桥接。
+摘要存于 SQLite 的 `medium_summary_blocks` 表，以 `(session_id, last_turn_id)` 为唯一键，包含 `first_turn_id`、`last_turn_id`、`content` 和 `updated_at`。下轮推理若发现所需检查点尚未写入，会等待或补做后台任务；进程退出后的未完成任务也由下一轮补做。先前逐轮摘要的旧表不会用于新 prompt，内容可由保留的原始 trace 重新生成。
 
-会话轨迹的查询、恢复与删除接口见[本地会话轨迹](session_trace.md)。
+中期摘要和长期画像每轮重新读取，内容经 JSON 字符串转义并受长度限制。它们是可能过时的用户数据，不能覆盖固定系统规则。会话轨迹及状态见[本地会话轨迹](session_trace.md)。

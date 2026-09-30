@@ -17,7 +17,7 @@ pub enum MemoryTier {
 }
 
 impl MemoryTier {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Medium => "medium",
             Self::Long => "long",
@@ -104,7 +104,7 @@ impl MemoryStore {
     }
 
     fn from_connection(connection: Connection) -> Result<Self, MemoryError> {
-        connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+        connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY,
@@ -121,6 +121,20 @@ impl MemoryStore {
                 ON memories(tier, expires_at);",
         )?;
         crate::trace::create_schema(&connection)?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory_point_sources (
+                memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+                turn_id INTEGER NOT NULL REFERENCES trace_turns(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                evidence TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS memory_extracted_turns (
+                turn_id INTEGER PRIMARY KEY REFERENCES trace_turns(id) ON DELETE CASCADE,
+                processed_at INTEGER NOT NULL
+            );",
+        )?;
+        crate::a2a::create_schema(&connection)?;
+        crate::proactive::create_schema(&connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })

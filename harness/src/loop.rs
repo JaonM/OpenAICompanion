@@ -59,7 +59,63 @@ where
     E: ToolExecutor + Sync,
     O: FnMut(&Message) -> Result<(), AgentError>,
 {
-    let cancellation = crate::cancellation::begin();
+    run_with_history_observed_mode(
+        model,
+        executor,
+        config,
+        system_prompt,
+        previous_history,
+        user_input,
+        &mut observe,
+        true,
+    )
+    .await
+}
+
+/// Runs an independent background task without user-visible stream events or
+/// replacing the foreground loop's cancellation token.
+pub(crate) async fn run_silent<E>(
+    model: &ModelServeWrapper,
+    executor: &mut E,
+    config: &Configuration,
+    system_prompt: &str,
+    user_input: impl Into<String>,
+) -> Result<AgentRun, AgentError>
+where
+    E: ToolExecutor + Sync,
+{
+    run_with_history_observed_mode(
+        model,
+        executor,
+        config,
+        system_prompt,
+        &[],
+        user_input,
+        &mut |_| Ok(()),
+        false,
+    )
+    .await
+}
+
+async fn run_with_history_observed_mode<E, O>(
+    model: &ModelServeWrapper,
+    executor: &mut E,
+    config: &Configuration,
+    system_prompt: &str,
+    previous_history: &[Message],
+    user_input: impl Into<String>,
+    observe: &mut O,
+    emit_events: bool,
+) -> Result<AgentRun, AgentError>
+where
+    E: ToolExecutor + Sync,
+    O: FnMut(&Message) -> Result<(), AgentError>,
+{
+    let cancellation = if emit_events {
+        crate::cancellation::begin()
+    } else {
+        CancellationToken::new()
+    };
     if config.max_step == 0 {
         return Err(AgentError::InvalidConfig(
             "max_steps must be greater than zero",
@@ -102,12 +158,15 @@ where
         cancelable(&cancellation, executor.sync_if_changed()).await??;
         let response = cancelable(
             &cancellation,
-            model.complete(ModelRequest {
-                system_prompt: system_prompt.to_owned(),
-                user_input: user_input.clone(),
-                history: history.clone(),
-                tools: executor.list_tools()?,
-            }),
+            model.complete_with_events(
+                ModelRequest {
+                    system_prompt: system_prompt.to_owned(),
+                    user_input: user_input.clone(),
+                    history: history.clone(),
+                    tools: executor.list_tools()?,
+                },
+                emit_events,
+            ),
         )
         .await??;
         if !response.reasoning.is_empty() {
@@ -123,7 +182,9 @@ where
                 tool_calls: Vec::new(),
             });
             observe(history.last().expect("assistant message just appended"))?;
-            crate::serving::notify_agent_completed(response.content.clone());
+            if emit_events {
+                crate::serving::notify_agent_completed(response.content.clone());
+            }
             return Ok(AgentRun {
                 reasoning,
                 output: response.content,
@@ -188,7 +249,11 @@ async fn execute_tools<E: ToolExecutor + Sync>(
                 executor,
                 calls[next_to_start].clone(),
                 next_to_start,
-                config.tool_execute_timeout,
+                if calls[next_to_start].name == "delegate_to_agent" {
+                    std::time::Duration::from_secs(180)
+                } else {
+                    config.tool_execute_timeout
+                },
                 cancellation.clone(),
             );
             next_to_start += 1;
@@ -202,7 +267,9 @@ async fn execute_tools<E: ToolExecutor + Sync>(
         let (index, result) =
             joined.map_err(|error| AgentError::Model(format!("tool task failed: {error}")))?;
         if let Err(error) = &result {
-            if attempts[index] < config.max_tool_retries && error.is_retryable() {
+            if attempts[index] < config.max_tool_retries
+                && executor.should_retry(&calls[index], error)
+            {
                 let multiplier = 1u32.checked_shl(attempts[index] as u32).unwrap_or(u32::MAX);
                 attempts[index] += 1;
                 cancelable(
@@ -215,7 +282,11 @@ async fn execute_tools<E: ToolExecutor + Sync>(
                     executor,
                     calls[index].clone(),
                     index,
-                    config.tool_execute_timeout,
+                    if calls[index].name == "delegate_to_agent" {
+                        std::time::Duration::from_secs(180)
+                    } else {
+                        config.tool_execute_timeout
+                    },
                     cancellation.clone(),
                 );
                 continue;
@@ -283,7 +354,41 @@ fn validate_response(response: &ModelResponse) -> Result<(), AgentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SessionContext, Tool, ToolCall, ToolDefinition, ToolOutput};
+    use crate::{
+        McpTool, SessionContext, Tool, ToolCall, ToolCallReply, ToolDefinition, ToolListReply,
+        ToolOutput, ToolProvider,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FailingMcpProvider {
+        network_calls: std::sync::Arc<AtomicUsize>,
+        timeout_calls: std::sync::Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for FailingMcpProvider {
+        async fn get_tools(&self) -> ToolListReply {
+            ToolListReply {
+                tools: Vec::new(),
+                error_code: None,
+                error_message: None,
+            }
+        }
+
+        async fn call_tool(&self, name: String, _: String) -> ToolCallReply {
+            if name == "timeout" {
+                self.timeout_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::pending().await
+            }
+            self.network_calls.fetch_add(1, Ordering::SeqCst);
+            ToolCallReply {
+                output_json: String::new(),
+                is_error: false,
+                error_code: Some("NETWORK_UNREACHABLE".into()),
+                error_message: Some("response was lost".into()),
+            }
+        }
+    }
 
     struct ScriptedModel {
         responses: std::sync::Mutex<Vec<ModelResponse>>,
@@ -483,6 +588,50 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.output, "done");
+    }
+
+    #[test]
+    fn remote_mcp_failures_do_not_repeat_possibly_completed_calls() {
+        let network_calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let timeout_calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let provider: std::sync::Arc<dyn ToolProvider> = std::sync::Arc::new(FailingMcpProvider {
+            network_calls: std::sync::Arc::clone(&network_calls),
+            timeout_calls: std::sync::Arc::clone(&timeout_calls),
+        });
+        let mut executor = crate::ToolRegistry::new(8).unwrap();
+        executor
+            .replace_mcp_tools(
+                provider,
+                ["network", "timeout"]
+                    .into_iter()
+                    .map(|name| McpTool {
+                        name: name.into(),
+                        description: String::new(),
+                        input_schema_json: "{}".into(),
+                    })
+                    .collect(),
+            )
+            .unwrap();
+        let config = Configuration {
+            max_tool_retries: 3,
+            tool_execute_timeout: std::time::Duration::from_millis(5),
+            ..Configuration::default()
+        };
+        let calls = [
+            ToolCall::new("1", "network", "{}"),
+            ToolCall::new("2", "timeout", "{}"),
+        ];
+        let results = runtime()
+            .block_on(execute_tools(
+                &executor,
+                &calls,
+                &config,
+                &CancellationToken::new(),
+            ))
+            .unwrap();
+        assert!(results.iter().all(Result::is_err));
+        assert_eq!(network_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(timeout_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]

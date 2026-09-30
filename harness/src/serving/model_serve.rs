@@ -55,6 +55,7 @@ pub trait AgentEventSink: Send + Sync {
 }
 
 /// Harness-side adapter that translates internal state to Chat Completions JSON.
+#[derive(Clone)]
 pub struct ModelServeWrapper {
     provider: Arc<dyn ModelServeCallback>,
 }
@@ -74,12 +75,40 @@ impl ModelServeWrapper {
     }
 
     pub async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, AgentError> {
+        self.complete_internal(request, true).await
+    }
+
+    /// Background memory work must not emit user-visible stream events.
+    pub async fn complete_silent(
+        &self,
+        request: ModelRequest,
+    ) -> Result<ModelResponse, AgentError> {
+        self.complete_internal(request, false).await
+    }
+
+    pub(crate) async fn complete_with_events(
+        &self,
+        request: ModelRequest,
+        emit_events: bool,
+    ) -> Result<ModelResponse, AgentError> {
+        self.complete_internal(request, emit_events).await
+    }
+
+    async fn complete_internal(
+        &self,
+        request: ModelRequest,
+        emit_events: bool,
+    ) -> Result<ModelResponse, AgentError> {
         let request_json = request.to_chat_completions_json().map_err(|error| {
             AgentError::Model(format!("failed to encode model request: {error}"))
         })?;
         let stream = Arc::new(StreamAccumulator {
             state: Mutex::new(StreamState::default()),
-            sink: current_agent_event_sink()?,
+            sink: if emit_events {
+                current_agent_event_sink()?
+            } else {
+                None
+            },
         });
         let result = self
             .provider
@@ -95,10 +124,10 @@ impl ModelServeWrapper {
             }
             return Err(error);
         }
-        match stream.into_response() {
+        match Arc::clone(&stream).into_response() {
             Ok(response) => Ok(response),
             Err(error) => {
-                if let Some(sink) = current_agent_event_sink()? {
+                if let Some(sink) = &stream.sink {
                     sink.on_error(serde_json::json!({"error": error.to_string()}).to_string());
                 }
                 Err(error)

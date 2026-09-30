@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -36,6 +36,10 @@ pub trait ToolExecutor {
 
     fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError>;
     fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>>;
+
+    fn should_retry(&self, _call: &ToolCall, error: &AgentError) -> bool {
+        error.is_retryable()
+    }
 }
 
 enum RegisteredTool {
@@ -129,51 +133,52 @@ impl ToolRegistry {
         provider: Arc<dyn ToolProvider>,
         tools: Vec<McpTool>,
     ) -> Result<(), AgentError> {
-        let names = tools
-            .iter()
-            .map(|tool| tool.name.trim().to_owned())
-            .collect::<Vec<_>>();
-        for name in &names {
-            if name.is_empty() || name == "load_more_tools" {
+        let mut names = HashSet::new();
+        for tool in &tools {
+            let name = tool.name.trim();
+            if name.is_empty() || name == "load_more_tools" || name != tool.name {
                 return Err(AgentError::InvalidAction("invalid MCP tool name".into()));
+            }
+            if !names.insert(name) {
+                return Err(AgentError::DuplicateTool(name.to_owned()));
             }
             if self.tools.contains_key(name)
                 && !matches!(self.tools.get(name), Some(RegisteredTool::KmpMcp { .. }))
             {
-                return Err(AgentError::DuplicateTool(name.clone()));
+                return Err(AgentError::DuplicateTool(name.to_owned()));
             }
         }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
         self.tools
             .retain(|_, tool| !matches!(tool, RegisteredTool::KmpMcp { .. }));
-        {
-            let mut state = self
-                .state
-                .lock()
-                .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
-            state.order.retain(|name| self.tools.contains_key(name));
-            state.page_start = state.page_start.min(state.order.len());
-        }
+        state.order.retain(|name| self.tools.contains_key(name));
+        state.page_start = state.page_start.min(state.order.len());
         for tool in tools {
             let definition =
                 ToolDefinition::new(&tool.name, &tool.description, &tool.input_schema_json);
-            self.insert(
-                definition.clone(),
+            let name = definition.name.clone();
+            self.tools.insert(
+                name.clone(),
                 RegisteredTool::KmpMcp {
                     definition,
                     provider: Arc::clone(&provider),
                 },
-            )?;
+            );
+            state.order.push(name);
         }
         Ok(())
     }
 
     pub fn clear_mcp_tools(&mut self) -> Result<(), AgentError> {
-        self.tools
-            .retain(|_, tool| !matches!(tool, RegisteredTool::KmpMcp { .. }));
         let mut state = self
             .state
             .lock()
             .map_err(|_| AgentError::Model("tool registry lock poisoned".into()))?;
+        self.tools
+            .retain(|_, tool| !matches!(tool, RegisteredTool::KmpMcp { .. }));
         state.order.retain(|name| self.tools.contains_key(name));
         state.page_start = state.page_start.min(state.order.len());
         Ok(())
@@ -291,10 +296,17 @@ impl ToolExecutor for ToolRegistry {
                     provider
                         .call_tool(call.name.clone(), call.arguments.clone())
                         .await
-                        .map(ToolOutput::success)
-                        .map_err(|error| AgentError::ToolExecution {
+                        .into_result()
+                        .map(|(output, is_error)| {
+                            if is_error {
+                                ToolOutput::failure(output)
+                            } else {
+                                ToolOutput::success(output)
+                            }
+                        })
+                        .map_err(|(error, message)| AgentError::ToolExecution {
                             name: call.name.clone(),
-                            message: error.to_string(),
+                            message,
                             error,
                         })
                 })
@@ -313,6 +325,16 @@ impl ToolExecutor for ToolRegistry {
             })
         })
     }
+
+    fn should_retry(&self, call: &ToolCall, error: &AgentError) -> bool {
+        if call.name == "delegate_to_agent" || call.name == "list_remote_agents" {
+            return false;
+        }
+        !matches!(
+            self.tools.get(&call.name),
+            Some(RegisteredTool::KmpMcp { .. })
+        ) && error.is_retryable()
+    }
 }
 
 impl Default for ToolRegistry {
@@ -324,6 +346,29 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ToolCallReply, ToolListReply};
+
+    struct UnusedProvider;
+
+    #[async_trait::async_trait]
+    impl ToolProvider for UnusedProvider {
+        async fn get_tools(&self) -> ToolListReply {
+            ToolListReply {
+                tools: Vec::new(),
+                error_code: None,
+                error_message: None,
+            }
+        }
+
+        async fn call_tool(&self, _: String, _: String) -> ToolCallReply {
+            ToolCallReply {
+                output_json: "{}".into(),
+                is_error: false,
+                error_code: None,
+                error_message: None,
+            }
+        }
+    }
 
     struct NamedTool(&'static str);
 
@@ -360,6 +405,51 @@ mod tests {
 
         block_on(registry.execute(ToolCall::new("2", "load_more_tools", "{}"))).unwrap();
         assert_eq!(names(registry.list_tools().unwrap()), vec!["five"]);
+    }
+
+    #[test]
+    fn invalid_mcp_snapshot_does_not_partially_replace_existing_tools() {
+        let mut registry = ToolRegistry::new(8).unwrap();
+        registry.register(NamedTool("local")).unwrap();
+        let provider: Arc<dyn ToolProvider> = Arc::new(UnusedProvider);
+        let tool = |name: &str| McpTool {
+            name: name.into(),
+            description: String::new(),
+            input_schema_json: "{}".into(),
+        };
+        registry
+            .replace_mcp_tools(Arc::clone(&provider), vec![tool("old")])
+            .unwrap();
+        let names = |registry: &ToolRegistry| {
+            registry
+                .list_tools()
+                .unwrap()
+                .into_iter()
+                .map(|tool| tool.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&registry), ["local", "old"]);
+
+        assert!(matches!(
+            registry.replace_mcp_tools(Arc::clone(&provider), vec![tool("new"), tool("new")]),
+            Err(AgentError::DuplicateTool(_))
+        ));
+        assert_eq!(names(&registry), ["local", "old"]);
+        assert!(matches!(
+            registry.replace_mcp_tools(Arc::clone(&provider), vec![tool("local")]),
+            Err(AgentError::DuplicateTool(_))
+        ));
+        assert_eq!(names(&registry), ["local", "old"]);
+        assert!(matches!(
+            registry.replace_mcp_tools(Arc::clone(&provider), vec![tool(" padded ")]),
+            Err(AgentError::InvalidAction(_))
+        ));
+        assert_eq!(names(&registry), ["local", "old"]);
+
+        registry
+            .replace_mcp_tools(provider, vec![tool("new")])
+            .unwrap();
+        assert_eq!(names(&registry), ["local", "new"]);
     }
 
     fn block_on<F: Future>(mut future: F) -> F::Output {
