@@ -8,6 +8,8 @@ import com.openai.companion.kmp.McpServerManager
 import com.openai.companion.kmp.McpTool
 import com.openai.companion.kmp.ProactiveTask
 import com.openai.companion.kmp.ProactiveSettings
+import com.openai.companion.kmp.MemorySyncWorker
+import com.openai.companion.kmp.MemorySyncCredentials
 import com.openai.companion.kmp.MemorySyncClient
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -24,7 +26,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -59,7 +60,11 @@ import uniffi.harness.appRebaseProactiveRules
 import uniffi.harness.appRunDueProactive
 import uniffi.harness.appReadyProactiveNotifications
 import uniffi.harness.appMarkProactiveDelivered
-import uniffi.harness.appExportMemorySync
+import uniffi.harness.MemorySyncWake
+import uniffi.harness.registerMemorySyncWake
+import uniffi.harness.appPrepareMemorySync
+import uniffi.harness.appAcknowledgeMemorySync
+import uniffi.harness.appMemorySyncPending
 import uniffi.harness.appMergeMemorySync
 import uniffi.harness.cancelAgentLoop
 
@@ -85,6 +90,12 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
     private val preferences = Preferences.userNodeForPackage(DesktopBackend::class.java)
     private val approvalGate = Mutex()
     private val syncGate = Mutex()
+    private val syncSecrets = DesktopSecretStore()
+    private val memorySyncWorker = MemorySyncWorker(
+        enabled = { memorySyncEndpoint.isNotBlank() },
+        pending = { appMemorySyncPending().value().toBooleanStrict() },
+        sync = { syncMemories() },
+    )
     private val syncHttp = HttpClient(CIO) {
         followRedirects = false
         install(HttpTimeout) { requestTimeoutMillis = 30_000 }
@@ -165,12 +176,10 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
             }
         }
         proactiveScope.launch { processPendingProactivePlans() }
-        proactiveScope.launch {
-            while (isActive) {
-                if (memorySyncEndpoint.isNotBlank()) runCatching { syncMemories() }
-                delay(15 * 60 * 1_000L)
-            }
-        }
+        registerMemorySyncWake(object : MemorySyncWake {
+            override fun onPending() = memorySyncWorker.request()
+        })
+        proactiveScope.launch { memorySyncWorker.run() }
         proactiveScope.launch {
             while (isActive) {
                 if (proactiveSettings.enabled) discoverProactiveTasks()
@@ -239,37 +248,63 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
         if (settings.enabled) proactiveScope.launch { processPendingProactivePlans() }
     }
 
-    suspend fun configureMemorySync(endpoint: String, token: String) {
+    suspend fun configureMemorySync(endpoint: String, token: String) = syncGate.withLock {
         if (endpoint.isBlank()) {
             preferences.remove("memorySyncEndpoint")
+            if (memorySyncEndpoint.isNotBlank()) syncSecrets.remove(MemorySyncCredentials.key(memorySyncEndpoint))
             preferences.remove("memorySyncToken")
             memorySyncEndpoint = ""
             memorySyncStatus = "未配置"
-            return
+            return@withLock
         }
-        val credential = token.ifBlank { preferences.get("memorySyncToken", "") }
+        val credential = MemorySyncCredentials.resolve(endpoint, memorySyncEndpoint, token) { loadMemorySyncToken() }
         exchangeMemories(endpoint.trim(), credential)
+        syncSecrets.write(MemorySyncCredentials.key(endpoint), credential)
         preferences.put("memorySyncEndpoint", endpoint.trim())
-        if (token.isNotBlank()) preferences.put("memorySyncToken", token)
+        preferences.remove("memorySyncToken")
         memorySyncEndpoint = endpoint.trim()
+        memorySyncWorker.request()
     }
 
-    suspend fun syncMemories() {
-        val endpoint = memorySyncEndpoint.takeIf(String::isNotBlank) ?: return
-        exchangeMemories(endpoint, preferences.get("memorySyncToken", ""))
+    private fun loadMemorySyncToken(): String {
+        val key = MemorySyncCredentials.key(memorySyncEndpoint)
+        syncSecrets.read(key)?.let {
+            preferences.remove("memorySyncToken")
+            return it
+        }
+        val legacy = preferences.get("memorySyncToken", "")
+        if (legacy.isNotBlank()) {
+            syncSecrets.write(key, legacy)
+            preferences.remove("memorySyncToken")
+        }
+        return legacy
     }
 
-    private suspend fun exchangeMemories(endpoint: String, token: String) = syncGate.withLock {
+    suspend fun syncMemories() = syncGate.withLock {
+        val endpoint = memorySyncEndpoint.takeIf(String::isNotBlank) ?: return@withLock
+        exchangeMemories(endpoint, loadMemorySyncToken())
+    }
+
+    private suspend fun exchangeMemories(endpoint: String, token: String) {
         memorySyncStatus = "同步中…"
         try {
-            val local = withContext(Dispatchers.IO) { appExportMemorySync().value() }
-            val remote = syncClient.exchange(endpoint, token, local)
-            val merged = withContext(Dispatchers.IO) { appMergeMemorySync(remote).value() }
-            if (Json.parseToJsonElement(merged).jsonObject.getValue("changed").jsonPrimitive.content.toInt() > 0
+            val local = withContext(Dispatchers.IO) { appPrepareMemorySync().value() }
+            val batch = Json.parseToJsonElement(local).jsonObject
+            val generation = batch.getValue("generation").jsonPrimitive.content.toLong()
+            val records = batch.getValue("records").toString()
+            var changed = false
+            syncClient.exchange(endpoint, token, records) { page ->
+                val merged = withContext(Dispatchers.IO) { appMergeMemorySync(page).value() }
+                changed = changed || Json.parseToJsonElement(merged).jsonObject
+                    .getValue("changed").jsonPrimitive.content.toInt() > 0
+            }
+            appAcknowledgeMemorySync(generation).value()
+            if (changed
                 && proactiveSettings.enabled) proactiveScope.launch { discoverProactiveTasks() }
             memorySyncStatus = "已同步"
         } catch (error: Exception) {
             memorySyncStatus = "同步失败：${error.message ?: error}"
+            if (error !is kotlinx.coroutines.CancellationException) memorySyncWorker.request()
             throw error
         }
     }
@@ -370,10 +405,6 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
             bindings.unregisterAgentEventSink()
         }
         proactiveScope.launch { processPendingProactivePlans() }
-        if (memorySyncEndpoint.isNotBlank()) proactiveScope.launch {
-            delay(15_000)
-            runCatching { syncMemories() }
-        }
         output
         }
     }

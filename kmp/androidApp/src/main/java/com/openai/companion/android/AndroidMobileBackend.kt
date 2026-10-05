@@ -13,7 +13,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +44,11 @@ class AndroidMobileBackend(
     private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
     private val gate = Mutex()
     private val syncGate = Mutex()
+    private val memorySyncWorker = MemorySyncWorker(
+        enabled = { memorySyncEndpoint.isNotBlank() },
+        pending = { appMemorySyncPending().value().toBooleanStrict() },
+        sync = { syncMemories() },
+    )
     private val bindings = GeneratedHarnessBindingsAdapter()
     private val codec = CompanionConversationCodec()
     private val mcp = AndroidMcpService(context, oauthBrowser, bindings, approve, requestInput)
@@ -117,12 +121,10 @@ class AndroidMobileBackend(
             }
         }
         scope.launch { processPendingTurns() }
-        scope.launch {
-            while (isActive) {
-                if (memorySyncEndpoint.isNotBlank()) runCatching { syncMemories() }
-                delay(15 * 60 * 1_000L)
-            }
-        }
+        registerMemorySyncWake(object : MemorySyncWake {
+            override fun onPending() = memorySyncWorker.request()
+        })
+        scope.launch { memorySyncWorker.run() }
         scope.launch {
             while (isActive) {
                 if (proactiveSettings.enabled) discover()
@@ -161,10 +163,6 @@ class AndroidMobileBackend(
             finally { bindings.unregisterAgentEventSink() }
         }
         scope.launch { processPendingTurns() }
-        if (memorySyncEndpoint.isNotBlank()) scope.launch {
-            delay(15_000)
-            runCatching { syncMemories() }
-        }
         Unit
     }
     override fun cancel() {
@@ -188,38 +186,59 @@ class AndroidMobileBackend(
             requestPermissionForEnabledTasks()
         }
     }
-    override suspend fun configureMemorySync(endpoint: String, token: String) {
+    override suspend fun configureMemorySync(endpoint: String, token: String) = syncGate.withLock {
         if (endpoint.isBlank()) {
             syncPreferences.edit().remove("endpoint").apply()
+            if (memorySyncEndpoint.isNotBlank()) syncSecrets.remove(MemorySyncCredentials.key(memorySyncEndpoint))
             syncSecrets.remove("memory-sync-token")
             memorySyncEndpoint = ""
             mutableMemorySyncStatus.value = "未配置"
-            return
+            return@withLock
         }
-        val credential = token.ifBlank { syncSecrets.read("memory-sync-token") ?: "" }
+        val credential = MemorySyncCredentials.resolve(endpoint, memorySyncEndpoint, token) { loadMemorySyncToken() }
         exchangeMemories(endpoint.trim(), credential)
+        syncSecrets.write(MemorySyncCredentials.key(endpoint), credential)
+        syncSecrets.remove("memory-sync-token")
         check(syncPreferences.edit().putString("endpoint", endpoint.trim()).commit())
-        if (token.isNotBlank()) syncSecrets.write("memory-sync-token", token)
         memorySyncEndpoint = endpoint.trim()
+        memorySyncWorker.request()
     }
 
-    override suspend fun syncMemories() {
-        val endpoint = memorySyncEndpoint.takeIf(String::isNotBlank) ?: return
-        val token = syncSecrets.read("memory-sync-token") ?: error("未设置记忆同步令牌")
+    private fun loadMemorySyncToken(): String {
+        val key = MemorySyncCredentials.key(memorySyncEndpoint)
+        syncSecrets.read(key)?.let { return it }
+        val legacy = syncSecrets.read("memory-sync-token") ?: error("未设置记忆同步令牌")
+        syncSecrets.write(key, legacy)
+        syncSecrets.remove("memory-sync-token")
+        return legacy
+    }
+
+    override suspend fun syncMemories() = syncGate.withLock {
+        val endpoint = memorySyncEndpoint.takeIf(String::isNotBlank) ?: return@withLock
+        val token = loadMemorySyncToken()
         exchangeMemories(endpoint, token)
     }
 
-    private suspend fun exchangeMemories(endpoint: String, token: String) = syncGate.withLock {
+    private suspend fun exchangeMemories(endpoint: String, token: String) {
         mutableMemorySyncStatus.value = "同步中…"
         try {
-            val local = gate.withLock { appExportMemorySync().value() }
-            val remote = memorySyncClient.exchange(endpoint, token, local)
-            val merged = gate.withLock { appMergeMemorySync(remote).value() }
-            if (Json.parseToJsonElement(merged).jsonObject.getValue("changed").jsonPrimitive.content.toInt() > 0
+            val local = gate.withLock { appPrepareMemorySync().value() }
+            val batch = Json.parseToJsonElement(local).jsonObject
+            val generation = batch.getValue("generation").jsonPrimitive.content.toLong()
+            val records = batch.getValue("records").toString()
+            var changed = false
+            memorySyncClient.exchange(endpoint, token, records) { page ->
+                val merged = gate.withLock { appMergeMemorySync(page).value() }
+                changed = changed || Json.parseToJsonElement(merged).jsonObject
+                    .getValue("changed").jsonPrimitive.content.toInt() > 0
+            }
+            appAcknowledgeMemorySync(generation).value()
+            if (changed
                 && proactiveSettings.enabled) scope.launch { discover() }
             mutableMemorySyncStatus.value = "已同步"
         } catch (error: Exception) {
             mutableMemorySyncStatus.value = "同步失败：${error.message ?: error}"
+            if (error !is kotlinx.coroutines.CancellationException) memorySyncWorker.request()
             throw error
         }
     }
@@ -327,6 +346,7 @@ class AndroidMobileBackend(
         bindings.unregisterAgentEventSink()
         bindings.unregisterToolProvider()
         bindings.unregisterModelServeCallback()
+        unregisterMemorySyncWake()
         unregisterA2aProvider()
     }
 
