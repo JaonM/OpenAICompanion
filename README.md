@@ -95,11 +95,10 @@ iOS 的 KMP 核心代码可在 `kmp/` 下用 `./gradlew -PkmpJvmToolchain=21 :co
 - [Android MVP](docs/android_mvp.md)
 - [跨端记忆同步](docs/memory_sync.md)
 - [设备日历工具](docs/device_calendar_tool.md)
-- [待办与已知限制](docs/todo.md)
 
 ## 反馈与贡献
 
-构建或使用时遇到问题，可在仓库 Issue 中提供操作系统、Xcode/JDK/Rust 版本、复现步骤和相关日志。欢迎围绕 [待办与已知限制](docs/todo.md) 提交讨论或 Pull Request；提交代码前请运行受影响模块的测试。
+构建或使用时遇到问题，可在仓库 Issue 中提供操作系统、Xcode/JDK/Rust 版本、复现步骤和相关日志。欢迎围绕各平台指南中的运行边界和待验收能力提交讨论或 Pull Request；提交代码前请运行受影响模块的测试。
 
 ## 许可证
 
