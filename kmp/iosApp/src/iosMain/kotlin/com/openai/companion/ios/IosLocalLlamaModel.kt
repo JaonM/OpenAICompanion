@@ -5,6 +5,7 @@ import com.openai.companion.ios.llama.oc_llama_create
 import com.openai.companion.ios.llama.oc_llama_free_string
 import com.openai.companion.ios.llama.oc_llama_generate
 import com.openai.companion.ios.llama.oc_llama_load
+import com.openai.companion.kmp.LocalModelContext
 import com.openai.companion.kmp.AppModelServe
 import com.openai.companion.kmp.IosGgufImporter
 import com.openai.companion.kmp.ModelStreamCallback
@@ -63,15 +64,17 @@ class IosLocalLlamaModel : AppModelServe {
                     checkNative(oc_llama_load(engine, path))
                     val sink = StableRef.create(ChunkSink(callback))
                     try {
-                        checkNative(oc_llama_generate(
-                            engine, requestJson, MAX_OUTPUT_TOKENS,
-                            staticCFunction { chunk, context ->
-                                if (context != null) {
-                                    val target = context.asStableRef<ChunkSink>().get()
-                                    target.emit(chunk?.toKString())
-                                }
-                            }, sink.asCPointer(),
-                        ))
+                        LocalModelContext.complete(requestJson) { fittedRequest ->
+                            checkNative(oc_llama_generate(
+                                engine, fittedRequest, MAX_OUTPUT_TOKENS,
+                                staticCFunction { chunk, context ->
+                                    if (context != null) {
+                                        val target = context.asStableRef<ChunkSink>().get()
+                                        target.emit(chunk?.toKString())
+                                    }
+                                }, sink.asCPointer(),
+                            ))
+                        }
                         sink.get().failure?.let { throw it }
                     } finally {
                         sink.dispose()

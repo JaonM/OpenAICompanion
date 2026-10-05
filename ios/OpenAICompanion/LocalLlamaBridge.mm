@@ -163,7 +163,7 @@ static NSString *OCChunkJSON(NSString *text) {
 
     const int32_t outputLimit = static_cast<int32_t>(std::max<NSInteger>(1, std::min<NSInteger>(maxTokens, 512)));
     if (tokenCount + outputLimit > static_cast<int32_t>(llama_n_ctx(context.get()))) {
-        return @"对话已超过端侧上下文容量，请缩短消息或减少加载的记忆。";
+        return @"LOCAL_MODEL_CONTEXT_EXCEEDED";
     }
     const int32_t batchSize = static_cast<int32_t>(llama_n_batch(context.get()));
     for (int32_t offset = 0; offset < tokenCount; offset += batchSize) {

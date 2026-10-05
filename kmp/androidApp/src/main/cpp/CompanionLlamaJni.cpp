@@ -169,7 +169,7 @@ Java_com_openai_companion_android_AndroidLlamaNative_generate(
     if (!context) return failure(env, "Could not create llama.cpp context");
     const int32_t output_limit = std::max(1, std::min(static_cast<int>(max_tokens), 512));
     if (token_count + output_limit > static_cast<int32_t>(llama_n_ctx(context.get())))
-        return failure(env, "Conversation exceeds the local model context");
+        return failure(env, "LOCAL_MODEL_CONTEXT_EXCEEDED");
     const int32_t batch_size = llama_n_batch(context.get());
     for (int32_t offset = 0; offset < token_count; offset += batch_size) {
         if (state->cancelled.load()) return failure(env, "Generation cancelled");
