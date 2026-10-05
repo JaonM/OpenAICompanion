@@ -366,6 +366,45 @@ pub fn app_set_proactive_settings(enabled: bool, discovery_interval_minutes: i64
     }
 }
 
+/// Read generation BEFORE exporting: concurrent writes can cause an extra upload,
+/// but can never be acknowledged without having been included in the snapshot.
+pub fn app_prepare_memory_sync() -> AppResult {
+    let result = (|| {
+        let state = app_state()?;
+        let generation = state
+            .store
+            .memory_sync_generation()
+            .map_err(|e| e.to_string())?;
+        let records = state
+            .store
+            .export_memory_sync()
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(json!({"generation": generation, "records": records}))
+    })();
+    match result {
+        Ok(batch) => AppResult::success(batch),
+        Err(e) => AppResult::failure(e),
+    }
+}
+
+pub fn app_acknowledge_memory_sync(generation: i64) -> AppResult {
+    match app_state().and_then(|s| {
+        s.store
+            .acknowledge_memory_sync(generation)
+            .map_err(|e| e.to_string())
+    }) {
+        Ok(()) => AppResult::success(json!({})),
+        Err(e) => AppResult::failure(e),
+    }
+}
+
+pub fn app_memory_sync_pending() -> AppResult {
+    match app_state().and_then(|s| s.store.memory_sync_pending().map_err(|e| e.to_string())) {
+        Ok(pending) => AppResult::success(json!(pending)),
+        Err(e) => AppResult::failure(e),
+    }
+}
+
 pub fn app_export_memory_sync() -> AppResult {
     match app_state().and_then(|state| state.store.export_memory_sync().map_err(|e| e.to_string()))
     {

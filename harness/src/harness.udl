@@ -24,6 +24,11 @@ namespace harness {
     AppResult app_delete_proactive_task(string id);
     AppResult app_get_proactive_settings();
     AppResult app_set_proactive_settings(boolean enabled, i64 discovery_interval_minutes);
+    void register_memory_sync_wake(MemorySyncWake sink);
+    void unregister_memory_sync_wake();
+    AppResult app_prepare_memory_sync();
+    AppResult app_acknowledge_memory_sync(i64 generation);
+    AppResult app_memory_sync_pending();
     AppResult app_export_memory_sync();
     AppResult app_merge_memory_sync(string records_json);
     AppResult app_process_pending_proactive_plans(i64 timezone_offset_minutes);
@@ -69,3 +74,5 @@ typedef trait_with_foreign A2aProvider;
 typedef trait_with_foreign ModelServeCallback;
 typedef trait_with_foreign ModelStreamCallback;
 typedef trait_with_foreign AgentEventSink;
+
+typedef trait_with_foreign MemorySyncWake;

@@ -136,6 +136,7 @@ impl MemoryStore {
         )?;
         crate::a2a::create_schema(&connection)?;
         crate::proactive::create_schema(&connection)?;
+        crate::memory_sync::install_wake_hooks(&connection);
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })
