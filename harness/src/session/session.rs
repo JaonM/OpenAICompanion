@@ -141,7 +141,7 @@ impl Session {
                     )
                     .map_err(memory_error)?
                 {
-                    self.ensure_summary(session_id, target)?;
+                    self.schedule_summary(session_id, target)?;
                 }
                 let watermark = store
                     .medium_summaries(session_id)
@@ -258,15 +258,7 @@ impl Session {
                         )
                         .map_err(memory_error)?
                     {
-                        let watermark = store
-                            .medium_summaries(session_id)
-                            .map_err(memory_error)?
-                            .last()
-                            .map(|entry| entry.last_turn_id)
-                            .unwrap_or(0);
-                        if target > watermark && self.summary_job.is_none() {
-                            self.spawn_summary(session_id, target);
-                        }
+                        self.schedule_summary(session_id, target)?;
                     }
                     let model = self.model_serve.clone();
                     std::thread::spawn(move || {
@@ -312,10 +304,18 @@ impl Session {
         }
     }
 
-    fn ensure_summary(&mut self, session_id: i64, target: i64) -> Result<(), AgentError> {
-        if let Some(job) = self.summary_job.take() {
-            job.join()
-                .map_err(|_| AgentError::Memory("summary worker panicked".into()))??;
+    // Only reap completed jobs. A slow/failed summary must never gate a foreground turn.
+    fn schedule_summary(&mut self, session_id: i64, target: i64) -> Result<(), AgentError> {
+        if self
+            .summary_job
+            .as_ref()
+            .is_some_and(|job| job.is_finished())
+        {
+            match self.summary_job.take().unwrap().join() {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!("summary deferred: {error}"),
+                Err(_) => eprintln!("summary worker panicked"),
+            }
         }
         let store = self.memory.as_ref().expect("memory-backed session");
         let watermark = store
@@ -324,13 +324,8 @@ impl Session {
             .last()
             .map(|entry| entry.last_turn_id)
             .unwrap_or(0);
-        if watermark < target {
+        if watermark < target && self.summary_job.is_none() {
             self.spawn_summary(session_id, target);
-            self.summary_job
-                .take()
-                .expect("summary worker")
-                .join()
-                .map_err(|_| AgentError::Memory("summary worker panicked".into()))??;
         }
         Ok(())
     }
@@ -526,6 +521,61 @@ mod tests {
     }
 
     #[test]
+    fn failed_or_running_summary_does_not_block_foreground_turn() {
+        let memory = MemoryStore::in_memory().unwrap();
+        let model = Arc::new(RecordingModel::default());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut conversation = session(model, memory.clone());
+        let id = conversation.trace_session_id.unwrap();
+        // Seed enough history to require summarization without starting a worker.
+        for _ in 0..9 {
+            let turn = memory.begin_trace_turn(id, "prior").unwrap();
+            memory
+                .finish_trace_turn(
+                    turn,
+                    TraceStatus::Completed,
+                    None,
+                    Some("ok"),
+                    Some(1),
+                    None,
+                )
+                .unwrap();
+        }
+        let failed = std::thread::spawn(|| Err(AgentError::Memory("summary offline".into())));
+        while !failed.is_finished() {
+            std::thread::yield_now();
+        }
+        conversation.summary_job = Some(failed);
+        runtime
+            .block_on(conversation.run_turn("continue after failure"))
+            .unwrap();
+        if let Some(job) = conversation.summary_job.take() {
+            job.join().unwrap().unwrap();
+        }
+        let (send, receive) = std::sync::mpsc::channel();
+        conversation.summary_job = Some(std::thread::spawn(move || {
+            let _ = receive.recv_timeout(std::time::Duration::from_secs(2));
+            Ok(())
+        }));
+        let start = std::time::Instant::now();
+        runtime
+            .block_on(conversation.run_turn("continue while summary runs"))
+            .unwrap();
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        let _ = send.send(());
+        conversation
+            .summary_job
+            .take()
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
     fn completed_turn_starts_memory_extraction() {
         let memory = MemoryStore::in_memory().unwrap();
         let model = Arc::new(RecordingModel::default());
@@ -559,6 +609,9 @@ mod tests {
             runtime
                 .block_on(conversation.run_turn(format!("问题{index}")))
                 .unwrap();
+            if let Some(job) = conversation.summary_job.take() {
+                job.join().unwrap().unwrap();
+            }
         }
         let session_id = conversation.trace_session_id.unwrap();
         let summaries = memory.medium_summaries(session_id).unwrap();
