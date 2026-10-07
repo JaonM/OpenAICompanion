@@ -94,7 +94,8 @@ iOS 的 KMP 核心代码可在 `kmp/` 下用 `./gradlew -PkmpJvmToolchain=21 :co
 - [iOS MVP](docs/ios_mvp.md)
 - [Android MVP](docs/android_mvp.md)
 - [跨端记忆同步](docs/memory_sync.md)
-- [设备日历工具](docs/device_calendar_tool.md)
+- [跨设备任务路由与 A2A 执行](docs/cross_device_execution.md)
+- [统一端侧工具：设备上下文、日程查询与新建](docs/device_calendar_tool.md)
 
 ## 反馈与贡献
 

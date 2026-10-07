@@ -34,5 +34,7 @@ an HTTP Bearer security scheme. Redirects are disabled for the A2A client.
 This MVP supports text-only JSON-RPC `SendMessage`, `GetTask`, and `CancelTask`
 with optional manual Bearer credentials. It does not yet support SSE streaming,
 push notifications, files, automatic OAuth flows, signed Agent Card verification,
-or an inbound A2A server. Agent Cards requiring unsupported authentication or
+or a directly device-hosted inbound A2A server. Personal-device execution is now
+available through the authenticated gateway and outbound workers described in
+[cross-device execution](cross_device_execution.md). Agent Cards requiring unsupported authentication or
 extensions are not delegated to.
