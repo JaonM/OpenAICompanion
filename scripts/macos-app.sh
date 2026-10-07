@@ -14,7 +14,7 @@ cp "$project_root/harness/target/release/libharness.dylib" "$app_resources/libha
 cd "$project_root/kmp"
 export COMPANION_CALENDAR_LIBRARY_PATH="$app_resources/libcompanion_calendar.dylib"
 export HARNESS_LIBRARY_PATH="$app_resources/libharness.dylib"
-gradle_args=(-PkmpJvmToolchain=21)
+gradle_args=(-PkmpJvmToolchain=21 -PskipAndroidApp=true)
 if [[ -n "${COMPANION_BUILD_DIR:-}" ]]; then
   gradle_args+=("-PcompanionBuildDir=$COMPANION_BUILD_DIR")
 fi
