@@ -48,5 +48,51 @@
     "Android SDK and real devices unavailable (confirmed by user)",
     "Container image build blocked by Docker Hub authentication endpoint timeout",
     "LaunchAgent login/reboot, sleep recovery, load/soak and real calendar permissions pending"
-  ]
+  ],
+  "physical_acceptance": {
+    "device": "iPhone 17 Pro Max",
+    "ios": "27.0",
+    "signed_install": "Passed",
+    "basic_ui": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "local_model": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "model": "SmolLM2-135M-Instruct Q4_K_M",
+      "assertion": "new assistant reply after valid input, not history"
+    },
+    "mac_https_worker": {
+      "result": "Passed preflight",
+      "model": "local Qwen3.8-27B-GGUF UD-Q4_K_M",
+      "output": "42",
+      "restart": "completed task state, attempt and output unchanged"
+    },
+    "https_service": {
+      "mode": "isolated LAN deployment on Mac",
+      "tls_validation": "CA and IP validated on Mac; no certificate verification bypass",
+      "unauthenticated_devices_status": 401
+    },
+    "pairing": {
+      "result": "Not accepted",
+      "failure": "iOS NSURLErrorDomain -1202: untrusted server certificate",
+      "followup": "fullchain deployed; awaiting iPhone trust verification and rerun"
+    },
+    "pending": [
+      "iPhone-to-Mac delegation and return UI",
+      "Mac-to-iPhone foreground execution",
+      "follow-up and reply UI",
+      "network-switch recovery",
+      "sleep/login recovery",
+      "minimum supported OS",
+      "production HTTPS deployment"
+    ],
+    "test_setup_issues": [
+      "Third-party keyboard prevented input; switched to system keyboard and model test passed",
+      "Scrolling input focus required field-targeted typing; pre-submit input guard added"
+    ]
+  }
 }
