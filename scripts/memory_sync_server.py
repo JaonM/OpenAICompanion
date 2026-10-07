@@ -11,6 +11,8 @@ import ssl
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from service_storage import migrate
+
 MAX_BODY = 4 * 1024 * 1024
 MAX_RECORDS = 10_000
 PAGE_RECORDS = 256
@@ -51,14 +53,16 @@ class RelayStore:
     def __init__(self, path):
         self.path = path
         with self.connect() as db:
-            db.execute("""CREATE TABLE IF NOT EXISTS records (
-                user_id TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
-                author TEXT NOT NULL, memory_json TEXT, PRIMARY KEY(user_id,id))""")
-            db.execute("""CREATE TABLE IF NOT EXISTS changes (
-                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL, id TEXT NOT NULL, UNIQUE(user_id,id))""")
-            db.execute("INSERT OR IGNORE INTO changes(user_id,id) SELECT user_id,id FROM records")
-            db.execute("CREATE INDEX IF NOT EXISTS changes_user_sequence ON changes(user_id,sequence)")
+            migrate(db, """
+                CREATE TABLE IF NOT EXISTS records (
+                    user_id TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
+                    author TEXT NOT NULL, memory_json TEXT, PRIMARY KEY(user_id,id));
+                CREATE TABLE IF NOT EXISTS changes (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL, id TEXT NOT NULL, UNIQUE(user_id,id));
+                INSERT OR IGNORE INTO changes(user_id,id) SELECT user_id,id FROM records;
+                CREATE INDEX IF NOT EXISTS changes_user_sequence ON changes(user_id,sequence);
+            """)
 
     @contextmanager
     def connect(self):

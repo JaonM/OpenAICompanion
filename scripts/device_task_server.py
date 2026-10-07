@@ -13,6 +13,8 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from service_storage import migrate
+
 MAX_BODY = 512 * 1024
 TERMINAL = {'TASK_STATE_COMPLETED', 'TASK_STATE_FAILED', 'TASK_STATE_CANCELED', 'TASK_STATE_REJECTED'}
 INTERRUPTED = {'TASK_STATE_INPUT_REQUIRED', 'TASK_STATE_AUTH_REQUIRED'}
@@ -52,7 +54,7 @@ class TaskStore:
     def __init__(self, path):
         self.path = path
         with self.connect() as db:
-            db.executescript('''
+            migrate(db, '''
                 CREATE TABLE IF NOT EXISTS devices(
                     user_id TEXT, id TEXT, descriptor TEXT NOT NULL, seen REAL NOT NULL,
                     PRIMARY KEY(user_id,id));
@@ -98,6 +100,8 @@ class TaskStore:
                 raise ValueError('missing execution policy')
         if type(descriptor.get('foreground')) is not bool or type(descriptor.get('acceptTasks')) is not bool:
             raise ValueError('missing device availability')
+        if type(descriptor.get('backgroundExecution', False)) is not bool:
+            raise ValueError('invalid background execution capability')
         # Resources are declared by the trusted device host, never the model.
         resources = descriptor.get('resources', [])
         if not isinstance(resources, list) or len(resources) > 256:
@@ -123,6 +127,7 @@ class TaskStore:
         return {'name': item['name'], 'version': '1.0.0', 'description': 'Personal device task executor',
                 'supportedInterfaces': [{'url': f'{base}/agents/{device}/rpc', 'protocolBinding': 'JSONRPC', 'protocolVersion': '1.0'}],
                 'capabilities': {'streaming': False, 'pushNotifications': False},
+                'metadata': {'companionRecoveryVersion': 1},
                 'defaultInputModes': ['text/plain'], 'defaultOutputModes': ['text/plain'],
                 'securitySchemes': {'bearer': {'httpAuthSecurityScheme': {'scheme': 'Bearer'}}},
                 'securityRequirements': [{'schemes': {'bearer': []}}],
@@ -193,6 +198,24 @@ class TaskStore:
             self._expire(db)
             return self.view(self._task(db, user, device, task_id))
 
+    def receipt(self, user, device, message_id):
+        text(message_id, 200)
+        with self.connect() as db:
+            self._expire(db)
+            row = db.execute('SELECT task_id FROM messages WHERE user_id=? AND device_id=? AND message_id=?',
+                             (user, device, message_id)).fetchone()
+            return {'task': self.view(self._task(db, user, device, row['task_id'])) if row else None}
+
+    def abandon(self, user, device, task_id, attempt):
+        with self.connect() as db:
+            row = self._task(db, user, device, task_id)
+            if row['attempt'] != attempt:
+                raise ValueError('attempt mismatch')
+            if row['state'] == 'TASK_STATE_WORKING':
+                db.execute("UPDATE tasks SET unknown=1,output='执行结果未知：执行进程已中断；不会自动重试',updated=? WHERE user_id=? AND id=?",
+                           (time.time(), user, task_id))
+            return {'ok': True}
+
     def cancel(self, user, device, task_id):
         with self.connect() as db:
             self._expire(db)
@@ -211,7 +234,7 @@ class TaskStore:
             if d is None or time.time() - d['seen'] >= 60:
                 return {'job': None}
             desc = json.loads(d['descriptor'])
-            if not desc['acceptTasks'] or not desc['foreground']:
+            if not desc['acceptTasks'] or not (desc['foreground'] or desc.get('backgroundExecution', False)):
                 return {'job': None}
             if db.execute("SELECT 1 FROM tasks WHERE user_id=? AND device_id=? AND state='TASK_STATE_WORKING' AND unknown=0", (user, device)).fetchone():
                 return {'job': None}
@@ -319,6 +342,8 @@ def handler_for(store, credentials, base):
                     result = store.claim(user, device)
                 elif self.path == '/v1/devices/heartbeat':
                     result = store.heartbeat(user, device, body.get('id'), body.get('attempt'))
+                elif self.path == '/v1/devices/abandon':
+                    result = store.abandon(user, device, body.get('id'), body.get('attempt'))
                 elif self.path == '/v1/devices/finish':
                     result = store.finish(user, device, body)
                 else:
@@ -344,6 +369,8 @@ def handler_for(store, credentials, base):
                             while result['task']['status']['state'] not in TERMINAL | INTERRUPTED:
                                 time.sleep(0.25)
                                 result = {'task': store.get(user, target, result['task']['id'])}
+                    elif method == 'companion/GetMessageReceipt':
+                        result = store.receipt(user, target, params.get('messageId'))
                     elif method == 'GetTask':
                         result = store.get(user, target, params.get('id'))
                     elif method == 'CancelTask':

@@ -1,0 +1,11 @@
+{$COMPANION_DOMAIN} {
+    request_body {
+        max_size 4MB
+    }
+    reverse_proxy companion:9444 {
+        transport http {
+            dial_timeout 5s
+            response_header_timeout 35s
+        }
+    }
+}

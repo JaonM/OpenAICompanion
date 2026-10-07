@@ -1,0 +1,40 @@
+services:
+  companion:
+    build:
+      context: ../..
+      dockerfile: deploy/service/Dockerfile
+    restart: unless-stopped
+    environment:
+      COMPANION_SERVICE_URL: https://${COMPANION_DOMAIN:?Set COMPANION_DOMAIN}
+      COMPANION_METRICS_TOKEN: ${COMPANION_METRICS_TOKEN:?Set a random metrics token}
+    volumes:
+      - companion-data:/data
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 40s
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9444/readyz', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["443:443", "80:80"]
+    environment:
+      COMPANION_DOMAIN: ${COMPANION_DOMAIN:?Set COMPANION_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      companion:
+        condition: service_healthy
+volumes:
+  companion-data:
+  caddy-data:
+  caddy-config:

@@ -4,6 +4,7 @@
 /target/
 **/target/
 Cargo.lock
+!/harness/Cargo.lock
 *.rs.bk
 
 # ============================================
@@ -30,6 +31,7 @@ gradle-wrapper.properties
 *.hprof
 __pycache__/
 *.pyc
+.venv-service/
 
 # ============================================
 # Android

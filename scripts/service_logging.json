@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {"plain": {"format": "%(message)s"}},
+  "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain", "stream": "ext://sys.stdout"}},
+  "loggers": {"companion.service": {"handlers": ["console"], "level": "INFO", "propagate": false}},
+  "root": {"handlers": ["console"], "level": "INFO"}
+}
