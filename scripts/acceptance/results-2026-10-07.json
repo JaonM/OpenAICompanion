@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-07",
+  "scope": "local acceptance; device and production deployment acceptance pending",
+  "rust": {
+    "passed": 59,
+    "evidence": "cargo test --locked --manifest-path harness/Cargo.toml console"
+  },
+  "python": {
+    "passed": 22,
+    "evidence": "unittest discover test_*.py console; Uvicorn enabled"
+  },
+  "jvm": {
+    "tests": 114,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "ios": {
+    "basic_ui": {
+      "result": "Passed",
+      "passedTests": 3,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "startTime": 1791381040.702,
+      "finishTime": 1791381100.612
+    },
+    "scheduled_reminder": {
+      "result": "Passed",
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "startTime": 1791381441.777,
+      "finishTime": 1791381615.564
+    },
+    "device_extension": {
+      "result": "Passed",
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "startTime": 1791382888.565,
+      "finishTime": 1791382902.467
+    }
+  },
+  "limits": [
+    "Worker model is deterministic HTTP fixture, not model-quality acceptance",
+    "Real GGUF UI smoke uses SmolLM2-135M-Instruct Q4_K_M; no quality certification",
+    "iOS runtime tested: 27.0; minimum OS linker warnings unresolved",
+    "Android SDK and real devices unavailable (confirmed by user)",
+    "Container image build blocked by Docker Hub authentication endpoint timeout",
+    "LaunchAgent login/reboot, sleep recovery, load/soak and real calendar permissions pending"
+  ]
+}

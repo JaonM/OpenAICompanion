@@ -1,5 +1,6 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import json
 import importlib.util
 import os
@@ -157,6 +158,31 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.app.body({'content-type': 'application/json'}, disconnected)
         self.assertEqual(rejected.exception.status, 400)
 
+    async def test_full_backup_restores_credentials_tasks_and_memory(self):
+        await self.register(self.mac)
+        _, sent = await self.rpc('SendMessage', {'message': {
+            'messageId': 'restore-message', 'role': 'ROLE_USER', 'parts': [{'text': 'Restore task'}]},
+            'configuration': {'returnImmediately': True}})
+        task_id = sent['result']['task']['id']
+        _, claimed = await self.request('/v1/devices/claim', {}, self.mac['token'])
+        self.app.memories.exchange('user', [{'id': 'a' * 32, 'author': 'b' * 32, 'revision': 1, 'memory': None}])
+        self.app.credentials.revoke('other', self.other['id'])
+        with tempfile.TemporaryDirectory() as restored_directory:
+            for name in ('credentials.sqlite', 'device-tasks.sqlite', 'memory-sync.sqlite'):
+                backup(str(Path(self.directory.name) / name), str(Path(restored_directory) / name))
+            restored = CompanionService(restored_directory, 'https://tasks.example')
+            self.assertIsNotNone(restored.credentials.authenticate(self.phone['token']))
+            self.assertIsNone(restored.credentials.authenticate(self.other['token']))
+            task = restored.tasks.get('user', 'mac', task_id)
+            self.assertEqual(task['status']['state'], 'TASK_STATE_WORKING')
+            self.assertIsNone(restored.tasks.claim('user', 'mac')['job'])
+            receipt = restored.tasks.receipt('user', 'mac', 'restore-message')
+            self.assertEqual(receipt['task']['id'], task_id)
+            self.assertEqual(len(restored.memories.exchange('user', [])), 1)
+            self.assertEqual(restored.memories.exchange('other', []), [])
+            restored.tasks.finish('user', 'mac', dict(claimed['job'], state='TASK_STATE_COMPLETED', text='Restored'))
+            self.assertEqual(restored.tasks.get('user', 'mac', task_id)['status']['state'], 'TASK_STATE_COMPLETED')
+
 
 class CredentialTests(unittest.TestCase):
     def test_pairing_is_atomic_and_tokens_are_hashed(self):
@@ -179,7 +205,7 @@ class CredentialTests(unittest.TestCase):
             copy = directory + '/backup.sqlite'
             backup(store.path, copy)
             self.assertIsNotNone(Credentials(copy).authenticate(issued['token']))
-            with sqlite3.connect(copy) as db:
+            with closing(sqlite3.connect(copy)) as db, db:
                 db.execute('PRAGMA user_version=99')
             with self.assertRaises(RuntimeError):
                 Credentials(copy)

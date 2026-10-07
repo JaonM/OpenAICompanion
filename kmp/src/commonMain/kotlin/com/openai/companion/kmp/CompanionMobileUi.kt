@@ -32,6 +32,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.Json
@@ -147,7 +149,8 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         Text(state.modelStatus)
                         OutlinedButton(onClick = actions::importModel) { Text("导入 GGUF") }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(state.deviceToolsEnabled, actions::setDeviceToolsEnabled)
+                            Checkbox(state.deviceToolsEnabled, actions::setDeviceToolsEnabled,
+                                modifier = Modifier.semantics { contentDescription = "端侧工具扩展开关" })
                             Text("启用端侧工具扩展（设备上下文与日历）")
                         }
                         Text("扩展默认关闭；启用后，日历访问仍需逐次确认和系统权限。")
@@ -156,7 +159,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         Row {
                             Checkbox(state.proactiveSettings.enabled, { enabled ->
                                 actions.saveProactiveConfig(state.proactiveSettings.copy(enabled = enabled))
-                            })
+                            }, modifier = Modifier.semantics { contentDescription = "主动推送开关" })
                             Text("开启主动推送")
                         }
                         Text(state.backgroundReminderStatus)

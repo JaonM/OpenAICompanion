@@ -8,6 +8,25 @@
 
 @implementation OpenAICompanionUITests
 
+- (void)testScheduledReminderSurvivesAppTermination {
+    XCUIApplication *app = [[XCUIApplication alloc] init];
+    [app launch];
+    [app.buttons[@"设置"] tap];
+    if (![app.staticTexts[@"Acceptance scheduled notification"] waitForExistenceWithTimeout:5]) {
+        XCTSkip(@"需要在独立模拟器准备一次性提醒测试数据。");
+    }
+    XCUIElement *toggle = app.buttons[@"主动推送开关"];
+    XCTAssertTrue([toggle waitForExistenceWithTimeout:10]);
+    [toggle tap];
+    XCUIApplication *springboard = [[XCUIApplication alloc] initWithBundleIdentifier:@"com.apple.springboard"];
+    XCUIElement *allow = springboard.alerts.buttons[@"允许"];
+    if ([allow waitForExistenceWithTimeout:5]) [allow tap];
+    XCTAssertTrue([app.staticTexts[@"系统已安排 1 个计划提醒"] waitForExistenceWithTimeout:15]);
+    [app terminate];
+    XCUIElement *notification = springboard.staticTexts[@"Acceptance scheduled notification"];
+    XCTAssertTrue([notification waitForExistenceWithTimeout:180]);
+}
+
 - (void)testSingleConversationAndSettingsSurviveRelaunch {
     XCUIApplication *app = [[XCUIApplication alloc] init];
     [app launch];
@@ -63,8 +82,23 @@
     [app.buttons[@"设置"] tap];
 
     XCUIElement *connected = [[app.staticTexts matchingPredicate:
-        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"已连接 · 3"]] firstMatch];
+        // Three fixture tools plus two shared device-routing tools.
+        [NSPredicate predicateWithFormat:@"label == %@", @"已连接 · 5 个工具"]] firstMatch];
     XCTAssertTrue([connected waitForExistenceWithTimeout:20]);
+}
+
+- (void)testDeviceToolExtensionIsOptional {
+    XCUIApplication *app = [[XCUIApplication alloc] init];
+    app.launchArguments = @[@"-mcpEndpoint", @"http://127.0.0.1:8765/mcp", @"-deviceToolsEnabled", @"NO"];
+    [app launch];
+    [app.buttons[@"设置"] tap];
+    XCTAssertTrue([app.staticTexts[@"已连接 · 5 个工具"] waitForExistenceWithTimeout:20]);
+    XCUIElement *toggle = app.buttons[@"端侧工具扩展开关"];
+    XCTAssertTrue([toggle waitForExistenceWithTimeout:10]);
+    [toggle tap];
+    XCTAssertTrue([app.staticTexts[@"已连接 · 9 个工具"] waitForExistenceWithTimeout:10]);
+    [toggle tap];
+    XCTAssertTrue([app.staticTexts[@"已连接 · 5 个工具"] waitForExistenceWithTimeout:10]);
 }
 
 @end

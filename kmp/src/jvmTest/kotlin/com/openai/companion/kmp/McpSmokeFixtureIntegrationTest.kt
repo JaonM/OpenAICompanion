@@ -19,12 +19,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import org.junit.Assume.assumeTrue
 
 /** Opt-in wire test against the same standalone server used for iOS Simulator acceptance. */
 class McpSmokeFixtureIntegrationTest {
     @Test
     fun sharedClientCompletesFixtureToolsAndInputRoundTrip() = runBlocking {
-        if (System.getenv("RUN_MCP_SMOKE_FIXTURE") != "1") return@runBlocking
+        assumeTrue(System.getenv("RUN_MCP_SMOKE_FIXTURE") == "1")
         val fixture = File("../scripts/mcp_smoke_server.py").canonicalFile
         require(fixture.isFile) { "Missing MCP smoke fixture: $fixture" }
         val process = ProcessBuilder("python3", fixture.path, "--port", "0")

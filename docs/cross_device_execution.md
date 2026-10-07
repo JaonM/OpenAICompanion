@@ -139,3 +139,63 @@ HARNESS_LIBRARY_PATH="$PWD/../harness/target/release/libharness.dylib" \
 ```
 
 HTTP 集成测试覆盖两设备提交、追问、回复、回传和用户隔离；存储测试覆盖并发接单、重启、不确定状态和幂等。KMP 测试覆盖本地优先、指定设备、资源匹配、前台条件、不同源令牌保护、回传恢复、有限自动回复和取消归属。Harness 绑定测试验证任务不读取本地对话、不向聊天发送事件，回复后保留工具结果且不重复调用。新增生产服务测试覆盖凭据撤销与轮换、并发配对、消息回执、导出删除隔离、请求边界及真实 Uvicorn 启停。JVM 测试覆盖后台路由、进程中断不重跑、损坏状态拒绝覆盖和原子文件替换。实际两设备 UI、后台挂起和网络切换仍需真机验收。
+
+## 2026-10-07 本机验收记录
+
+本次验收使用独立数据库、一次性回环服务、专用 Keychain 测试条目和新建的 `Companion Acceptance` 模拟器，不读写私人日历。结果只对已运行的平台及场景有效。
+
+测试数量、运行结果与未覆盖范围保存在[结构化验收结果](../scripts/acceptance/results-2026-10-07.json)。
+
+| 能力 | 实际证据 | 结论与边界 |
+| --- | --- | --- |
+| Harness 对话、记忆、任务与策略 | Rust 59 项回归通过 | 逻辑与持久化通过；不代表真实模型质量评测 |
+| MCP、A2A、记忆同步、路由与恢复 | JVM 全部 114 项通过，零跳过；真实 MCP 服务链路开启 | 协议及原生桥接通过；真实手机与 Mac 联动仍待验收 |
+| Keychain | 真正执行读、写、更新、删除及非交互读取 | 本机通过；真机安全存储和发布签名身份变化仍待验收 |
+| Mac worker | 最新 DMG 打包；真实应用进程 + Uvicorn + Rust + Keychain 自动接单、回传、重启防重跑及进程互斥 | 通过；模型使用确定性 HTTP 测试响应，未安装 LaunchAgent，也未验证睡眠/登录重启 |
+| 服务凭据与数据维护 | Python 22 项通过，含 Uvicorn 启停、配对撤销、消息回执、导出删除及三库备份恢复 | 本机通过；未进行公网、容量及长期运行验收 |
+| iOS App | 最新模拟器 App 完整构建和真机目标无签名构建 | 编译/链接通过；真实设备未连接 |
+| iOS 基础 UI | 会话与设置重启恢复、MCP 连接、真实 GGUF 回复 3 项通过，无跳过 | iOS 27 模拟器通过；小模型只验证能回复，不代表质量达标 |
+| iOS 后台提醒 | 允许通知后终止 App，SpringBoard 实际显示一次性计划提醒；1 项通过，无跳过 | 模拟器链路通过；重复时间、夏令时、专注模式及真实设备省电行为仍待验收 |
+| 端侧工具扩展 | iOS 模拟器实际切换关闭→开启→关闭，工具数 5→9→5；1 项通过，无跳过 | 开关及注册通过；日历授权、查询和写入仅有共享契约/桥接测试，真实账户待验收 |
+| Android | 当前无 Android SDK 或验收设备，用户确认暂不提供 | 构建、后台排程与端到端待验收 |
+| 容器与 TLS | Compose 配置校验通过，尝试实际构建镜像 | 拉取 `python:3.13-slim` 在 Docker Hub 认证请求处超时；容器、TLS 部署未通过验收 |
+
+验收中修复了 Apple/Desktop 构建误依赖 Android SDK、worker 无窗口模式等待 UI 主线程、后台读取 Keychain 可能等待授权 UI 的问题。MCP 用例未开启时现在明确标记跳过，避免无操作却计为通过。iOS MCP UI 断言按远程 3 个工具 + 路由 2 个工具更新；扩展额外注册设备上下文、日历查询、日历目录和新建四个工具。
+
+iOS 链接仍报告 SQLite 对象最低版本为 27.0、ICU 为 17.2，而 App 声明 17.0；本次只运行 iOS 27 模拟器，不能声称兼容 17.0。上线前应修正部署版本配置并在最低支持系统验收。
+
+### 复现打包 worker 验收
+
+在仓库根目录准备服务环境、打包应用和隔离 Preferences 工厂，再执行测试：
+
+```sh
+python3 -m venv .venv-service
+.venv-service/bin/pip install -r scripts/requirements-service.txt
+./scripts/macos-app.sh package
+mkdir -p /tmp/companion-acceptance-java
+javac -d /tmp/companion-acceptance-java scripts/acceptance/AcceptancePreferencesFactory.java
+jar cf /tmp/companion-acceptance-prefs.jar -C /tmp/companion-acceptance-java .
+cd kmp
+RUN_MCP_SMOKE_FIXTURE=1 COMPANION_TEST_KEYCHAIN=1 \
+COMPANION_TEST_WORKER_APP="$PWD/build/compose/binaries/main/app/OpenAICompanion.app/Contents/MacOS/OpenAICompanion" \
+COMPANION_TEST_PREFS_JAR=/tmp/companion-acceptance-prefs.jar \
+COMPANION_TEST_SERVICE_PYTHON="$PWD/../.venv-service/bin/python" \
+HARNESS_LIBRARY_PATH="$PWD/../harness/target/release/libharness.dylib" \
+./gradlew -PkmpJvmToolchain=21 -PskipAndroidApp=true jvmTest
+```
+
+worker 用例只在显式配置应用路径时执行。工厂 JAR 是测试注入，隔离模型/设置并在应用本身身份下创建、清理测试凭据，不打进产品包，也不修改个人 Preferences。未配置验收开关的真实服务、worker 和 Keychain 用例应按跳过处理。
+
+### 复现 iOS 退出后提醒验收
+
+新建并启动名称以 `Companion Acceptance` 开头的专用模拟器，安装并启动最新版 App 一次。不要复用带有个人任务的实例。在仓库根目录执行：
+
+```sh
+python3 scripts/acceptance/prepare_ios_reminder.py --device <专用模拟器-UDID>
+xcodebuild -project ios/OpenAICompanion.xcodeproj -scheme OpenAICompanion \
+  -configuration Debug -destination 'platform=iOS Simulator,id=<专用模拟器-UDID>' \
+  -parallel-testing-enabled NO -collect-test-diagnostics never CODE_SIGNING_ALLOWED=NO \
+  -only-testing:OpenAICompanionUITests/OpenAICompanionUITests/testScheduledReminderSurvivesAppTermination test
+```
+
+准备脚本仅允许已启动的专用模拟器，拒绝存在其他任务的数据库。测试从设置开启主动推送、允许通知，再终止 App 并观察系统通知；缺少专用任务时明确跳过。通知权限必须允许，拒绝授权应视为该场景未验收。
