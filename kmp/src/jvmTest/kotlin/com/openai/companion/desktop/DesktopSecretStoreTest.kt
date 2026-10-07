@@ -14,6 +14,7 @@ class DesktopSecretStoreTest {
             assertNull(store.read(account))
             store.write(account, "测试-secret")
             assertEquals("测试-secret", store.read(account))
+            assertEquals("测试-secret", DesktopSecretStore(allowInteraction = false).read(account))
             store.write(account, "updated")
             assertEquals("updated", store.read(account))
             store.remove(account)

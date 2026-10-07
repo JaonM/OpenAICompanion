@@ -92,7 +92,7 @@ sealed interface DesktopStreamEvent {
 
 data class McpApprovalRequest(val id: Long, val toolName: String, val argumentsJson: String)
 
-class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
+class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe(), private val backgroundWorker: Boolean = false) {
     private val proactiveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val proactiveWake = Channel<Unit>(Channel.CONFLATED)
     private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
@@ -104,7 +104,7 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
     private val agentGate = AgentExecutionGate()
     private val approvalGate = Mutex()
     private val syncGate = Mutex()
-    private val syncSecrets = DesktopSecretStore()
+    private val syncSecrets = DesktopSecretStore(allowInteraction = !backgroundWorker)
     private val memorySyncWorker = MemorySyncWorker(
         enabled = { memorySyncEndpoint.isNotBlank() },
         pending = { appMemorySyncPending().value().toBooleanStrict() },
@@ -128,7 +128,7 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
         System.getenv("COMPANION_DATA_DIR")?.takeIf(String::isNotBlank)
             ?: (System.getProperty("user.home") + "/Library/Application Support/OpenAICompanion"), "device-tasks.json"))
     val devices = CrossDeviceService(syncHttp, a2a, a2aTokens, deviceSettings::load, deviceSettings::save, "macos",
-        { withContext(Dispatchers.Main) { java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null } },
+        ::isForeground,
         manager::tools, { request -> withContext(Dispatchers.IO) { agentGate.withLock { bindings.executeDeviceTask(request) } } },
         answerQuestion = { request -> withContext(Dispatchers.IO) { agentGate.withLock { bindings.answerDeviceQuestion(request) } } },
         backgroundExecution = true)
@@ -457,11 +457,15 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
 
     val deviceToolsEnabled: Boolean get() = preferences.getBoolean("deviceToolsEnabled", false)
 
+    private suspend fun isForeground(): Boolean = !backgroundWorker && withContext(Dispatchers.Main) {
+        java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null
+    }
+
     private suspend fun attachDeviceTools() {
         manager.attach("device", DeviceToolConnection(
             createDeviceTools("macos", { java.util.Locale.getDefault().toLanguageTag() },
                 DesktopCalendarEventDataSource(),
-                { withContext(Dispatchers.Main) { java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null } }, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings))))
+                ::isForeground, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings))))
     }
 
     suspend fun setDeviceToolsEnabled(enabled: Boolean) = agentGate.withLock {

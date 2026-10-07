@@ -17,7 +17,7 @@ fun main(args: Array<String>) {
     DesktopProcessLease.acquire().use {
         if (args.contentEquals(arrayOf("--worker"))) {
             runBlocking {
-                DesktopBackend().initialize()
+                DesktopBackend(backgroundWorker = true).initialize()
                 awaitCancellation()
             }
         } else {

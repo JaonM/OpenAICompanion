@@ -7,7 +7,7 @@ import com.sun.jna.Pointer
 import com.sun.jna.ptr.PointerByReference
 
 /** Generic-password Keychain access. Secrets never enter command-line arguments or Preferences. */
-internal class DesktopSecretStore {
+internal class DesktopSecretStore(private val allowInteraction: Boolean = true) {
     private interface CoreFoundation : Library {
         fun CFStringCreateWithCString(allocator: Pointer?, text: String, encoding: Int): Pointer
         fun CFDictionaryCreateMutable(allocator: Pointer?, capacity: Long, keys: Pointer, values: Pointer): Pointer
@@ -49,6 +49,8 @@ internal class DesktopSecretStore {
         block(query)
     }
     fun read(account: String): String? = query(account) { query ->
+        if (!allowInteraction) cf.CFDictionarySetValue(query, constant("kSecUseAuthenticationUI"),
+            constant("kSecUseAuthenticationUIFail"))
         cf.CFDictionarySetValue(query, constant("kSecReturnData"),
             cfLibrary.getGlobalVariableAddress("kCFBooleanTrue").getPointer(0))
         val result = PointerByReference()
