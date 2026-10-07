@@ -88,6 +88,7 @@ impl Tool for DelegateTool {
 }
 
 pub(crate) fn create_schema(connection: &Connection) -> Result<(), MemoryError> {
+    connection.execute_batch("SAVEPOINT a2a_schema;")?;
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS a2a_agents (
             id TEXT PRIMARY KEY,
@@ -110,6 +111,13 @@ pub(crate) fn create_schema(connection: &Connection) -> Result<(), MemoryError> 
         );
         CREATE INDEX IF NOT EXISTS a2a_tasks_state ON a2a_tasks(state, updated_at);",
     )?;
+    let has_message_id = connection.prepare("PRAGMA table_info(a2a_tasks)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?.iter().any(|column| column == "pending_message_id");
+    if !has_message_id {
+        connection.execute_batch("ALTER TABLE a2a_tasks ADD COLUMN pending_message_id TEXT;")?;
+    }
+    connection.execute_batch("RELEASE a2a_schema;")?;
     Ok(())
 }
 
@@ -199,6 +207,7 @@ impl MemoryStore {
         let context_id = optional(value, "contextId");
         let question = optional(value, "question");
         let result = optional(value, "result");
+        let pending_message_id = optional(value, "pendingMessageId");
         let connection = self
             .connection
             .lock()
@@ -206,8 +215,8 @@ impl MemoryStore {
         let now = now_unix_seconds();
         if let Some(id) = id {
             let changed = connection.execute(
-                "UPDATE a2a_tasks SET remote_task_id=?2,context_id=?3,state=?4,request_text=?5,question=?6,result=?7,updated_at=?8 WHERE id=?1 AND agent_id=?9",
-                params![id,remote_task_id,context_id,state,request_text,question,result,now,agent_id],
+                "UPDATE a2a_tasks SET remote_task_id=?2,context_id=?3,state=?4,request_text=?5,question=?6,result=?7,updated_at=?8,pending_message_id=?10 WHERE id=?1 AND agent_id=?9",
+                params![id,remote_task_id,context_id,state,request_text,question,result,now,agent_id,pending_message_id],
             )?;
             if changed == 0 {
                 return Err(MemoryError::InvalidData("A2A task not found".into()));
@@ -215,9 +224,9 @@ impl MemoryStore {
             Ok(json!({"id":id}))
         } else {
             connection.execute(
-                "INSERT INTO a2a_tasks (agent_id,remote_task_id,context_id,state,request_text,question,result,updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-                params![agent_id,remote_task_id,context_id,state,request_text,question,result,now],
+                "INSERT INTO a2a_tasks (agent_id,remote_task_id,context_id,state,request_text,question,result,updated_at,pending_message_id)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![agent_id,remote_task_id,context_id,state,request_text,question,result,now,pending_message_id],
             )?;
             Ok(json!({"id":connection.last_insert_rowid()}))
         }
@@ -229,7 +238,7 @@ impl MemoryStore {
             .lock()
             .map_err(|_| MemoryError::LockPoisoned)?;
         let mut statement = connection.prepare(
-            "SELECT id,agent_id,remote_task_id,context_id,state,request_text,question,result,updated_at
+            "SELECT id,agent_id,remote_task_id,context_id,state,request_text,question,result,updated_at,pending_message_id
              FROM a2a_tasks ORDER BY id DESC",
         )?;
         let rows = statement.query_map([], |row| Ok(json!({
@@ -237,7 +246,7 @@ impl MemoryStore {
             "remoteTaskId":row.get::<_,Option<String>>(2)?,"contextId":row.get::<_,Option<String>>(3)?,
             "state":row.get::<_,String>(4)?,"requestText":row.get::<_,String>(5)?,
             "question":row.get::<_,Option<String>>(6)?,"result":row.get::<_,Option<String>>(7)?,
-            "updatedAt":row.get::<_,i64>(8)?
+            "updatedAt":row.get::<_,i64>(8)?,"pendingMessageId":row.get::<_,Option<String>>(9)?
         })))?;
         Ok(Value::Array(rows.collect::<Result<Vec<_>, _>>()?))
     }
@@ -299,6 +308,21 @@ mod tests {
     }
 
     #[test]
+    fn legacy_task_schema_preserves_records_and_adds_durable_message_identity() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE a2a_tasks (
+            id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, remote_task_id TEXT, context_id TEXT,
+            state TEXT NOT NULL, request_text TEXT NOT NULL, question TEXT, result TEXT, updated_at INTEGER NOT NULL);
+            INSERT INTO a2a_tasks VALUES(1,'agent',NULL,NULL,'SEND_UNCERTAIN','original',NULL,NULL,1);").unwrap();
+        create_schema(&connection).unwrap();
+        create_schema(&connection).unwrap();
+        let text: String = connection.query_row("SELECT request_text FROM a2a_tasks WHERE id=1", [], |row| row.get(0)).unwrap();
+        assert_eq!(text, "original");
+        let id: Option<String> = connection.query_row("SELECT pending_message_id FROM a2a_tasks WHERE id=1", [], |row| row.get(0)).unwrap();
+        assert_eq!(id, None);
+    }
+
+    #[test]
     fn task_and_agent_survive_reopen_and_disabled_agent_keeps_provenance() {
         let path = std::env::temp_dir().join(format!(
             "companion-a2a-{}-{}.sqlite",
@@ -318,13 +342,14 @@ mod tests {
         let created = store
             .a2a_put_task(&json!({
                 "agentId":"https://agent.example/card", "state":"TASK_STATE_INPUT_REQUIRED",
-                "requestText":"summarize", "remoteTaskId":"remote-1", "question":"Which year?"
+                "requestText":"summarize", "remoteTaskId":"remote-1", "question":"Which year?", "pendingMessageId":"message-1"
             }))
             .unwrap();
         let id = created["id"].as_i64().unwrap();
         drop(store);
         let reopened = MemoryStore::open(&path).unwrap();
         assert_eq!(reopened.a2a_tasks().unwrap()[0]["question"], "Which year?");
+        assert_eq!(reopened.a2a_tasks().unwrap()[0]["pendingMessageId"], "message-1");
         reopened
             .a2a_put_task(&json!({
                 "id":id, "agentId":"https://agent.example/card", "state":"TASK_STATE_COMPLETED",

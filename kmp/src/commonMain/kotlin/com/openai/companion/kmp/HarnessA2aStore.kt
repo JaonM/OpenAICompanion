@@ -52,6 +52,7 @@ class HarnessA2aStore(
                 remoteTaskId = item.optional("remoteTaskId"), contextId = item.optional("contextId"),
                 question = item.optional("question"), result = item.optional("result"),
                 updatedAt = item.getValue("updatedAt").jsonPrimitive.long,
+                pendingMessageId = item.optional("pendingMessageId"),
             )
         }
     }
@@ -64,6 +65,7 @@ class HarnessA2aStore(
             task.contextId?.let { put("contextId", it) }
             task.question?.let { put("question", it) }
             task.result?.let { put("result", it) }
+            task.pendingMessageId?.let { put("pendingMessageId", it) }
         }.toString())).jsonObject
         task.copy(id = result.getValue("id").jsonPrimitive.long)
     }

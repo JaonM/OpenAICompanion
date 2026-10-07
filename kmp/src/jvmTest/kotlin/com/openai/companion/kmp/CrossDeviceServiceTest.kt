@@ -35,6 +35,23 @@ class CrossDeviceServiceTest {
     private fun card() = Json.parseToJsonElement("""{"name":"Mac","supportedInterfaces":[{"url":"https://gateway.test/agents/mac/rpc","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"securitySchemes":{"bearer":{"httpAuthSecurityScheme":{"scheme":"Bearer"}}},"securityRequirements":[{"schemes":{"bearer":[]}}],"skills":[]}""").jsonObject
 
     @Test
+    fun failedSettingsWriteDoesNotSwitchTheLiveConnection() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val http = HttpClient(MockEngine { error("must not contact a service") })
+        val tokens = Tokens()
+        val client = A2aClient(http, Store(), tokens, scope) { true }
+        val service = CrossDeviceService(http, client, tokens,
+            { """{"endpoint":"https://original.test","name":"Original","acceptTasks":false}""" },
+            { error("disk unavailable") }, "ios", { true }, { emptyList() }, { error("must not execute") })
+        try {
+            assertFailsWith<IllegalStateException> { service.configure("https://new.test", "secret", "New", true) }
+            assertEquals("https://original.test", service.endpoint)
+            assertEquals("Original", service.deviceName)
+            assertFalse(service.acceptsTasks)
+        } finally { scope.cancel(); http.close() }
+    }
+
+    @Test
     fun routingPrefersLocalAndHonorsExplicitTargetAndResources() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val peers = listOf(device("phone", listOf("calendar")), device("mac", listOf("calendar", "build")))
@@ -65,6 +82,71 @@ class CrossDeviceServiceTest {
             assertEquals("WAITING", service.resolve(listOf(device("mac", listOf("build"), online = false)), args)["decision"]!!.jsonPrimitive.content)
             assertEquals("NEEDS_USER_ACTION", service.resolve(listOf(device("mac", listOf("build"), foreground = false)), args)["decision"]!!.jsonPrimitive.content)
             assertEquals("secret", tokens.load("https://gateway.test/agents/mac/card"))
+        } finally { scope.cancel(); http.close() }
+    }
+
+    @Test
+    fun lostActiveExecutionIsReconciledOnRestartWithoutReexecution() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        var settings = """{"endpoint":"https://gateway.test","name":"Mac","acceptTasks":true,"active":{"id":"t1","attempt":"a1"}}"""
+        var abandons = 0
+        val http = HttpClient(MockEngine { req ->
+            val reply = when (req.url.encodedPath) {
+                "/v1/devices/register" -> """{"id":"mac"}"""
+                "/v1/devices/abandon" -> {
+                    val active = Json.parseToJsonElement((req.body as TextContent).text).jsonObject
+                    assertEquals("a1", active["attempt"]!!.jsonPrimitive.content)
+                    abandons++; """{"ok":true}"""
+                }
+                "/v1/devices" -> """{"devices":[]}"""
+                "/v1/devices/claim" -> """{"job":null}"""
+                else -> error("Unexpected endpoint")
+            }
+            respond(reply, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        })
+        val tokens = Tokens().also { it.save("device-tasks:https://gateway.test", "secret") }
+        val client = A2aClient(http, Store(), tokens, scope) { true }
+        try {
+            val service = CrossDeviceService(http, client, tokens, { settings }, { settings = it }, "macos",
+                { true }, { emptyList() }, { error("Interrupted tasks must not be re-executed") })
+            service.tick()
+            assertEquals(1, abandons)
+            assertNull(Json.parseToJsonElement(settings).jsonObject["active"])
+        } finally { scope.cancel(); http.close() }
+    }
+
+    @Test
+    fun corruptExecutionStateCannotBeSilentlyOverwritten() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val http = HttpClient(MockEngine { error("No request allowed") })
+        val tokens = Tokens()
+        val client = A2aClient(http, Store(), tokens, scope) { true }
+        var writes = 0
+        try {
+            val service = CrossDeviceService(http, client, tokens, { "invalid JSON" }, { writes++ }, "ios",
+                { true }, { emptyList() }, { error("No execution allowed") })
+            assertFailsWith<IllegalStateException> { service.configure("", "", "", false) }
+            assertFailsWith<IllegalStateException> { service.tick() }
+            assertEquals(0, writes)
+        } finally { scope.cancel(); http.close() }
+    }
+
+    @Test
+    fun backgroundWorkerCanRunTextButCannotRouteForegroundCalendar() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val http = HttpClient(MockEngine { respond("{}") })
+        val tokens = Tokens()
+        val client = A2aClient(http, Store(), tokens, scope) { true }
+        val service = CrossDeviceService(http, client, tokens, { "{}" }, {}, "ios", { true }, { emptyList() }, { error("unused") })
+        try {
+            val worker = JsonObject(device("mac", listOf("calendar"), foreground = false) + mapOf(
+                "backgroundExecution" to JsonPrimitive(true),
+                "tools" to JsonArray(listOf(buildJsonObject { put("name", "calendar"); put("requiresForeground", true) }))))
+            fun route(capability: String) = service.resolve(listOf(worker), buildJsonObject {
+                put("required_capabilities", JsonArray(listOf(JsonPrimitive(capability))))
+            })["decision"]!!.jsonPrimitive.content
+            assertEquals("REMOTE", route("model.complete"))
+            assertEquals("NEEDS_USER_ACTION", route("calendar"))
         } finally { scope.cancel(); http.close() }
     }
 

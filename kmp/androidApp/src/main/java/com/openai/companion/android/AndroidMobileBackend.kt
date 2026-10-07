@@ -78,6 +78,21 @@ class AndroidMobileBackend(
     override val deviceAcceptsTasks get() = devices.acceptsTasks
     override val deviceStatus get() = devices.status
     override suspend fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = devices.configure(endpoint, token, name, accepts)
+    override suspend fun pairDevice(endpoint: String, code: String, name: String, accepts: Boolean) = devices.pair(endpoint, code, name, accepts)
+    private val scheduled = AndroidScheduledReminders(context)
+    private val mutableReminderStatus = MutableStateFlow("后台提醒未启用")
+    override val backgroundReminderStatus = mutableReminderStatus
+    override val reminderSettingsAvailable get() = android.os.Build.VERSION.SDK_INT >= 31
+    override fun openReminderSettings() = notifications.openExactAlarmSettings()
+    private fun refreshScheduledReminders() {
+        val plans = scheduledReminders(proactiveTasks, proactiveSettings.enabled, Instant.now().epochSecond)
+        scheduled.replace(plans)
+        mutableReminderStatus.value = when {
+            !proactiveSettings.enabled -> "后台提醒未启用"
+            !notifications.permitted -> "请在系统设置中允许通知，后台提醒暂无法显示"
+            else -> "系统已安排 ${plans.size} 个提醒 · " + if (scheduled.exact) "已获得精确提醒权限" else "缺少精确提醒权限，可能延迟"
+        }
+    }
     private var initialized = false
 
     override var mealReminderEnabled: Boolean = false
@@ -94,6 +109,8 @@ class AndroidMobileBackend(
         private set
     private val mutableProactiveTasks = MutableStateFlow<List<ProactiveTask>>(emptyList())
     override val proactiveTaskUpdates: StateFlow<List<ProactiveTask>> = mutableProactiveTasks.asStateFlow()
+    override val deviceToolsEnabled get() = mcp.deviceToolsEnabled
+    override suspend fun setDeviceToolsEnabled(enabled: Boolean) = mcp.setDeviceToolsEnabled(enabled)
     override val mcpEndpoint: String get() = mcp.endpoint
     override val mcpStatus: String get() = mcp.status
     override val mcpStatusUpdates: StateFlow<String> get() = mcp.statusUpdates
@@ -117,6 +134,7 @@ class AndroidMobileBackend(
         })
         loadRules()
         proactiveSettings = Json.decodeFromString(appGetProactiveSettings().value())
+        refreshScheduledReminders()
         initialized = true
         requestPermissionForEnabledTasks()
         scope.launch {
@@ -186,15 +204,17 @@ class AndroidMobileBackend(
         }
     }
     fun onActivityResumed() {
-        if (initialized) scope.launch { requestPermissionForEnabledTasks() }
+        if (initialized) scope.launch { requestPermissionForEnabledTasks(); refreshScheduledReminders() }
     }
     private suspend fun requestPermissionForEnabledTasks() {
         if (proactiveSettings.enabled && proactiveTasks.any { it.enabled }) notifications.requestPermission()
     }
     override suspend fun saveProactiveConfig(settings: ProactiveSettings) {
+        scheduledReminders(proactiveTasks, settings.enabled, Instant.now().epochSecond)
         if (settings.enabled && !notifications.requestPermission()) error("请先允许 App 发送通知")
         proactiveSettings = Json.decodeFromString(appSetProactiveSettings(
             settings.enabled, settings.discoveryIntervalMinutes).value())
+        refreshScheduledReminders()
         wake.trySend(Unit)
         discoveryWake.trySend(Unit)
         if (settings.enabled) {
@@ -284,6 +304,7 @@ class AndroidMobileBackend(
         loadRules(); wake.trySend(Unit)
     }
     override suspend fun saveProactiveTask(task: ProactiveTask) {
+        scheduledReminders(proactiveTasks.filter { it.scenario != task.scenario } + task, proactiveSettings.enabled, Instant.now().epochSecond)
         if (proactiveSettings.enabled && task.enabled && !notifications.requestPermission()) error("请先允许 App 发送通知")
         withContext(Dispatchers.IO) {
             appPutProactiveTask(Json.encodeToString(task.copy(timezoneOffsetMinutes = timezoneOffset(),
@@ -307,6 +328,7 @@ class AndroidMobileBackend(
     private suspend fun loadRules() = withContext(Dispatchers.IO) {
         proactiveTasks = Json.decodeFromString(appListProactiveRules().value())
         mutableProactiveTasks.value = proactiveTasks
+        if (initialized) refreshScheduledReminders()
         proactiveTasks.forEach { rule ->
             val time = "%02d:%02d".format(rule.localMinute / 60, rule.localMinute % 60)
             when (rule.scenario) {

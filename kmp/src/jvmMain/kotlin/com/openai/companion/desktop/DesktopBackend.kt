@@ -130,7 +130,8 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
     val devices = CrossDeviceService(syncHttp, a2a, a2aTokens, deviceSettings::load, deviceSettings::save, "macos",
         { withContext(Dispatchers.Main) { java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null } },
         manager::tools, { request -> withContext(Dispatchers.IO) { agentGate.withLock { bindings.executeDeviceTask(request) } } },
-        answerQuestion = { request -> withContext(Dispatchers.IO) { agentGate.withLock { bindings.answerDeviceQuestion(request) } } })
+        answerQuestion = { request -> withContext(Dispatchers.IO) { agentGate.withLock { bindings.answerDeviceQuestion(request) } } },
+        backgroundExecution = true)
 
     @Volatile var memorySyncEndpoint: String = preferences.get("memorySyncEndpoint", "")
         private set
@@ -177,10 +178,7 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
             require(support.isDirectory || support.mkdirs()) { "无法创建应用数据目录" }
             appOpenStore(File(support, "companion.sqlite").absolutePath).value()
         }
-        manager.attach("device", DeviceToolConnection(
-            createDeviceTools("macos", { java.util.Locale.getDefault().toLanguageTag() },
-                DesktopCalendarEventDataSource(),
-                { withContext(Dispatchers.Main) { java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null } }, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings))))
+        if (deviceToolsEnabled) attachDeviceTools()
         registerMcpProvider(bindings, manager, ::approveMcpTool)
         a2a.start()
         registerA2aProvider(object : A2aProvider {
@@ -455,6 +453,21 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
 
     suspend fun deleteSession(id: Long) = withContext(Dispatchers.IO) {
         appDeleteSession(id).value()
+    }
+
+    val deviceToolsEnabled: Boolean get() = preferences.getBoolean("deviceToolsEnabled", false)
+
+    private suspend fun attachDeviceTools() {
+        manager.attach("device", DeviceToolConnection(
+            createDeviceTools("macos", { java.util.Locale.getDefault().toLanguageTag() },
+                DesktopCalendarEventDataSource(),
+                { withContext(Dispatchers.Main) { java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null } }, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings))))
+    }
+
+    suspend fun setDeviceToolsEnabled(enabled: Boolean) = agentGate.withLock {
+        preferences.putBoolean("deviceToolsEnabled", enabled)
+        preferences.flush()
+        if (enabled) attachDeviceTools() else manager.detach("device")
     }
 
     suspend fun connectMcp(endpoint: String) {

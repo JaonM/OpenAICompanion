@@ -15,6 +15,8 @@ class IosMcpService(
     approve: suspend (String, String) -> Boolean,
     requestInput: suspend (String, String, JsonObject) -> JsonObject,
 ) : MobileMcpService(
+    loadDeviceToolsEnabled = { NSUserDefaults.standardUserDefaults.boolForKey("deviceToolsEnabled") },
+    saveDeviceToolsEnabled = { NSUserDefaults.standardUserDefaults.setBool(it, forKey = "deviceToolsEnabled") },
     deviceTools = { createDeviceTools(
         "ios", { platform.Foundation.NSLocale.preferredLanguages.firstOrNull() as? String ?: "und" },
         IosCalendarEventDataSource(),

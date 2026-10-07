@@ -72,6 +72,7 @@ data class A2aTask(
     val question: String? = null,
     val result: String? = null,
     val updatedAt: Long = 0,
+    val pendingMessageId: String? = null,
 ) {
     val terminal: Boolean get() = state in setOf(
         "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED", "DIRECT_MESSAGE", "SEND_UNCERTAIN",
@@ -218,11 +219,12 @@ class A2aClient(
         if (agents.value.none { it.id == agent.id && it.card == agent.card && it.enabled }) {
             return "{\"error\":\"Agent 配置已变化，请重新确认\"}"
         }
-        var task = store.putTask(A2aTask(0, agent.id, text, "SUBMITTING"))
+        val message = userMessage(text)
+        var task = store.putTask(A2aTask(0, agent.id, text, "SUBMITTING", pendingMessageId = field(message, "messageId")))
         reload()
         try {
             task = fromSendResult(task, rpc(agent, "SendMessage", buildJsonObject {
-                put("message", userMessage(text))
+                put("message", message)
                 put("configuration", buildJsonObject { put("returnImmediately", true) })
             }))
             store.putTask(task)
@@ -248,8 +250,21 @@ class A2aClient(
     suspend fun refresh() {
         val current = store.tasks()
         for (task in current) {
-            if (task.terminal || task.remoteTaskId == null || task.state in setOf("TASK_STATE_INPUT_REQUIRED", "REPLY_SUBMITTING")) continue
             val agent = agents.value.firstOrNull { it.id == task.agentId } ?: continue
+            if (task.state in setOf("SEND_UNCERTAIN", "REPLY_UNCERTAIN") && task.pendingMessageId != null &&
+                (agent.card["metadata"] as? JsonObject)?.get("companionRecoveryVersion") == JsonPrimitive(1)) {
+                try {
+                    val receipt = rpc(agent, "companion/GetMessageReceipt", buildJsonObject { put("messageId", task.pendingMessageId) })
+                    val remote = receipt["task"] as? JsonObject ?: continue
+                    val latest = store.tasks().firstOrNull { it.id == task.id }
+                    if (latest?.state == task.state && latest.pendingMessageId == task.pendingMessageId) {
+                        store.putTask(fromRemoteTask(task, remote))
+                    }
+                } catch (error: CancellationException) { throw error }
+                catch (_: Exception) { /* Query receipts only; never replay a send or reply. */ }
+                continue
+            }
+            if (task.terminal || task.remoteTaskId == null || task.state in setOf("TASK_STATE_INPUT_REQUIRED", "REPLY_SUBMITTING")) continue
             try {
                 val result = rpc(agent, "GetTask", buildJsonObject { put("id", task.remoteTaskId) })
                 val latest = store.tasks().firstOrNull { it.id == task.id }
@@ -267,18 +282,20 @@ class A2aClient(
         require(task.state == "TASK_STATE_INPUT_REQUIRED") { "该任务当前不等待回复" }
         require(text.isNotBlank()) { "回复不能为空" }
         val agent = agents.value.firstOrNull { it.id == task.agentId } ?: error("Agent 配置不存在")
-        store.putTask(task.copy(state = "REPLY_SUBMITTING"))
+        val message = userMessage(text.trim(), task.remoteTaskId, task.contextId)
+        val pending = task.copy(state = "REPLY_SUBMITTING", pendingMessageId = field(message, "messageId"))
+        store.putTask(pending)
         reload()
         try {
             val result = rpc(agent, "SendMessage", buildJsonObject {
-                put("message", userMessage(text.trim(), task.remoteTaskId, task.contextId))
+                put("message", message)
                 put("configuration", buildJsonObject { put("returnImmediately", true) })
             })
-            store.putTask(fromSendResult(task, result))
+            store.putTask(fromSendResult(pending, result))
             reload()
         } catch (error: Exception) {
             withContext(NonCancellable) {
-                store.putTask(task.copy(state = "REPLY_UNCERTAIN", result = error.message ?: error.toString()))
+                store.putTask(pending.copy(state = "REPLY_UNCERTAIN", result = error.message ?: error.toString()))
                 reload()
             }
             throw error
@@ -339,7 +356,8 @@ class A2aClient(
         val remoteTask = result["task"] as? JsonObject
         if (remoteTask != null) return fromRemoteTask(task, remoteTask)
         val message = result["message"] as? JsonObject ?: error("A2A 响应缺少 task/message")
-        return task.copy(state = "DIRECT_MESSAGE", result = textParts(message).ifBlank { "远端返回了非文本内容" }, contextId = field(message, "contextId"))
+        return task.copy(state = "DIRECT_MESSAGE", pendingMessageId = null,
+            result = textParts(message).ifBlank { "远端返回了非文本内容" }, contextId = field(message, "contextId"))
     }
 
     private fun fromRemoteTask(local: A2aTask, remote: JsonObject): A2aTask {
@@ -352,6 +370,7 @@ class A2aClient(
         val artifactObjects = (remote["artifacts"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
         val artifacts = artifactObjects.joinToString("\n") { textParts(it) }
         return local.copy(
+            pendingMessageId = null,
             remoteTaskId = remoteId, contextId = field(remote, "contextId"), state = state,
             question = prompt.takeIf { state == "TASK_STATE_INPUT_REQUIRED" || state == "TASK_STATE_AUTH_REQUIRED" },
             result = artifacts.ifBlank { prompt.ifBlank { if (artifactObjects.isNotEmpty()) "远端返回了非文本内容" else "" } }

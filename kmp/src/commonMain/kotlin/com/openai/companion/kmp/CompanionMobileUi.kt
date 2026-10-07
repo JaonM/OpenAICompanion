@@ -58,11 +58,14 @@ data class MobileUiState(
     val commuteTime: String = "18:30",
     val proactiveTasks: List<ProactiveTask> = emptyList(),
     val proactiveSettings: ProactiveSettings = ProactiveSettings(),
+    val backgroundReminderStatus: String = "后台提醒未启用",
+    val reminderSettingsAvailable: Boolean = false,
     val memorySyncEndpoint: String = "",
     val memorySyncStatus: String = "未配置",
     val mcpEndpoint: String = "",
     val mcpStatus: String = "未连接 MCP",
     val mcpBusy: Boolean = false,
+    val deviceToolsEnabled: Boolean = false,
     val approval: MobileToolApproval? = null,
     val inputPrompt: MobileInputPrompt? = null,
     val deviceEndpoint: String = "",
@@ -83,6 +86,7 @@ interface MobileActions {
     fun send(text: String)
     fun cancel()
     fun configureMcp(endpoint: String)
+    fun setDeviceToolsEnabled(enabled: Boolean) = Unit
     fun authorizeMcp(clientId: String)
     fun answerApproval(id: Long, allow: Boolean)
     fun answerInput(id: Long, contentJson: String?)
@@ -91,10 +95,12 @@ interface MobileActions {
         commuteEnabled: Boolean, commuteTime: String)
     fun saveProactiveTask(task: ProactiveTask) = Unit
     fun saveProactiveConfig(settings: ProactiveSettings) = Unit
+    fun openReminderSettings() = Unit
     fun configureMemorySync(endpoint: String, token: String) = Unit
     fun syncMemories() = Unit
     fun deleteProactiveTask(id: String) = Unit
     fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = Unit
+    fun pairDevice(endpoint: String, code: String, name: String, accepts: Boolean) = Unit
     fun addA2aAgent(cardUrl: String)
     fun disableA2aAgent(id: String)
     fun setA2aBearerToken(id: String, token: String)
@@ -116,6 +122,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var deviceNameDraft by remember(state.deviceName) { mutableStateOf(state.deviceName) }
     var deviceAcceptsDraft by remember(state.deviceAcceptsTasks) { mutableStateOf(state.deviceAcceptsTasks) }
     var deviceTokenDraft by remember { mutableStateOf("") }
+    var pairingCode by remember { mutableStateOf("") }
     var a2aCardDraft by remember { mutableStateOf("") }
     var memorySyncEndpointDraft by remember(state.memorySyncEndpoint) { mutableStateOf(state.memorySyncEndpoint) }
     var memorySyncTokenDraft by remember { mutableStateOf("") }
@@ -139,6 +146,11 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         Text("端侧模型", style = MaterialTheme.typography.titleMedium)
                         Text(state.modelStatus)
                         OutlinedButton(onClick = actions::importModel) { Text("导入 GGUF") }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(state.deviceToolsEnabled, actions::setDeviceToolsEnabled)
+                            Text("启用端侧工具扩展（设备上下文与日历）")
+                        }
+                        Text("扩展默认关闭；启用后，日历访问仍需逐次确认和系统权限。")
                         Spacer(Modifier.height(20.dp))
                         Text("主动任务", style = MaterialTheme.typography.titleMedium)
                         Row {
@@ -147,6 +159,9 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             })
                             Text("开启主动推送")
                         }
+                        Text(state.backgroundReminderStatus)
+                        Text("固定计划由系统提醒；实时条件检查与模型任务仍需要可运行的执行端。")
+                        if (state.reminderSettingsAvailable) TextButton(onClick = actions::openReminderSettings) { Text("配置精确提醒权限") }
                         Text("后台发现间隔")
                         listOf(15L, 30L, 60L, 180L).chunked(2).forEach { pair ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -228,6 +243,11 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth())
                         OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth())
                         OutlinedTextField(deviceTokenDraft, { deviceTokenDraft = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(pairingCode, { pairingCode = it }, label = { Text("一次性配对码（10 分钟有效）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                        OutlinedButton(enabled = pairingCode.isNotBlank(), onClick = {
+                            actions.pairDevice(deviceEndpointDraft, pairingCode, deviceNameDraft, deviceAcceptsDraft)
+                            pairingCode = ""
+                        }) { Text("使用配对码连接") }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(deviceAcceptsDraft, { deviceAcceptsDraft = it })
                             Text("允许本设备在前台接收任务")

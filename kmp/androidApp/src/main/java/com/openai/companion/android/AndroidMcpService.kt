@@ -21,6 +21,8 @@ class AndroidMcpService(
     requestInput: suspend (String, String, JsonObject) -> JsonObject,
     calendarPermission: AndroidCalendarPermission,
 ) : MobileMcpService(
+    loadDeviceToolsEnabled = { context.getSharedPreferences("companion_mcp", Context.MODE_PRIVATE).getBoolean("deviceToolsEnabled", false) },
+    saveDeviceToolsEnabled = { enabled -> check(context.getSharedPreferences("companion_mcp", Context.MODE_PRIVATE).edit().putBoolean("deviceToolsEnabled", enabled).commit()) },
     deviceTools = { createDeviceTools(
         "android", { java.util.Locale.getDefault().toLanguageTag() },
         AndroidCalendarEventDataSource(context, calendarPermission::request, calendarPermission::requestWrite),

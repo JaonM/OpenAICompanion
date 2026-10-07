@@ -10,8 +10,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.runBlocking
 
-fun main() = application {
+fun main(args: Array<String>) {
+    DesktopProcessLease.acquire().use {
+        if (args.contentEquals(arrayOf("--worker"))) {
+            runBlocking {
+                DesktopBackend().initialize()
+                awaitCancellation()
+            }
+        } else {
+            require(args.isEmpty()) { "仅支持 --worker 参数" }
+            runDesktopApp()
+        }
+    }
+}
+
+private fun runDesktopApp() = application {
     val backend = remember { DesktopBackend() }
     Window(
         onCloseRequest = ::exitApplication,

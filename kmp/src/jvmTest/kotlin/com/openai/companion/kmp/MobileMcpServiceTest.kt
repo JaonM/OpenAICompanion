@@ -59,6 +59,8 @@ class MobileMcpServiceTest {
         )
         try {
             service.start()
+            assertTrue(bindings.tools.isEmpty())
+            service.setDeviceToolsEnabled(true)
             val localNames = setOf("device_get_context", "device_calendar_list_events")
             assertEquals(localNames, bindings.tools.map { it.name }.toSet())
             val endpoint = "http://127.0.0.1:${server.address.port}/mcp"
@@ -69,6 +71,8 @@ class MobileMcpServiceTest {
             service.connect("")
             assertEquals("", endpoints.value)
             assertEquals(localNames, bindings.tools.map { it.name }.toSet())
+            service.setDeviceToolsEnabled(false)
+            assertTrue(bindings.tools.isEmpty())
         } finally {
             server.stop(0)
         }

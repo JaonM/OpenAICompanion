@@ -20,6 +20,10 @@ fun DeviceExecutionPanel(service: CrossDeviceService, client: A2aClient) {
     var endpoint by remember { mutableStateOf(service.endpoint) }
     var name by remember { mutableStateOf(service.deviceName) }
     var token by remember { mutableStateOf("") }
+    var pairingCode by remember { mutableStateOf("") }
+    var inviteDeviceId by remember { mutableStateOf("") }
+    var issuedCode by remember { mutableStateOf("") }
+    var credentials by remember { mutableStateOf<kotlinx.serialization.json.JsonArray?>(null) }
     var accepts by remember { mutableStateOf(service.acceptsTasks) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -37,14 +41,36 @@ fun DeviceExecutionPanel(service: CrossDeviceService, client: A2aClient) {
         OutlinedTextField(endpoint, { endpoint = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(name, { name = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(token, { token = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(pairingCode, { pairingCode = it }, label = { Text("一次性配对码") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        OutlinedButton(enabled = !busy && pairingCode.isNotBlank(), onClick = { action {
+            service.pair(endpoint, pairingCode, name, accepts); pairingCode = ""
+        } }) { Text("使用配对码连接") }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(accepts, { accepts = it }); Text("允许本设备在前台接收任务")
+            Checkbox(accepts, { accepts = it }); Text("允许本设备接收任务（后台仅限无需确认的能力）")
         }
         Text(status)
         Text("远端任务使用独立上下文；工具权限仍需本机确认。清空地址可停用。")
         Button(enabled = !busy, onClick = { action { service.configure(endpoint, token, name, accepts); token = "" } }) { Text("保存设备连接") }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         HorizontalDivider()
+        OutlinedTextField(inviteDeviceId, { inviteDeviceId = it }, label = { Text("新设备 ID（字母、数字、下划线或短横线）") })
+        OutlinedButton(enabled = !busy && inviteDeviceId.isNotBlank(), onClick = { action {
+            issuedCode = service.createPairingCode(inviteDeviceId)
+        } }) { Text("生成 10 分钟配对码") }
+        if (issuedCode.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer { Text(issuedCode) }
+        TextButton(enabled = !busy, onClick = { action { credentials = service.credentials() } }) { Text("查看设备访问权限") }
+        credentials?.forEach { entry ->
+            val record = entry as kotlinx.serialization.json.JsonObject
+            val id = record["id"] as kotlinx.serialization.json.JsonPrimitive
+            val device = record["device_id"] as kotlinx.serialization.json.JsonPrimitive
+            if (record["revoked"] == kotlinx.serialization.json.JsonNull) Row {
+                Text(device.content, modifier = Modifier.weight(1f))
+                TextButton(enabled = !busy, onClick = { action {
+                    service.revokeCredential(id.content)
+                    credentials = kotlinx.serialization.json.JsonArray(credentials.orEmpty().filter { it != entry })
+                } }) { Text("撤销访问") }
+            }
+        }
         Text("已配对设备")
         agents.forEach { agent ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

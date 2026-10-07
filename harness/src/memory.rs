@@ -104,6 +104,10 @@ impl MemoryStore {
     }
 
     fn from_connection(connection: Connection) -> Result<Self, MemoryError> {
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version > 1 {
+            return Err(MemoryError::InvalidData("database requires a newer app; downgrade refused".into()));
+        }
         connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS memories (
@@ -137,6 +141,7 @@ impl MemoryStore {
         crate::device_operations::create_schema(&connection)?;
         crate::a2a::create_schema(&connection)?;
         crate::proactive::create_schema(&connection)?;
+        connection.execute_batch("PRAGMA user_version = 1;")?;
         crate::memory_sync::install_wake_hooks(&connection);
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),

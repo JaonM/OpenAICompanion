@@ -25,12 +25,14 @@ class CrossDeviceService(
     private val tools: suspend () -> List<McpToolDescriptor>,
     private val execute: suspend (String) -> String,
     private val answerQuestion: suspend (String) -> String = { "{\"answer\":null}" },
+    private val backgroundExecution: Boolean = false,
 ) : McpServerConnection {
     private val gate = Mutex()
     private val tickGate = Mutex()
     private var executing = false
-    private var settings = runCatching { Json.parseToJsonElement(load()).jsonObject }.getOrDefault(JsonObject(emptyMap()))
-    private val mutableStatus = MutableStateFlow("未配置跨设备执行")
+    private val loadedSettings = runCatching { Json.parseToJsonElement(load()).jsonObject }
+    private var settings = loadedSettings.getOrDefault(JsonObject(emptyMap()))
+    private val mutableStatus = MutableStateFlow(if (loadedSettings.isFailure) "任务状态读取失败，请恢复数据后重启" else "未配置跨设备执行")
     val status = mutableStatus.asStateFlow()
     val endpoint: String get() = settings.string("endpoint")
     val deviceName: String get() = settings.string("name").ifBlank { platform }
@@ -39,8 +41,8 @@ class CrossDeviceService(
     private var started = false
 
     private fun persist(value: JsonObject) {
+        save(value.toString())
         settings = value
-        save(settings.toString())
     }
 
     /** Clear only after acknowledgement; an upload retry never re-executes the task. */
@@ -54,8 +56,13 @@ class CrossDeviceService(
     private fun agentCardUrl(id: String) = endpoint + agentCardPath(id)
 
     suspend fun configure(rawEndpoint: String, token: String, name: String, acceptTasks: Boolean) = gate.withLock {
+        configureLocked(rawEndpoint, token, name, acceptTasks)
+    }
+
+    private suspend fun configureLocked(rawEndpoint: String, token: String, name: String, acceptTasks: Boolean) {
+        check(loadedSettings.isSuccess) { "任务状态读取失败，禁止覆盖；请恢复数据后重启" }
         val base = rawEndpoint.trim().trimEnd('/')
-        require(!executing && settings["pending"] == null) { "有结果尚未回传，请先恢复原服务连接" }
+        require(!executing && settings["pending"] == null && settings["active"] == null) { "有任务或结果尚未恢复，请先恢复原服务连接" }
         if (base.isNotBlank()) {
             validateGateway(base)
             require(name.isNotBlank() && name.length <= 100) { "请输入设备名称" }
@@ -69,6 +76,33 @@ class CrossDeviceService(
         })
         deviceId = ""
         mutableStatus.value = if (base.isBlank()) "已停用跨设备执行" else "已保存，连接中"
+    }
+
+    suspend fun pair(rawEndpoint: String, code: String, name: String, acceptTasks: Boolean) = gate.withLock {
+        check(loadedSettings.isSuccess && !executing && settings["pending"] == null && settings["active"] == null) { "请先恢复当前任务" }
+        val base = rawEndpoint.trim().trimEnd('/')
+        validateGateway(base)
+        require(name.isNotBlank() && name.length <= 100 && code.isNotBlank() && code.length <= 200)
+        val response = http.post("$base/v1/pairing/redeem") {
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("code", code.trim()) }.toString())
+        }
+        require(response.status.value == 200) { "配对失败：HTTP ${response.status.value}，请检查配对码是否过期" }
+        val body = response.bodyAsText()
+        require(body.length <= 4096)
+        val token = Json.parseToJsonElement(body).jsonObject.string("token")
+        require(token.isNotBlank() && token.length <= 16000)
+        configureLocked(base, token, name, acceptTasks)
+    }
+
+    suspend fun createPairingCode(deviceId: String): String = gate.withLock {
+        request("/v1/pairing/invite", buildJsonObject { put("device_id", deviceId) }).string("code")
+    }
+
+    suspend fun credentials(): JsonArray = gate.withLock { request("/v1/credentials")["credentials"]!!.jsonArray }
+    suspend fun revokeCredential(id: String) = gate.withLock {
+        request("/v1/credentials/revoke", buildJsonObject { put("id", id) })
+        Unit
     }
 
     fun start(scope: CoroutineScope) {
@@ -105,10 +139,11 @@ class CrossDeviceService(
         val reply = request("/v1/devices/register", buildJsonObject {
             put("name", deviceName); put("platform", platform)
             put("foreground", foreground()); put("acceptTasks", acceptsTasks)
+            put("backgroundExecution", backgroundExecution)
             put("resources", JsonArray(emptyList()))
             put("tools", JsonArray(available.map { tool -> buildJsonObject {
                 put("name", tool.name); put("description", tool.description.ifBlank { tool.name }.take(1000))
-                put("requiresForeground", tool.policy.requiresForeground)
+                put("requiresForeground", tool.policy.requiresForeground || !tool.policy.allowsBackgroundRead())
             } }))
         })
         deviceId = reply.string("id")
@@ -116,15 +151,24 @@ class CrossDeviceService(
     }
 
     suspend fun tick() = tickGate.withLock tick@ {
+        check(loadedSettings.isSuccess) { "任务状态读取失败，请恢复数据后重启" }
         val (job, available) = gate.withLock prepare@ {
             if (endpoint.isBlank()) return@prepare null
             validateGateway(endpoint)
             val available = register()
             uploadPending()
+            (settings["active"] as? JsonObject)?.let { active ->
+                // A previous process may have performed side effects. Reconcile, never execute it again.
+                request("/v1/devices/abandon", active)
+                persist(JsonObject(settings - "active"))
+            }
             discover()
-            mutableStatus.value = "已连接 · $deviceName · ${if (acceptsTasks) "前台可接单" else "仅发起任务"}"
-            if (!acceptsTasks || !foreground()) return@prepare null
+            mutableStatus.value = "已连接 · $deviceName · ${if (!acceptsTasks) "仅发起任务" else if (backgroundExecution) "可后台接单" else "前台可接单"}"
+            if (!acceptsTasks || !foreground() && !backgroundExecution) return@prepare null
             val claimed = request("/v1/devices/claim", JsonObject(emptyMap()))["job"] as? JsonObject ?: return@prepare null
+            persist(JsonObject(settings + ("active" to buildJsonObject {
+                put("id", claimed.getValue("id")); put("attempt", claimed.getValue("attempt"))
+            })))
             executing = true
             claimed to available
         } ?: return@tick
@@ -141,10 +185,12 @@ class CrossDeviceService(
                     }
                 }
                 try {
-                    if (!foreground()) error("请在前台打开执行设备")
+                    val inForeground = foreground()
+                    if (!inForeground && !backgroundExecution) error("请在前台打开执行设备")
+                    val allowed = if (inForeground) available else available.filter { it.policy.allowsBackgroundRead() }
                     Json.parseToJsonElement(execute(buildJsonObject {
                         put("input", job.getValue("input")); put("checkpoint", job.getValue("checkpoint"))
-                        put("allowed_tools", JsonArray(available.map { JsonPrimitive(it.name) }))
+                        put("allowed_tools", JsonArray(allowed.map { JsonPrimitive(it.name) }))
                     }.toString())).jsonObject
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { buildJsonObject {
@@ -154,7 +200,7 @@ class CrossDeviceService(
             }
             val report = JsonObject(result + mapOf("id" to job.getValue("id"), "attempt" to job.getValue("attempt")))
             gate.withLock {
-                persist(JsonObject(settings + ("pending" to report)))
+                persist(JsonObject(settings - "active" + ("pending" to report)))
                 uploadPending()
                 mutableStatus.value = "已回传远端任务结果"
             }
@@ -240,8 +286,17 @@ class CrossDeviceService(
             return required.all { it in capabilities } && resources.all { it in refs }
         }
         val candidates = devices.filter { it["delegationEnabled"] != JsonPrimitive(false) && (target.isBlank() || it.string("id") == target) && compatible(it) }
+        fun canRun(device: JsonObject): Boolean {
+            if (device["foreground"] == JsonPrimitive(true)) return true
+            if (device["backgroundExecution"] != JsonPrimitive(true)) return false
+            return required.all { capability -> capability == "model.complete" ||
+                device.getValue("tools").jsonArray.any { tool ->
+                    tool.jsonObject.string("name") == capability && tool.jsonObject["requiresForeground"] == JsonPrimitive(false)
+                }
+            }
+        }
         val local = candidates.firstOrNull { it.string("id") == deviceId }
-        val chosen = local ?: candidates.firstOrNull { it["online"] == JsonPrimitive(true) && it["foreground"] == JsonPrimitive(true) && it["acceptTasks"] == JsonPrimitive(true) }
+        val chosen = local ?: candidates.firstOrNull { it["online"] == JsonPrimitive(true) && canRun(it) && it["acceptTasks"] == JsonPrimitive(true) }
             ?: candidates.firstOrNull()
         return buildJsonObject {
             if (chosen == null) {
@@ -250,7 +305,7 @@ class CrossDeviceService(
                 val isLocal = chosen.string("id") == deviceId
                 val decision = when {
                     chosen["online"] != JsonPrimitive(true) -> "WAITING"
-                    chosen["foreground"] != JsonPrimitive(true) -> "NEEDS_USER_ACTION"
+                    !canRun(chosen) -> "NEEDS_USER_ACTION"
                     !isLocal && chosen["acceptTasks"] != JsonPrimitive(true) -> "NEEDS_USER_ACTION"
                     isLocal -> "LOCAL"
                     else -> "REMOTE"

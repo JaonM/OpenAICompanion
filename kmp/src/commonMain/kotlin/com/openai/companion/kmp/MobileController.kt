@@ -29,6 +29,8 @@ interface MobileBackend {
     suspend fun configureMcp(endpoint: String)
     suspend fun authorizeMcp(clientId: String)
     suspend fun refreshMcp()
+    val deviceToolsEnabled: Boolean get() = false
+    suspend fun setDeviceToolsEnabled(enabled: Boolean) = Unit
     suspend fun importModel()
     val mealReminderEnabled: Boolean get() = false
     val commuteReminderEnabled: Boolean get() = false
@@ -38,6 +40,9 @@ interface MobileBackend {
         commuteEnabled: Boolean, commuteTime: String) = Unit
     val proactiveTasks: List<ProactiveTask> get() = emptyList()
     val proactiveSettings: ProactiveSettings get() = ProactiveSettings()
+    val backgroundReminderStatus: StateFlow<String>? get() = null
+    val reminderSettingsAvailable: Boolean get() = false
+    fun openReminderSettings() = Unit
     suspend fun saveProactiveConfig(settings: ProactiveSettings) = Unit
     val memorySyncEndpoint: String get() = ""
     val memorySyncStatus: String get() = "未配置"
@@ -52,6 +57,7 @@ interface MobileBackend {
     val deviceAcceptsTasks: Boolean get() = false
     val deviceStatus: StateFlow<String>? get() = null
     suspend fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = Unit
+    suspend fun pairDevice(endpoint: String, code: String, name: String, accepts: Boolean) = Unit
     val a2aAgents: StateFlow<List<A2aAgent>>? get() = null
     val a2aTasks: StateFlow<List<A2aTask>>? get() = null
     suspend fun addA2aAgent(cardUrl: String) = Unit
@@ -88,6 +94,9 @@ class MobileController(
     private val pendingA2aApproval = MutableStateFlow<Pair<Long, CompletableDeferred<Boolean>>?>(null)
 
     fun start() = scope.launch {
+        backend.backgroundReminderStatus?.let { updates ->
+            scope.launch { updates.collect { value -> mutableState.update { it.copy(backgroundReminderStatus = value) } } }
+        }
         backend.deviceStatus?.let { updates ->
             scope.launch { updates.collect { value -> mutableState.update { it.copy(deviceStatus = value) } } }
         }
@@ -216,6 +225,12 @@ class MobileController(
         launchMcpAction { backend.configureMcp(endpoint) }
     }
 
+    override fun openReminderSettings() = backend.openReminderSettings()
+
+    override fun setDeviceToolsEnabled(enabled: Boolean) {
+        scope.launch { perform { backend.setDeviceToolsEnabled(enabled); syncSettings() } }
+    }
+
     override fun authorizeMcp(clientId: String) {
         launchMcpAction { backend.authorizeMcp(clientId) }
     }
@@ -268,6 +283,10 @@ class MobileController(
 
     override fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) {
         scope.launch { perform { backend.configureDevices(endpoint, token, name, accepts) }; syncSettings() }
+    }
+
+    override fun pairDevice(endpoint: String, code: String, name: String, accepts: Boolean) {
+        scope.launch { perform { backend.pairDevice(endpoint, code, name, accepts); syncSettings() } }
     }
 
     override fun addA2aAgent(cardUrl: String) = launchA2aAction { backend.addA2aAgent(cardUrl) }
@@ -390,6 +409,7 @@ class MobileController(
         mutableState.update {
             it.copy(
                 mcpEndpoint = backend.mcpEndpoint,
+                deviceToolsEnabled = backend.deviceToolsEnabled,
                 mcpStatus = backend.mcpStatus,
                 modelStatus = backend.modelStatus,
                 mealReminderEnabled = backend.mealReminderEnabled,
@@ -398,6 +418,7 @@ class MobileController(
                 commuteTime = backend.commuteTime,
                 proactiveTasks = backend.proactiveTasks,
                 proactiveSettings = backend.proactiveSettings,
+                reminderSettingsAvailable = backend.reminderSettingsAvailable,
                 deviceEndpoint = backend.deviceEndpoint,
                 deviceName = backend.deviceName,
                 deviceAcceptsTasks = backend.deviceAcceptsTasks,

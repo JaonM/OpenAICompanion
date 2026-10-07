@@ -8,6 +8,8 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
@@ -16,7 +18,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class AndroidNotificationSink(private val activity: ComponentActivity) {
+    fun openExactAlarmSettings() {
+        if (Build.VERSION.SDK_INT >= 31) activity.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+            Uri.parse("package:${activity.packageName}")))
+    }
     private val manager = activity.getSystemService(NotificationManager::class.java)
+    val permitted: Boolean get() = manager.areNotificationsEnabled() && (Build.VERSION.SDK_INT < 33 ||
+        activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
     private var pending: CompletableDeferred<Boolean>? = null
     private val permission = activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         pending?.complete(granted)

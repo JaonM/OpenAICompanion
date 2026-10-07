@@ -121,9 +121,9 @@ class IosMobileBackend(
     private val mutableMemorySyncStatus = MutableStateFlow("未配置")
     override val memorySyncStatusUpdates: StateFlow<String> = mutableMemorySyncStatus.asStateFlow()
     override val memorySyncStatus: String get() = mutableMemorySyncStatus.value
+    private val deviceSettings = IosDeviceSettingsFile()
     private val devices = CrossDeviceService(a2aHttp, a2a, IosA2aTokenStore(),
-        { syncDefaults.stringForKey("deviceTasksConfig") ?: "{}" },
-        { syncDefaults.setObject(it, forKey = "deviceTasksConfig") }, "ios",
+        deviceSettings::load, deviceSettings::save, "ios",
         { withContext(Dispatchers.Main) { platform.UIKit.UIApplication.sharedApplication.applicationState == platform.UIKit.UIApplicationState.UIApplicationStateActive } },
         mcp::tools, { request -> withContext(Dispatchers.Default) { agentGate.withLock { bindings.executeDeviceTask(request) } } },
         answerQuestion = { request -> withContext(Dispatchers.Default) { agentGate.withLock { bindings.answerDeviceQuestion(request) } } })
@@ -132,6 +132,19 @@ class IosMobileBackend(
     override val deviceAcceptsTasks get() = devices.acceptsTasks
     override val deviceStatus get() = devices.status
     override suspend fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = devices.configure(endpoint, token, name, accepts)
+    override suspend fun pairDevice(endpoint: String, code: String, name: String, accepts: Boolean) = devices.pair(endpoint, code, name, accepts)
+    private val scheduled = IosScheduledReminders()
+    private val mutableReminderStatus = MutableStateFlow("后台提醒未启用")
+    override val backgroundReminderStatus = mutableReminderStatus
+    private suspend fun refreshScheduledReminders() {
+        val plans = com.openai.companion.kmp.scheduledReminders(proactiveTasks, proactiveSettings.enabled, Clock.System.now().epochSeconds)
+        scheduled.replace(plans)
+        mutableReminderStatus.value = when {
+            !proactiveSettings.enabled -> "后台提醒未启用"
+            !scheduled.permitted() -> "请在系统设置中允许通知，后台提醒暂无法显示"
+            else -> "系统已安排 ${plans.size} 个计划提醒"
+        }
+    }
     private var initialized = false
     override var mealReminderEnabled: Boolean = false
         private set
@@ -148,6 +161,8 @@ class IosMobileBackend(
     private val mutableProactiveTasks = MutableStateFlow<List<ProactiveTask>>(emptyList())
     override val proactiveTaskUpdates: StateFlow<List<ProactiveTask>> = mutableProactiveTasks.asStateFlow()
 
+    override val deviceToolsEnabled get() = mcp.deviceToolsEnabled
+    override suspend fun setDeviceToolsEnabled(enabled: Boolean) = mcp.setDeviceToolsEnabled(enabled)
     override val mcpEndpoint: String get() = mcp.endpoint
     override val mcpStatus: String get() = mcp.status
     override val mcpStatusUpdates: StateFlow<String> get() = mcp.statusUpdates
@@ -174,6 +189,7 @@ class IosMobileBackend(
         bindings.registerA2aProvider(a2a::listForModel, a2a::delegate)
         loadProactiveRules()
         proactiveSettings = Json.decodeFromString(appGetProactiveSettings().value())
+        refreshScheduledReminders()
         initialized = true
         proactiveScope.launch {
             while (isActive) {
@@ -259,6 +275,7 @@ class IosMobileBackend(
         val raw = appListProactiveRules().value()
         proactiveTasks = Json.decodeFromString(raw)
         mutableProactiveTasks.value = proactiveTasks
+        if (initialized) refreshScheduledReminders()
         Json.parseToJsonElement(raw).jsonArray.forEach { item ->
             val rule = item.jsonObject
             val minute = rule.getValue("local_minute").jsonPrimitive.content.toInt()
@@ -301,6 +318,7 @@ class IosMobileBackend(
     }
 
     override suspend fun saveProactiveTask(task: ProactiveTask) {
+        com.openai.companion.kmp.scheduledReminders(proactiveTasks.filter { it.scenario != task.scenario } + task, proactiveSettings.enabled, Clock.System.now().epochSeconds)
         if (proactiveSettings.enabled && task.enabled && !requestNotificationPermission()) error("请先允许 App 发送通知")
         withContext(Dispatchers.Default) {
             appPutProactiveTask(Json.encodeToString(task.copy(
@@ -313,9 +331,11 @@ class IosMobileBackend(
     }
 
     override suspend fun saveProactiveConfig(settings: ProactiveSettings) {
+        com.openai.companion.kmp.scheduledReminders(proactiveTasks, settings.enabled, Clock.System.now().epochSeconds)
         if (settings.enabled && !requestNotificationPermission()) error("请先允许 App 发送通知")
         proactiveSettings = Json.decodeFromString(appSetProactiveSettings(
             settings.enabled, settings.discoveryIntervalMinutes).value())
+        refreshScheduledReminders()
         proactiveWake.trySend(Unit)
         discoveryWake.trySend(Unit)
         if (settings.enabled) {

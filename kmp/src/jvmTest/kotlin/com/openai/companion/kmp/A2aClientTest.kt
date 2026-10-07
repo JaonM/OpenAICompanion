@@ -22,6 +22,40 @@ import kotlin.test.assertTrue
 
 class A2aClientTest {
     @Test
+    fun gatewayReceiptRecoversLostAcknowledgementAfterClientRestartWithoutResend() = runBlocking {
+        var sends = 0
+        var messageId = ""
+        val store = TestA2aStore()
+        val tokens = TestTokenStore()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val http = HttpClient(MockEngine { request ->
+            val body = Json.parseToJsonElement((request.body as TextContent).text).jsonObject
+            if (body["method"]!!.jsonPrimitive.content == "SendMessage") {
+                sends++
+                messageId = body["params"]!!.jsonObject["message"]!!.jsonObject["messageId"]!!.jsonPrimitive.content
+                respond("lost acknowledgement", HttpStatusCode.ServiceUnavailable)
+            } else {
+                assertEquals("companion/GetMessageReceipt", body["method"]!!.jsonPrimitive.content)
+                assertEquals(messageId, body["params"]!!.jsonObject["messageId"]!!.jsonPrimitive.content)
+                respond("""{"jsonrpc":"2.0","id":"r1","result":{"task":{"id":"remote-1","contextId":"ctx-1","status":{"state":"TASK_STATE_COMPLETED"},"artifacts":[{"parts":[{"text":"Recovered"}]}]}}}""",
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            }
+        })
+        try {
+            val card = Json.parseToJsonElement("""{"name":"Mac","metadata":{"companionRecoveryVersion":1},"supportedInterfaces":[{"url":"https://gateway.test/rpc","protocolBinding":"JSONRPC","protocolVersion":"1.0"}]}""").jsonObject
+            val first = A2aClient(http, store, tokens, scope) { true }
+            first.installDeviceAgent("https://gateway.test/card", card, "secret")
+            first.delegate("https://gateway.test/card", "Do work")
+            assertEquals(messageId, store.tasks().single().pendingMessageId)
+            val restored = A2aClient(http, store, tokens, scope) { true }
+            restored.start()
+            assertEquals("TASK_STATE_COMPLETED", restored.tasks.value.single().state)
+            assertEquals("Recovered", restored.tasks.value.single().result)
+            assertEquals(1, sends)
+        } finally { scope.cancel(); http.close() }
+    }
+
+    @Test
     fun uncertainSendIsPersistedAndNotRetried() = runBlocking {
         var sends = 0
         val engine = MockEngine { request ->

@@ -33,6 +33,8 @@ open class MobileMcpService(
     private val browser: McpOAuthBrowser,
     private val redirectUri: String,
     private val deviceTools: (suspend () -> DeviceToolRegistry)? = null,
+    loadDeviceToolsEnabled: () -> Boolean = { false },
+    private val saveDeviceToolsEnabled: (Boolean) -> Unit = {},
     private val deferTokenLoadFailure: (Throwable) -> Boolean = { false },
 ) {
     private val manager = McpServerManager()
@@ -40,6 +42,8 @@ open class MobileMcpService(
     private val connectionGate = Mutex()
     private val authorizationGate = Mutex()
     private val serverId = "remote"
+    var deviceToolsEnabled = loadDeviceToolsEnabled()
+        private set
     private var authChallenge: McpAuthorizationChallenge? = null
     private var tokens: McpOAuthTokens? = null
     private var tokenEndpoint: String? = null
@@ -52,7 +56,7 @@ open class MobileMcpService(
         private set(value) { mutableStatus.value = value }
 
     suspend fun start() {
-        deviceTools?.let { manager.attach("device", DeviceToolConnection(it())) }
+        if (deviceToolsEnabled) deviceTools?.let { manager.attach("device", DeviceToolConnection(it())) }
         registerMcpProvider(
             bindings, manager,
             approve = approve,
@@ -72,6 +76,16 @@ open class MobileMcpService(
 
     suspend fun connect(rawEndpoint: String) = connectionGate.withLock {
         connectLocked(rawEndpoint)
+    }
+
+    suspend fun setDeviceToolsEnabled(enabled: Boolean) = connectionGate.withLock {
+        val connection = if (enabled) {
+            val factory = requireNotNull(deviceTools) { "当前设备未安装端侧工具扩展" }
+            DeviceToolConnection(factory())
+        } else null
+        saveDeviceToolsEnabled(enabled)
+        deviceToolsEnabled = enabled
+        if (connection != null) manager.attach("device", connection) else manager.detach("device")
     }
 
     /** Serializes endpoint and credential state changes with refresh and OAuth completion. */

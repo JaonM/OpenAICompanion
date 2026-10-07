@@ -388,6 +388,7 @@ private fun CodexSettings(
     var mcpEndpoint by remember { mutableStateOf(backend.mcpEndpoint) }
     var showTasks by remember { mutableStateOf(false) }
     var showDevices by remember { mutableStateOf(false) }
+    var deviceToolsEnabled by remember { mutableStateOf(backend.deviceToolsEnabled) }
     var connecting by remember { mutableStateOf(false) }
     DialogWindow(onCloseRequest = onClose, title = "设置", state = DialogState(width = 560.dp, height = 730.dp)) {
         MaterialTheme {
@@ -402,6 +403,13 @@ private fun CodexSettings(
                 OutlinedTextField(apiKey, { apiKey = it }, label = { Text("API Key（仅本次运行）") },
                     visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                 HorizontalDivider()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(deviceToolsEnabled, { enabled -> scope.launch {
+                        try { backend.setDeviceToolsEnabled(enabled); deviceToolsEnabled = enabled }
+                        catch (error: Exception) { onError(error.message) }
+                    } })
+                    Text("启用端侧工具扩展（设备上下文与日历）")
+                }
                 OutlinedTextField(mcpEndpoint, { mcpEndpoint = it }, label = { Text("远程 MCP（可选）") },
                     modifier = Modifier.fillMaxWidth())
                 Text(backend.mcpStatus, color = secondaryText,
