@@ -66,7 +66,6 @@ kotlin {
         jvmMain.dependencies {
             implementation("net.java.dev.jna:jna:5.15.0")
             implementation("io.modelcontextprotocol:kotlin-sdk:$mcpSdkVersion")
-            implementation("io.modelcontextprotocol:kotlin-sdk-testing:$mcpSdkVersion")
             implementation(compose.desktop.currentOs)
             implementation(compose.material3)
             implementation("io.ktor:ktor-client-cio:3.2.3")
@@ -90,6 +89,15 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg)
             packageName = "OpenAICompanion"
             packageVersion = "1.0.0"
+            macOS {
+                bundleID = "com.openai.companion.desktop"
+                infoPlist { extraKeysRawXml = """
+                    <key>NSCalendarsFullAccessUsageDescription</key>
+                    <string>经你确认后查询和新建日程，查询结果供当前模型处理。</string>
+                    <key>NSCalendarsUsageDescription</key>
+                    <string>经你确认后查询和新建日程，帮助安排日程。</string>
+                """.trimIndent() }
+            }
             modules("java.net.http")
             appResourcesRootDir.set(project.layout.projectDirectory.dir("appResources"))
         }

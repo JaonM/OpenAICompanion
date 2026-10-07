@@ -1,5 +1,8 @@
 package com.openai.companion.kmp
 
+import com.openai.companion.kmp.device.DeviceToolRegistry
+import com.openai.companion.kmp.device.DeviceToolConnection
+
 import io.ktor.client.HttpClient
 import io.ktor.http.Url
 import kotlinx.coroutines.sync.Mutex
@@ -29,6 +32,7 @@ open class MobileMcpService(
     private val crypto: McpOAuthCrypto,
     private val browser: McpOAuthBrowser,
     private val redirectUri: String,
+    private val deviceTools: (suspend () -> DeviceToolRegistry)? = null,
     private val deferTokenLoadFailure: (Throwable) -> Boolean = { false },
 ) {
     private val manager = McpServerManager()
@@ -48,11 +52,13 @@ open class MobileMcpService(
         private set(value) { mutableStatus.value = value }
 
     suspend fun start() {
+        deviceTools?.let { manager.attach("device", DeviceToolConnection(it())) }
         registerMcpProvider(
             bindings, manager,
-            approve = { name, arguments ->
+            approve = approve,
+            remoteApprovalName = { name ->
                 val server = endpoint.takeIf(String::isNotBlank)?.let { Url(it).host } ?: "未配置服务"
-                approve("$server · $name", arguments)
+                "$server · $name"
             },
             onToolCountChanged = { count ->
                 if (status.startsWith("已连接")) status = "已连接 · $count 个工具"

@@ -789,12 +789,17 @@ impl ToolExecutor for ReadOnlyExecutor {
             .inner
             .list_tools()?
             .into_iter()
-            .filter(|item| self.allowed.contains(&item.name))
+            .filter(|item| self.allowed.contains(&item.name) && self.inner.background_allowed(&item.name))
             .collect())
     }
+    fn should_retry(&self, call: &ToolCall, error: &AgentError) -> bool {
+        self.allowed.contains(&call.name) && self.inner.background_allowed(&call.name)
+            && self.inner.should_retry(call, error)
+    }
+
     fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>> {
-        if self.allowed.contains(&call.name) {
-            self.inner.execute(call)
+        if self.allowed.contains(&call.name) && self.inner.background_allowed(&call.name) {
+            self.inner.execute_background(call)
         } else {
             Box::pin(async {
                 Err(AgentError::InvalidAction(

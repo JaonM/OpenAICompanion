@@ -30,6 +30,10 @@
             <array><string>openai-companion</string></array>
         </dict>
     </array>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>经你确认后查询和新建日程，帮助安排日程；查询结果供当前模型处理。</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>经你确认后查询和新建日程，帮助安排日程。</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UIApplicationSceneManifest</key>

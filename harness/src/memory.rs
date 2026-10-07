@@ -134,6 +134,7 @@ impl MemoryStore {
                 processed_at INTEGER NOT NULL
             );",
         )?;
+        crate::device_operations::create_schema(&connection)?;
         crate::a2a::create_schema(&connection)?;
         crate::proactive::create_schema(&connection)?;
         crate::memory_sync::install_wake_hooks(&connection);

@@ -85,7 +85,10 @@ class McpServerManager {
             val discovered = linkedMapOf<String, McpToolDescriptor>()
             val names = mutableSetOf<String>()
             current.forEach { (serverId, connection) ->
-                connection.listTools().forEach { tool ->
+                connection.listTools().forEach { advertised ->
+                    // A remote descriptor cannot opt itself into background execution or skip approval.
+                    val tool = if (connection is com.openai.companion.kmp.device.DeviceToolConnection) advertised
+                        else advertised.copy(policy = ToolPolicy())
                     require(tool.name.isNotBlank()) { "MCP tool name must not be blank" }
                     check(names.add(tool.name)) { "Duplicate MCP tool name: ${tool.name}" }
                     val key = "$serverId/${tool.name}"

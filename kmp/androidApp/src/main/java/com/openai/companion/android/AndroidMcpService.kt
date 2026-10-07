@@ -1,5 +1,7 @@
 package com.openai.companion.android
 
+import com.openai.companion.kmp.device.createDeviceTools
+import com.openai.companion.kmp.AndroidCalendarEventDataSource
 import android.content.Context
 import com.openai.companion.kmp.GeneratedHarnessBindings
 import com.openai.companion.kmp.McpEndpointStore
@@ -17,7 +19,12 @@ class AndroidMcpService(
     bindings: GeneratedHarnessBindings,
     approve: suspend (String, String) -> Boolean,
     requestInput: suspend (String, String, JsonObject) -> JsonObject,
+    calendarPermission: AndroidCalendarPermission,
 ) : MobileMcpService(
+    deviceTools = { createDeviceTools(
+        "android", { java.util.Locale.getDefault().toLanguageTag() },
+        AndroidCalendarEventDataSource(context, calendarPermission::request, calendarPermission::requestWrite),
+        calendarPermission::isForeground, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings)) },
     bindings = bindings,
     approve = approve,
     requestInput = requestInput,

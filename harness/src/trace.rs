@@ -514,7 +514,7 @@ mod tests {
         ));
         let store = MemoryStore::open(&path).unwrap();
         let session = store.create_trace_session().unwrap();
-        let turn_id = store.begin_trace_turn(session.id, "查询日历").unwrap();
+        let turn_id = store.begin_trace_turn(session.id, "查询jin历").unwrap();
         store
             .append_trace_message(
                 turn_id,

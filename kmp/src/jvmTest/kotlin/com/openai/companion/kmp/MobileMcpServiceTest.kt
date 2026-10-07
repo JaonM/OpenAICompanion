@@ -34,6 +34,10 @@ class MobileMcpServiceTest {
         val bindings = RecordingBindings()
         val endpoints = MemoryEndpointStore()
         val service = MobileMcpService(
+            deviceTools = { com.openai.companion.kmp.device.createDeviceTools("ios", { "en" },
+                object : CalendarEventDataSource {
+                    override suspend fun getEvents(query: CalendarQuery): List<CalendarEvent> = error("No calendar read expected")
+                }, { true }) },
             bindings = bindings,
             approve = { _, _ -> false },
             requestInput = { _, _, _: JsonObject -> error("Unexpected input request") },
@@ -55,14 +59,16 @@ class MobileMcpServiceTest {
         )
         try {
             service.start()
+            val localNames = setOf("device_get_context", "device_calendar_list_events")
+            assertEquals(localNames, bindings.tools.map { it.name }.toSet())
             val endpoint = "http://127.0.0.1:${server.address.port}/mcp"
             service.connect(endpoint)
             assertEquals(endpoint, endpoints.value)
-            assertEquals("get_weather", bindings.tools.single().name)
+            assertEquals(localNames + "get_weather", bindings.tools.map { it.name }.toSet())
             assertTrue(service.status.startsWith("已连接"))
             service.connect("")
             assertEquals("", endpoints.value)
-            assertEquals(emptyList(), bindings.tools)
+            assertEquals(localNames, bindings.tools.map { it.name }.toSet())
         } finally {
             server.stop(0)
         }

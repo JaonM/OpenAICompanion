@@ -12,9 +12,13 @@ namespace harness {
     void clear_context_directories();
     void cancel_agent_loop();
     AppResult app_open_store(string database_path);
+    AppResult app_device_operation(string tool, string request_id, string request_json, boolean claim);
+    AppResult app_finish_device_operation(string operation_id, boolean succeeded, string result_json);
     AppResult app_start_session();
     AppResult app_resume_session(i64 session_id);
     AppResult app_send_message(string user_input);
+    AppResult app_execute_device_task(string request_json);
+    AppResult app_answer_device_question(string request_json);
     AppResult app_list_sessions();
     AppResult app_load_session(i64 session_id);
     AppResult app_delete_session(i64 session_id);
@@ -65,6 +69,7 @@ enum ModelServeError {
     "Unknown"
 };
 
+typedef record ToolPolicy;
 typedef record McpTool;
 typedef record ToolListReply;
 typedef record ToolCallReply;

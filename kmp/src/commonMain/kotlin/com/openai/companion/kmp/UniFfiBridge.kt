@@ -23,6 +23,15 @@ interface GeneratedHarnessBindings {
 
     fun clearContextDirectories()
 
+    fun deviceOperation(tool: String, requestId: String, requestJson: String, claim: Boolean): String =
+        error("Persistent device operation store is unavailable")
+    fun finishDeviceOperation(operationId: String, succeeded: Boolean, resultJson: String): String =
+        error("Persistent device operation store is unavailable")
+
+    fun answerDeviceQuestion(requestJson: String): String = "{\"answer\":null}"
+
+    fun executeDeviceTask(requestJson: String): String = error("Device task executor unavailable")
+
     fun cancelAgentLoop()
 }
 
@@ -31,21 +40,18 @@ suspend fun registerMcpProvider(
     manager: McpServerManager,
     approve: suspend (String, String) -> Boolean,
     onToolCountChanged: (Int) -> Unit = {},
+    remoteApprovalName: (String) -> String = { it },
 ) {
-    bindings.registerToolProvider(McpToolProvider(manager, approve))
+    bindings.registerToolProvider(McpToolProvider(manager, approve, remoteApprovalName))
     manager.setToolsChangedListener {
         val tools = manager.tools().map { tool ->
-            McpTool(
-                name = tool.name,
-                description = tool.description,
-                inputSchemaJson = tool.inputSchemaJson,
-            )
+            tool.toHarnessTool()
         }
         bindings.updateMcpTools(tools)
         onToolCountChanged(tools.size)
     }
     val initialTools = manager.tools().map { tool ->
-        McpTool(tool.name, tool.description, tool.inputSchemaJson)
+        tool.toHarnessTool()
     }
     bindings.updateMcpTools(initialTools)
     onToolCountChanged(initialTools.size)

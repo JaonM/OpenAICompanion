@@ -4,6 +4,7 @@ pub struct ToolDefinition {
     pub description: String,
     /// Provider-neutral JSON Schema encoded as a string at the core boundary.
     pub parameters_schema: String,
+    pub policy: Option<crate::ToolPolicy>,
 }
 
 impl ToolDefinition {
@@ -16,6 +17,7 @@ impl ToolDefinition {
             name: name.into(),
             description: description.into(),
             parameters_schema: parameters_schema.into(),
+            policy: None,
         }
     }
 }

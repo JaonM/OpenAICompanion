@@ -192,7 +192,7 @@ fn available_query_tools() -> Vec<serde_json::Value> {
     crate::uniffi::current_mcp_tool_snapshot()
         .1
         .into_iter()
-        .filter(|tool| query_tool_name(&tool.name))
+        .filter(|tool| tool.policy.as_ref().is_some_and(|policy| policy.allows_background_read()))
         .take(30)
         .map(|tool| {
             let schema = if tool.input_schema_json.len() <= 4096 {
@@ -204,6 +204,7 @@ fn available_query_tools() -> Vec<serde_json::Value> {
                 "name":tool.name,
                 "description":tool.description.chars().take(300).collect::<String>(),
                 "input_schema":schema,
+                "policy":tool.policy,
             })
         })
         .collect()
@@ -394,8 +395,7 @@ fn apply_proposal(
         _ => return Ok(PlanOutcome::default()),
     };
     if proposal.allowed_tools.iter().any(|name| {
-        !query_tool_name(name)
-            || !available_tools
+        !available_tools
                 .iter()
                 .any(|tool| tool["name"].as_str() == Some(name))
     }) || proposal
@@ -484,23 +484,6 @@ fn has_clock_evidence(value: &str) -> bool {
         .chars()
         .any(|c| c.is_ascii_digit() || "一二三四五六七八九十两零半".contains(c));
     numeral && (value.contains(':') || value.contains('点') || value.contains('时'))
-}
-
-fn query_tool_name(name: &str) -> bool {
-    [
-        "get_",
-        "list_",
-        "search_",
-        "query_",
-        "fetch_",
-        "estimate_",
-        "read_",
-        "lookup_",
-        "find_",
-        "forecast_",
-    ]
-    .iter()
-    .any(|prefix| name.starts_with(prefix))
 }
 
 fn stable_title_hash(title: &str) -> String {

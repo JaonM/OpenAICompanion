@@ -38,6 +38,7 @@ class AndroidMobileBackend(
     approve: suspend (String, String) -> Boolean,
     approveA2a: suspend (A2aDelegation) -> Boolean,
     requestInput: suspend (String, String, JsonObject) -> JsonObject,
+    calendarPermission: AndroidCalendarPermission,
 ) : MobileBackend {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val wake = Channel<Unit>(Channel.CONFLATED)
@@ -51,7 +52,7 @@ class AndroidMobileBackend(
     )
     private val bindings = GeneratedHarnessBindingsAdapter()
     private val codec = CompanionConversationCodec()
-    private val mcp = AndroidMcpService(context, oauthBrowser, bindings, approve, requestInput)
+    private val mcp = AndroidMcpService(context, oauthBrowser, bindings, approve, requestInput, calendarPermission)
     private val a2aHttp = HttpClient(OkHttp) {
         followRedirects = false
         install(HttpTimeout) { requestTimeoutMillis = 30_000 }

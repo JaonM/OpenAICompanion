@@ -1,3 +1,6 @@
+mod policy;
+pub use policy::ToolPolicy;
+
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -135,6 +138,9 @@ impl ToolRegistry {
     ) -> Result<(), AgentError> {
         let mut names = HashSet::new();
         for tool in &tools {
+            if tool.policy.as_ref().is_some_and(|policy| !policy.valid()) {
+                return Err(AgentError::InvalidAction("invalid host tool policy".into()));
+            }
             let name = tool.name.trim();
             if name.is_empty() || name == "load_more_tools" || name != tool.name {
                 return Err(AgentError::InvalidAction("invalid MCP tool name".into()));
@@ -157,8 +163,9 @@ impl ToolRegistry {
         state.order.retain(|name| self.tools.contains_key(name));
         state.page_start = state.page_start.min(state.order.len());
         for tool in tools {
-            let definition =
+            let mut definition =
                 ToolDefinition::new(&tool.name, &tool.description, &tool.input_schema_json);
+            definition.policy = tool.policy;
             let name = definition.name.clone();
             self.tools.insert(
                 name.clone(),
@@ -216,6 +223,63 @@ impl ToolRegistry {
             .order
             .push(name);
         Ok(())
+    }
+
+    pub(crate) fn execute_background(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>> {
+        self.execute_in_context(call, "background")
+    }
+
+    fn execute_in_context(&self, call: ToolCall, context: &'static str) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>> {
+        if context == "background" && !self.background_allowed(&call.name) {
+            return Box::pin(async move { Err(AgentError::ToolExecution {
+                name: call.name, message: "host policy forbids background execution".into(),
+                error: crate::ToolExecutionError::PermissionDenied,
+            }) });
+        }
+        let execution = match self.tools.get(&call.name) {
+            Some(RegisteredTool::Builtin(tool) | RegisteredTool::Local(tool)) => {
+                Arc::clone(tool).execute(call.clone())
+            }
+            Some(RegisteredTool::KmpMcp { provider, .. }) => {
+                let provider = Arc::clone(provider);
+                let call = call.clone();
+                Box::pin(async move {
+                    provider
+                        .call_tool(call.name.clone(), call.arguments.clone(), context.into())
+                        .await
+                        .into_result()
+                        .map(|(output, is_error)| {
+                            if is_error {
+                                ToolOutput::failure(output)
+                            } else {
+                                ToolOutput::success(output)
+                            }
+                        })
+                        .map_err(|(error, message)| AgentError::ToolExecution {
+                            name: call.name.clone(),
+                            message,
+                            error,
+                        })
+                })
+            }
+            None => return Box::pin(async move { Err(AgentError::UnknownTool(call.name)) }),
+        };
+        let name = call.name.clone();
+        Box::pin(async move {
+            let result = execution.await;
+            result.map_err(|error| match error {
+                AgentError::ToolExecution { .. } => error,
+                error => AgentError::Tool {
+                    name,
+                    message: error.to_string(),
+                },
+            })
+        })
+    }
+
+    pub(crate) fn background_allowed(&self, name: &str) -> bool {
+        self.definition(name).and_then(|definition| definition.policy)
+            .is_some_and(|policy| policy.allows_background_read())
     }
 
     fn definition(&self, name: &str) -> Option<ToolDefinition> {
@@ -285,55 +349,19 @@ impl ToolExecutor for ToolRegistry {
     }
 
     fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>> {
-        let execution = match self.tools.get(&call.name) {
-            Some(RegisteredTool::Builtin(tool) | RegisteredTool::Local(tool)) => {
-                Arc::clone(tool).execute(call.clone())
-            }
-            Some(RegisteredTool::KmpMcp { provider, .. }) => {
-                let provider = Arc::clone(provider);
-                let call = call.clone();
-                Box::pin(async move {
-                    provider
-                        .call_tool(call.name.clone(), call.arguments.clone())
-                        .await
-                        .into_result()
-                        .map(|(output, is_error)| {
-                            if is_error {
-                                ToolOutput::failure(output)
-                            } else {
-                                ToolOutput::success(output)
-                            }
-                        })
-                        .map_err(|(error, message)| AgentError::ToolExecution {
-                            name: call.name.clone(),
-                            message,
-                            error,
-                        })
-                })
-            }
-            None => return Box::pin(async move { Err(AgentError::UnknownTool(call.name)) }),
-        };
-        let name = call.name.clone();
-        Box::pin(async move {
-            let result = execution.await;
-            result.map_err(|error| match error {
-                AgentError::ToolExecution { .. } => error,
-                error => AgentError::Tool {
-                    name,
-                    message: error.to_string(),
-                },
-            })
-        })
+        self.execute_in_context(call, "foreground")
     }
 
     fn should_retry(&self, call: &ToolCall, error: &AgentError) -> bool {
         if call.name == "delegate_to_agent" || call.name == "list_remote_agents" {
             return false;
         }
-        !matches!(
-            self.tools.get(&call.name),
-            Some(RegisteredTool::KmpMcp { .. })
-        ) && error.is_retryable()
+        let permitted = match self.tools.get(&call.name) {
+            Some(RegisteredTool::KmpMcp { definition, .. }) => definition.policy.as_ref().is_some_and(|policy| policy.allows_retry()),
+            Some(_) => true,
+            None => false,
+        };
+        permitted && error.is_retryable()
     }
 }
 
@@ -360,7 +388,7 @@ mod tests {
             }
         }
 
-        async fn call_tool(&self, _: String, _: String) -> ToolCallReply {
+        async fn call_tool(&self, _: String, _: String, _: String) -> ToolCallReply {
             ToolCallReply {
                 output_json: "{}".into(),
                 is_error: false,
@@ -416,6 +444,7 @@ mod tests {
             name: name.into(),
             description: String::new(),
             input_schema_json: "{}".into(),
+            policy: None,
         };
         registry
             .replace_mcp_tools(Arc::clone(&provider), vec![tool("old")])
@@ -450,6 +479,52 @@ mod tests {
             .replace_mcp_tools(provider, vec![tool("new")])
             .unwrap();
         assert_eq!(names(&registry), ["local", "new"]);
+    }
+
+    fn public_read_policy() -> ToolPolicy {
+        ToolPolicy { version: 1, origin: "device".into(), effect: "read".into(), data_class: "public".into(),
+            requires_foreground: false, background_eligible: true, requires_approval: false, retry_mode: "safe_read".into() }
+    }
+
+    #[test]
+    fn explicit_policy_controls_background_and_retries_independently_of_names() {
+        let mut registry = ToolRegistry::new(8).unwrap();
+        let provider: Arc<dyn ToolProvider> = Arc::new(UnusedProvider);
+        let read = public_read_policy();
+        let mut write = read.clone();
+        write.effect = "write".into(); write.requires_foreground = true; write.background_eligible = false;
+        write.requires_approval = true; write.retry_mode = "never".into();
+        let mut private = read.clone();
+        private.data_class = "personal".into(); private.requires_approval = true;
+        private.requires_foreground = true; private.background_eligible = false; private.retry_mode = "never".into();
+        registry.replace_mcp_tools(provider, vec![
+            McpTool { name:"device_get_context".into(), description:String::new(), input_schema_json:"{}".into(), policy:Some(read) },
+            McpTool { name:"get_destructive_action".into(), description:String::new(), input_schema_json:"{}".into(), policy:Some(write) },
+            McpTool { name:"get_calendar".into(), description:String::new(), input_schema_json:"{}".into(), policy:Some(private) },
+            McpTool { name:"get_legacy".into(), description:String::new(), input_schema_json:"{}".into(), policy:None },
+        ]).unwrap();
+        for (name, permitted) in [("device_get_context", true), ("get_destructive_action", false), ("get_calendar", false), ("get_legacy", false)] {
+            assert_eq!(registry.background_allowed(name), permitted);
+            let error = AgentError::ToolExecution { name: name.into(), message:"lost connection".into(), error:crate::ToolExecutionError::NetworkUnreachable };
+            assert_eq!(registry.should_retry(&ToolCall::new("1", name, "{}"), &error), permitted);
+            assert_eq!(block_on(registry.execute_background(ToolCall::new("1", name, "{}"))).is_ok(), permitted);
+        }
+    }
+
+    #[test]
+    fn policy_change_revokes_background_access_and_invalid_policy_does_not_replace_snapshot() {
+        let mut registry = ToolRegistry::new(8).unwrap();
+        let provider: Arc<dyn ToolProvider> = Arc::new(UnusedProvider);
+        let tool = |policy| McpTool { name:"context".into(), description:String::new(), input_schema_json:"{}".into(), policy:Some(policy) };
+        registry.replace_mcp_tools(provider.clone(), vec![tool(public_read_policy())]).unwrap();
+        assert!(registry.background_allowed("context"));
+        let mut invalid = public_read_policy(); invalid.effect = "write".into();
+        assert!(registry.replace_mcp_tools(provider.clone(), vec![tool(invalid)]).is_err());
+        assert!(registry.background_allowed("context"));
+        let mut revoked = public_read_policy(); revoked.requires_approval = true;
+        registry.replace_mcp_tools(provider, vec![tool(revoked)]).unwrap();
+        assert!(!registry.background_allowed("context"));
+        assert!(block_on(registry.execute_background(ToolCall::new("1", "context", "{}"))).is_err());
     }
 
     fn block_on<F: Future>(mut future: F) -> F::Output {

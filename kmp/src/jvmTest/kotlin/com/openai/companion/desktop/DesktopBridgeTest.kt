@@ -143,6 +143,107 @@ class DesktopBridgeTest {
     }
 
     @Test
+    fun deviceCalendarRoundTripsThroughRustWithoutRemoteMcp() = runBlocking {
+        System.setProperty("uniffi.component.harness.libraryOverride", System.getenv("HARNESS_LIBRARY_PATH"))
+        val bindings = GeneratedHarnessBindingsAdapter()
+        val manager = McpServerManager()
+        val database = Files.createTempFile("companion-device-bridge-", ".sqlite")
+        val calls = AtomicInteger()
+        val turns = AtomicInteger()
+        val source = object : com.openai.companion.kmp.CalendarEventDataSource {
+            override suspend fun getEvents(query: com.openai.companion.kmp.CalendarQuery): List<com.openai.companion.kmp.CalendarEvent> {
+                calls.incrementAndGet()
+                return listOf(com.openai.companion.kmp.CalendarEvent("local", "Team review", query.startTimeMs + 1000, query.startTimeMs + 2000))
+            }
+        }
+        try {
+            manager.attach("device", com.openai.companion.kmp.device.DeviceToolConnection(
+                com.openai.companion.kmp.device.createDeviceTools("macos", { "en" }, source, { true })))
+            registerMcpProvider(bindings, manager, approve = { name, _ ->
+                assertTrue(name.startsWith("本机 · device_calendar_list_events")); true
+            })
+            bindings.registerModelServeCallback(object : AppModelServe {
+                override suspend fun complete(requestJson: String, callback: ModelStreamCallback) {
+                    if (requestJson.contains("提取未来有用的原子记忆点")) {
+                        callback.onChunk("""{"choices":[{"message":{"content":"[]"}}]}""")
+                        return
+                    }
+                    assertTrue(requestJson.contains("device_calendar_list_events"))
+                    if (turns.incrementAndGet() == 1) {
+                        callback.onChunk("""{"choices":[{"message":{"tool_calls":[{"id":"device-1","type":"function","function":{"name":"device_calendar_list_events","arguments":"{\"start\":\"2026-10-07T00:00:00Z\",\"end\":\"2026-10-08T00:00:00Z\"}"}}]}}]}""")
+                    } else {
+                        assertTrue(requestJson.contains("Team review"))
+                        assertTrue(requestJson.contains("observed_at"))
+                        callback.onChunk("""{"choices":[{"message":{"content":"Calendar queried"}}]}""")
+                    }
+                }
+            })
+            assertTrue(appOpenStore(database.toString()).ok)
+            assertTrue(appStartSession().ok)
+            val result = appSendMessage("查询本机今天的日历")
+            assertTrue(result.ok, result.error)
+            assertEquals(1, calls.get()); assertEquals(2, turns.get())
+        } finally {
+            bindings.unregisterModelServeCallback()
+            bindings.unregisterToolProvider()
+            manager.detach("device")
+            Files.deleteIfExists(database)
+        }
+    }
+
+    @Test
+    fun calendarCreationRetriesAcrossRustHarnessSaveOnlyOnce() = runBlocking {
+        System.setProperty("uniffi.component.harness.libraryOverride", System.getenv("HARNESS_LIBRARY_PATH"))
+        val bindings = GeneratedHarnessBindingsAdapter()
+        val manager = McpServerManager()
+        val database = Files.createTempFile("companion-calendar-create-", ".sqlite")
+        val saves = AtomicInteger()
+        val turns = AtomicInteger()
+        val approvals = AtomicInteger()
+        val source = object : com.openai.companion.kmp.CalendarWriteDataSource {
+            override suspend fun getEvents(query: com.openai.companion.kmp.CalendarQuery) = emptyList<com.openai.companion.kmp.CalendarEvent>()
+            override suspend fun listCalendars() = listOf(com.openai.companion.kmp.DeviceCalendar("work", "Work", true))
+            override suspend fun ensureWritePermission() = Unit
+            override suspend fun createEvent(draft: com.openai.companion.kmp.CalendarEventDraft): String {
+                assertEquals("Review", draft.title)
+                saves.incrementAndGet()
+                return "saved-event-001"
+            }
+        }
+        try {
+            manager.attach("device", com.openai.companion.kmp.device.DeviceToolConnection(
+                com.openai.companion.kmp.device.createDeviceTools("macos", { "en" }, source, { true }, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings))))
+            registerMcpProvider(bindings, manager, approve = { name, _ ->
+                assertTrue(name.startsWith("本机 · device_calendar_create_event")); approvals.incrementAndGet(); true
+            })
+            bindings.registerModelServeCallback(object : AppModelServe {
+                override suspend fun complete(requestJson: String, callback: ModelStreamCallback) {
+                    if (requestJson.contains("提取未来有用的原子记忆点")) {
+                        callback.onChunk("""{"choices":[{"message":{"content":"[]"}}]}""")
+                        return
+                    }
+                    if (turns.incrementAndGet() <= 2) {
+                        callback.onChunk("""{"choices":[{"message":{"tool_calls":[{"id":"create-${turns.get()}","type":"function","function":{"name":"device_calendar_create_event","arguments":"{\"request_id\":\"create-001\",\"calendar_id\":\"work\",\"calendar_title\":\"Work\",\"title\":\"Review\",\"start\":\"2026-10-07T09:00:00+08:00\",\"end\":\"2026-10-07T10:00:00+08:00\",\"time_zone\":\"Asia/Shanghai\"}"}}]}}]}""")
+                    } else {
+                        assertTrue(requestJson.contains("saved-event-001"))
+                        callback.onChunk("""{"choices":[{"message":{"content":"Event created once"}}]}""")
+                    }
+                }
+            })
+            assertTrue(appOpenStore(database.toString()).ok)
+            assertTrue(appStartSession().ok)
+            val result = appSendMessage("新建日程并模拟相同请求的重试")
+            assertTrue(result.ok, result.error)
+            assertEquals(1, saves.get()); assertEquals(2, approvals.get()); assertEquals(3, turns.get())
+        } finally {
+            bindings.unregisterModelServeCallback()
+            bindings.unregisterToolProvider()
+            manager.detach("device")
+            Files.deleteIfExists(database)
+        }
+    }
+
+    @Test
     fun parsesSseDataAndDoneMarker() {
         val chunks = mutableListOf<String>()
         consumeServerSentEvents(StringReader("""

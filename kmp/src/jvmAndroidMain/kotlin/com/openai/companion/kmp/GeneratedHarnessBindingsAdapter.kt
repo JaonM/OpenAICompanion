@@ -43,14 +43,14 @@ class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
         registerToolProviderNative(object : GeneratedToolProvider {
             override suspend fun getTools(): GeneratedToolListReply = try {
                 GeneratedToolListReply(provider.getTools().map {
-                    GeneratedMcpTool(it.name, it.description, it.inputSchemaJson)
+                    GeneratedMcpTool(it.name, it.description, it.inputSchemaJson, it.policy.toNativePolicy())
                 }, null, null)
             } catch (error: Throwable) {
                 GeneratedToolListReply(emptyList(), error.callbackCode(), error.message)
             }
 
-            override suspend fun callTool(name: String, argumentsJson: String): GeneratedToolCallReply = try {
-                val result = provider.callTool(name, argumentsJson)
+            override suspend fun callTool(name: String, argumentsJson: String, executionContext: String): GeneratedToolCallReply = try {
+                val result = provider.callTool(name, argumentsJson, executionContext)
                 GeneratedToolCallReply(result.contentJson, result.isError, null, null)
             } catch (error: Throwable) {
                 GeneratedToolCallReply("", false, error.callbackCode(), error.message)
@@ -58,9 +58,26 @@ class GeneratedHarnessBindingsAdapter : GeneratedHarnessBindings {
         })
     }
 
+    private fun uniffi.harness.AppResult.requireValueJson(): String {
+        check(ok) { error }
+        return valueJson
+    }
+
+    override fun answerDeviceQuestion(requestJson: String): String =
+        uniffi.harness.appAnswerDeviceQuestion(requestJson).requireValueJson()
+
+    override fun executeDeviceTask(requestJson: String): String =
+        uniffi.harness.appExecuteDeviceTask(requestJson).requireValueJson()
+
+    override fun deviceOperation(tool: String, requestId: String, requestJson: String, claim: Boolean): String =
+        uniffi.harness.appDeviceOperation(tool, requestId, requestJson, claim).requireValueJson()
+
+    override fun finishDeviceOperation(operationId: String, succeeded: Boolean, resultJson: String): String =
+        uniffi.harness.appFinishDeviceOperation(operationId, succeeded, resultJson).requireValueJson()
+
     override fun updateMcpTools(tools: List<McpTool>) {
         uniffi.harness.updateMcpTools(
-            tools.map { GeneratedMcpTool(it.name, it.description, it.inputSchemaJson) },
+            tools.map { GeneratedMcpTool(it.name, it.description, it.inputSchemaJson, it.policy.toNativePolicy()) },
         )
     }
 
@@ -104,3 +121,6 @@ private fun Throwable.callbackCode(): String =
         is CancellationException -> ToolExecutionErrorCode.CANCELLED.name
         else -> ToolExecutionErrorCode.UNKNOWN.name
     }
+
+private fun com.openai.companion.kmp.ToolPolicy.toNativePolicy() = uniffi.harness.ToolPolicy(
+    version, origin, effect, dataClass, requiresForeground, backgroundEligible, requiresApproval, retryMode)

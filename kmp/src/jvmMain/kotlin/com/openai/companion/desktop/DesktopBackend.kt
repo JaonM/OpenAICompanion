@@ -1,5 +1,10 @@
 package com.openai.companion.desktop
 
+import com.openai.companion.kmp.device.DeviceToolConnection
+import com.openai.companion.kmp.device.createDeviceTools
+import com.openai.companion.kmp.DesktopCalendarEventDataSource
+import com.openai.companion.kmp.toHarnessTool
+
 import com.openai.companion.kmp.GeneratedHarnessBindingsAdapter
 import com.openai.companion.kmp.AppAgentEventSink
 import com.openai.companion.kmp.CompanionConversationCodec
@@ -146,6 +151,10 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
             require(support.isDirectory || support.mkdirs()) { "无法创建应用数据目录" }
             appOpenStore(File(support, "companion.sqlite").absolutePath).value()
         }
+        manager.attach("device", DeviceToolConnection(
+            createDeviceTools("macos", { java.util.Locale.getDefault().toLanguageTag() },
+                DesktopCalendarEventDataSource(),
+                { withContext(Dispatchers.Main) { java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null } }, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings))))
         registerMcpProvider(bindings, manager, ::approveMcpTool)
         initialized = true
         loadProactiveRules()
@@ -444,7 +453,7 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
             else {
                 manager.refresh()
                 bindings.updateMcpTools(manager.tools().map {
-                    McpTool(it.name, it.description, it.inputSchemaJson)
+                    it.toHarnessTool()
                 })
                 mcpStatus = "已连接 · ${manager.tools().size} 个工具"
             }

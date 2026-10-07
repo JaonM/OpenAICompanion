@@ -11,6 +11,7 @@ data class CalendarEvent(
     val calendarName: String? = null,
     val location: String? = null,
     val notes: String? = null,
+    val allDay: Boolean = false,
 )
 
 data class CalendarQuery(
@@ -18,11 +19,12 @@ data class CalendarQuery(
     val endTimeMs: Long,
     val query: String? = null,
     val limit: Int = 20,
-    val sortOrder: CalendarSortOrder = CalendarSortOrder.ASC,
+    val includeLocation: Boolean = true,
+    val includeNotes: Boolean = true,
 )
 
-enum class CalendarSortOrder { ASC, DESC }
-
 interface CalendarEventDataSource {
+    /** Recheck access when serving cached pages. Must not return cached private data after revocation. */
+    suspend fun checkPermission() = Unit
     suspend fun getEvents(query: CalendarQuery): List<CalendarEvent>
 }

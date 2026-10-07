@@ -97,6 +97,15 @@ where
     .await
 }
 
+/// Isolated device task; preserves only its own checkpoint, never the local chat.
+pub(crate) async fn run_device_task<E: ToolExecutor + Sync>(
+    model: &ModelServeWrapper, executor: &mut E, config: &Configuration,
+    system_prompt: &str, history: &[Message], input: String,
+) -> Result<AgentRun, AgentError> {
+    run_with_history_observed_mode(model, executor, config, system_prompt, history,
+        input, &mut |_| Ok(()), false).await
+}
+
 async fn run_with_history_observed_mode<E, O>(
     model: &ModelServeWrapper,
     executor: &mut E,
@@ -375,7 +384,7 @@ mod tests {
             }
         }
 
-        async fn call_tool(&self, name: String, _: String) -> ToolCallReply {
+        async fn call_tool(&self, name: String, _: String, _: String) -> ToolCallReply {
             if name == "timeout" {
                 self.timeout_calls.fetch_add(1, Ordering::SeqCst);
                 std::future::pending().await
@@ -608,6 +617,7 @@ mod tests {
                         name: name.into(),
                         description: String::new(),
                         input_schema_json: "{}".into(),
+                        policy: None,
                     })
                     .collect(),
             )

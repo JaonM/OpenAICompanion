@@ -23,9 +23,10 @@ class MainActivity : ComponentActivity() {
         val importer = AndroidGgufImporter(this)
         val model = AndroidLocalLlamaModel(applicationContext, importer)
         val notifications = AndroidNotificationSink(this)
+        val calendarPermission = AndroidCalendarPermission(this)
         val controller = MobileController(scope) { approve, requestInput, approveA2a ->
             AndroidMobileBackend(applicationContext, model, notifications, oauthBrowser,
-                approve, approveA2a, requestInput).also { backend = it }
+                approve, approveA2a, requestInput, calendarPermission).also { backend = it }
         }
         setContent {
             val state by controller.state.collectAsState()

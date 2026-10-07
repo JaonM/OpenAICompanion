@@ -692,7 +692,7 @@ internal interface UniffiCallbackInterfaceToolProviderMethod0 : com.sun.jna.Call
     fun callback(`uniffiHandle`: Long,`uniffiFutureCallback`: UniffiForeignFutureCompleteRustBuffer,`uniffiCallbackData`: Long,`uniffiOutReturn`: UniffiForeignFuture,)
 }
 internal interface UniffiCallbackInterfaceToolProviderMethod1 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteRustBuffer,`uniffiCallbackData`: Long,`uniffiOutReturn`: UniffiForeignFuture,)
+    fun callback(`uniffiHandle`: Long,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,`executionContext`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteRustBuffer,`uniffiCallbackData`: Long,`uniffiOutReturn`: UniffiForeignFuture,)
 }
 @Structure.FieldOrder("listAgents", "delegate", "uniffiFree")
 internal open class UniffiVTableCallbackInterfaceA2aProvider(
@@ -991,6 +991,14 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 
 
 
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1018,13 +1026,21 @@ fun uniffi_harness_checksum_func_app_a2a_put_task(
 ): Short
 fun uniffi_harness_checksum_func_app_acknowledge_memory_sync(
 ): Short
+fun uniffi_harness_checksum_func_app_answer_device_question(
+): Short
 fun uniffi_harness_checksum_func_app_delete_proactive_task(
 ): Short
 fun uniffi_harness_checksum_func_app_delete_session(
 ): Short
+fun uniffi_harness_checksum_func_app_device_operation(
+): Short
 fun uniffi_harness_checksum_func_app_discover_proactive_tasks(
 ): Short
+fun uniffi_harness_checksum_func_app_execute_device_task(
+): Short
 fun uniffi_harness_checksum_func_app_export_memory_sync(
+): Short
+fun uniffi_harness_checksum_func_app_finish_device_operation(
 ): Short
 fun uniffi_harness_checksum_func_app_get_proactive_settings(
 ): Short
@@ -1227,7 +1243,7 @@ fun uniffi_harness_fn_init_callback_vtable_toolprovider(`vtable`: UniffiVTableCa
 ): Unit
 fun uniffi_harness_fn_method_toolprovider_get_tools(`ptr`: Pointer,
 ): Long
-fun uniffi_harness_fn_method_toolprovider_call_tool(`ptr`: Pointer,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,
+fun uniffi_harness_fn_method_toolprovider_call_tool(`ptr`: Pointer,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,`executionContext`: RustBuffer.ByValue,
 ): Long
 fun uniffi_harness_fn_func_app_a2a_delete_agent(`agentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1241,13 +1257,21 @@ fun uniffi_harness_fn_func_app_a2a_put_task(`taskJson`: RustBuffer.ByValue,uniff
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_acknowledge_memory_sync(`generation`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_answer_device_question(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_delete_proactive_task(`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_delete_session(`sessionId`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_device_operation(`tool`: RustBuffer.ByValue,`requestId`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,`claim`: Byte,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_discover_proactive_tasks(`timezoneOffsetMinutes`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_execute_device_task(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_export_memory_sync(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_finish_device_operation(`operationId`: RustBuffer.ByValue,`succeeded`: Byte,`resultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_get_proactive_settings(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1461,16 +1485,28 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_harness_checksum_func_app_acknowledge_memory_sync() != 29850.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_harness_checksum_func_app_answer_device_question() != 23654.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_harness_checksum_func_app_delete_proactive_task() != 62451.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_app_delete_session() != 39588.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_harness_checksum_func_app_device_operation() != 19521.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_harness_checksum_func_app_discover_proactive_tasks() != 29125.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_harness_checksum_func_app_execute_device_task() != 59942.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_harness_checksum_func_app_export_memory_sync() != 6314.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_finish_device_operation() != 10548.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_app_get_proactive_settings() != 57660.toShort()) {
@@ -1605,7 +1641,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_harness_checksum_method_toolprovider_get_tools() != 64301.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_harness_checksum_method_toolprovider_call_tool() != 53919.toShort()) {
+    if (lib.uniffi_harness_checksum_method_toolprovider_call_tool() != 15179.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1907,6 +1943,29 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterUInt: FfiConverter<UInt, Int> {
+    override fun lift(value: Int): UInt {
+        return value.toUInt()
+    }
+
+    override fun read(buf: ByteBuffer): UInt {
+        return lift(buf.getInt())
+    }
+
+    override fun lower(value: UInt): Int {
+        return value.toInt()
+    }
+
+    override fun allocationSize(value: UInt) = 4UL
+
+    override fun write(value: UInt, buf: ByteBuffer) {
+        buf.putInt(value.toInt())
+    }
 }
 
 /**
@@ -3690,7 +3749,7 @@ public interface ToolProvider {
 
     suspend fun `getTools`(): ToolListReply
 
-    suspend fun `callTool`(`name`: kotlin.String, `argumentsJson`: kotlin.String): ToolCallReply
+    suspend fun `callTool`(`name`: kotlin.String, `argumentsJson`: kotlin.String, `executionContext`: kotlin.String): ToolCallReply
 
     companion object
 }
@@ -3799,12 +3858,12 @@ open class ToolProviderImpl: Disposable, AutoCloseable, ToolProvider
 
 
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `callTool`(`name`: kotlin.String, `argumentsJson`: kotlin.String) : ToolCallReply {
+    override suspend fun `callTool`(`name`: kotlin.String, `argumentsJson`: kotlin.String, `executionContext`: kotlin.String) : ToolCallReply {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_harness_fn_method_toolprovider_call_tool(
                 thisPtr,
-                FfiConverterString.lower(`name`),FfiConverterString.lower(`argumentsJson`),
+                FfiConverterString.lower(`name`),FfiConverterString.lower(`argumentsJson`),FfiConverterString.lower(`executionContext`),
             )
         },
         { future, callback, continuation -> UniffiLib.INSTANCE.ffi_harness_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -3863,12 +3922,13 @@ internal object uniffiCallbackInterfaceToolProvider {
         }
     }
     internal object `callTool`: UniffiCallbackInterfaceToolProviderMethod1 {
-        override fun callback(`uniffiHandle`: Long,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteRustBuffer,`uniffiCallbackData`: Long,`uniffiOutReturn`: UniffiForeignFuture,) {
+        override fun callback(`uniffiHandle`: Long,`name`: RustBuffer.ByValue,`argumentsJson`: RustBuffer.ByValue,`executionContext`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteRustBuffer,`uniffiCallbackData`: Long,`uniffiOutReturn`: UniffiForeignFuture,) {
             val uniffiObj = FfiConverterTypeToolProvider.handleMap.get(uniffiHandle)
             val makeCall = suspend { ->
                 uniffiObj.`callTool`(
                     FfiConverterString.lift(`name`),
                     FfiConverterString.lift(`argumentsJson`),
+                    FfiConverterString.lift(`executionContext`),
                 )
             }
             val uniffiHandleSuccess = { returnValue: ToolCallReply ->
@@ -3988,7 +4048,8 @@ public object FfiConverterTypeAppResult: FfiConverterRustBuffer<AppResult> {
 data class McpTool (
     var `name`: kotlin.String,
     var `description`: kotlin.String,
-    var `inputSchemaJson`: kotlin.String
+    var `inputSchemaJson`: kotlin.String,
+    var `policy`: ToolPolicy?
 ) {
 
     companion object
@@ -4003,19 +4064,22 @@ public object FfiConverterTypeMcpTool: FfiConverterRustBuffer<McpTool> {
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterOptionalTypeToolPolicy.read(buf),
         )
     }
 
     override fun allocationSize(value: McpTool) = (
             FfiConverterString.allocationSize(value.`name`) +
             FfiConverterString.allocationSize(value.`description`) +
-            FfiConverterString.allocationSize(value.`inputSchemaJson`)
+            FfiConverterString.allocationSize(value.`inputSchemaJson`) +
+            FfiConverterOptionalTypeToolPolicy.allocationSize(value.`policy`)
     )
 
     override fun write(value: McpTool, buf: ByteBuffer) {
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`description`, buf)
             FfiConverterString.write(value.`inputSchemaJson`, buf)
+            FfiConverterOptionalTypeToolPolicy.write(value.`policy`, buf)
     }
 }
 
@@ -4092,6 +4156,65 @@ public object FfiConverterTypeToolListReply: FfiConverterRustBuffer<ToolListRepl
             FfiConverterSequenceTypeMcpTool.write(value.`tools`, buf)
             FfiConverterOptionalString.write(value.`errorCode`, buf)
             FfiConverterOptionalString.write(value.`errorMessage`, buf)
+    }
+}
+
+
+
+/**
+ * Supplied by the host, never inferred from a model-visible tool name or description.
+ */
+data class ToolPolicy (
+    var `version`: kotlin.UInt,
+    var `origin`: kotlin.String,
+    var `effect`: kotlin.String,
+    var `dataClass`: kotlin.String,
+    var `requiresForeground`: kotlin.Boolean,
+    var `backgroundEligible`: kotlin.Boolean,
+    var `requiresApproval`: kotlin.Boolean,
+    var `retryMode`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeToolPolicy: FfiConverterRustBuffer<ToolPolicy> {
+    override fun read(buf: ByteBuffer): ToolPolicy {
+        return ToolPolicy(
+            FfiConverterUInt.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ToolPolicy) = (
+            FfiConverterUInt.allocationSize(value.`version`) +
+            FfiConverterString.allocationSize(value.`origin`) +
+            FfiConverterString.allocationSize(value.`effect`) +
+            FfiConverterString.allocationSize(value.`dataClass`) +
+            FfiConverterBoolean.allocationSize(value.`requiresForeground`) +
+            FfiConverterBoolean.allocationSize(value.`backgroundEligible`) +
+            FfiConverterBoolean.allocationSize(value.`requiresApproval`) +
+            FfiConverterString.allocationSize(value.`retryMode`)
+    )
+
+    override fun write(value: ToolPolicy, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`version`, buf)
+            FfiConverterString.write(value.`origin`, buf)
+            FfiConverterString.write(value.`effect`, buf)
+            FfiConverterString.write(value.`dataClass`, buf)
+            FfiConverterBoolean.write(value.`requiresForeground`, buf)
+            FfiConverterBoolean.write(value.`backgroundEligible`, buf)
+            FfiConverterBoolean.write(value.`requiresApproval`, buf)
+            FfiConverterString.write(value.`retryMode`, buf)
     }
 }
 
@@ -4280,6 +4403,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeToolPolicy: FfiConverterRustBuffer<ToolPolicy?> {
+    override fun read(buf: ByteBuffer): ToolPolicy? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeToolPolicy.read(buf)
+    }
+
+    override fun allocationSize(value: ToolPolicy?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeToolPolicy.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ToolPolicy?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeToolPolicy.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTool>> {
     override fun read(buf: ByteBuffer): List<McpTool> {
         val len = buf.getInt()
@@ -4362,6 +4517,15 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
     )
     }
 
+ fun `appAnswerDeviceQuestion`(`requestJson`: kotlin.String): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_answer_device_question(
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+
  fun `appDeleteProactiveTask`(`id`: kotlin.String): AppResult {
             return FfiConverterTypeAppResult.lift(
     uniffiRustCall() { _status ->
@@ -4380,6 +4544,15 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
     )
     }
 
+ fun `appDeviceOperation`(`tool`: kotlin.String, `requestId`: kotlin.String, `requestJson`: kotlin.String, `claim`: kotlin.Boolean): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_device_operation(
+        FfiConverterString.lower(`tool`),FfiConverterString.lower(`requestId`),FfiConverterString.lower(`requestJson`),FfiConverterBoolean.lower(`claim`),_status)
+}
+    )
+    }
+
  fun `appDiscoverProactiveTasks`(`timezoneOffsetMinutes`: kotlin.Long): AppResult {
             return FfiConverterTypeAppResult.lift(
     uniffiRustCall() { _status ->
@@ -4389,11 +4562,29 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
     )
     }
 
+ fun `appExecuteDeviceTask`(`requestJson`: kotlin.String): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_execute_device_task(
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+
  fun `appExportMemorySync`(): AppResult {
             return FfiConverterTypeAppResult.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_harness_fn_func_app_export_memory_sync(
         _status)
+}
+    )
+    }
+
+ fun `appFinishDeviceOperation`(`operationId`: kotlin.String, `succeeded`: kotlin.Boolean, `resultJson`: kotlin.String): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_finish_device_operation(
+        FfiConverterString.lower(`operationId`),FfiConverterBoolean.lower(`succeeded`),FfiConverterString.lower(`resultJson`),_status)
 }
     )
     }

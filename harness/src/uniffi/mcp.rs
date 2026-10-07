@@ -27,6 +27,7 @@ pub struct McpTool {
     pub name: String,
     pub description: String,
     pub input_schema_json: String,
+    pub policy: Option<crate::ToolPolicy>,
 }
 
 #[derive(Debug, Clone, ::uniffi::Record)]
@@ -85,7 +86,7 @@ impl ToolCallReply {
 #[::async_trait::async_trait]
 pub trait ToolProvider: Send + Sync {
     async fn get_tools(&self) -> ToolListReply;
-    async fn call_tool(&self, name: String, arguments_json: String) -> ToolCallReply;
+    async fn call_tool(&self, name: String, arguments_json: String, execution_context: String) -> ToolCallReply;
 }
 
 static TOOL_PROVIDER: OnceLock<Mutex<Option<Arc<dyn ToolProvider>>>> = OnceLock::new();
