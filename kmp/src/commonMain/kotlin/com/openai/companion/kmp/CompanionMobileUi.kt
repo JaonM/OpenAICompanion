@@ -243,16 +243,16 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         Spacer(Modifier.height(20.dp))
                         Text("远端 Agent（A2A）", style = MaterialTheme.typography.titleMedium)
                         Text("跨设备执行", style = MaterialTheme.typography.titleMedium)
-                        OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "设备服务地址" })
+                        OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "本设备名称" })
                         OutlinedTextField(deviceTokenDraft, { deviceTokenDraft = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(pairingCode, { pairingCode = it }, label = { Text("一次性配对码（10 分钟有效）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(pairingCode, { pairingCode = it }, label = { Text("一次性配对码（10 分钟有效）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "一次性配对码" })
                         OutlinedButton(enabled = pairingCode.isNotBlank(), onClick = {
                             actions.pairDevice(deviceEndpointDraft, pairingCode, deviceNameDraft, deviceAcceptsDraft)
                             pairingCode = ""
                         }) { Text("使用配对码连接") }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(deviceAcceptsDraft, { deviceAcceptsDraft = it })
+                            Checkbox(deviceAcceptsDraft, { deviceAcceptsDraft = it }, modifier = Modifier.semantics { contentDescription = "前台接单开关" })
                             Text("允许本设备在前台接收任务")
                         }
                         Text(state.deviceStatus)

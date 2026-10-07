@@ -19,7 +19,7 @@ public class AcceptancePreferencesFactory implements PreferencesFactory {
   } catch (Exception error) { throw new IllegalStateException("Cannot seed isolated worker credential",error); }
   Preferences p=root.node("/com/openai/companion/desktop");
   p.put("endpoint",System.getProperty("companion.acceptance.modelEndpoint"));
-  p.put("model","acceptance-stub");
+  p.put("model",System.getProperty("companion.acceptance.model","acceptance-stub"));
  }
  public Preferences userRoot(){return root;}
  public Preferences systemRoot(){return root;}

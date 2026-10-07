@@ -8,6 +8,65 @@
 
 @implementation OpenAICompanionUITests
 
+- (void)setUp {
+    [super setUp];
+    self.continueAfterFailure = NO;
+}
+
+- (void)enterAcceptanceText:(NSString *)text field:(XCUIElement *)field app:(XCUIApplication *)app {
+    for (NSInteger i = 0; i < 5 && !field.hittable; i++) [app swipeUp];
+    XCTAssertTrue(field.hittable);
+    // Target the editable part instead of the floating label. Scroll settling
+    // can otherwise leave the first tap without keyboard focus on real devices.
+    [[field coordinateWithNormalizedOffset:CGVectorMake(0.25, 0.7)] tap];
+    if (![app.keyboards.firstMatch waitForExistenceWithTimeout:2]) [field tap];
+    XCTAssertTrue([app.keyboards.firstMatch waitForExistenceWithTimeout:5]);
+    [field typeText:text];
+}
+
+// Opt-in real-device acceptance. Copy a protected, disposable fixture to the
+// test runner's Documents directory; never embed credentials in launch arguments.
+- (void)testCrossDevicePairingAndForegroundExecution {
+    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) XCTSkip(@"需要为独立真机验收准备设备配对 fixture。");
+    NSDictionary *fixture = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    XCTAssertTrue([fixture[@"endpoint"] hasPrefix:@"https://"]);
+    XCTAssertTrue([fixture[@"code"] length] > 0);
+    XCUIApplication *app = [[XCUIApplication alloc] init];
+    app.launchArguments = @[@"-localGGUFFileName", @"test-smollm2.gguf"];
+    [app launch];
+    [app.buttons[@"设置"] tap];
+    XCUIElement *endpoint = app.textViews[@"设备服务地址"];
+    for (NSInteger i = 0; i < 12 && !endpoint.hittable; i++) [app swipeUp];
+    XCTAssertTrue(endpoint.hittable, @"设备服务地址输入框不可操作：%@", app.debugDescription);
+    [self enterAcceptanceText:fixture[@"endpoint"] field:endpoint app:app];
+    XCUIElement *name = app.textViews[@"本设备名称"];
+    [self enterAcceptanceText:@"Acceptance iPhone" field:name app:app];
+    // Password fields can have a different accessibility element type.
+    XCUIElement *code = [[app descendantsMatchingType:XCUIElementTypeAny]
+        matchingIdentifier:@"一次性配对码"].firstMatch;
+    [self enterAcceptanceText:fixture[@"code"] field:code app:app];
+    XCUIElement *accept = app.buttons[@"前台接单开关"];
+    for (NSInteger i = 0; i < 5 && !accept.hittable; i++) [app swipeUp];
+    [accept tap];
+    XCTAssertTrue(app.buttons[@"使用配对码连接"].enabled, @"配对码输入未生效，尚未发起网络配对请求。");
+    [app.buttons[@"使用配对码连接"] tap];
+    XCUIElement *connected = app.staticTexts[@"已连接 · Acceptance iPhone · 前台可接单"];
+    XCTAssertTrue([connected waitForExistenceWithTimeout:40]);
+    [app terminate];
+    [app launch];
+    [app.buttons[@"设置"] tap];
+    for (NSInteger i = 0; i < 12 && !connected.hittable; i++) [app swipeUp];
+    XCTAssertTrue([connected waitForExistenceWithTimeout:40]);
+    // The host-side acceptance controller sends a task while the real app is
+    // foreground. Its result is checked independently at the HTTPS gateway.
+    XCTestExpectation *foreground = [self expectationWithDescription:@"Foreground device task window"];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [foreground fulfill]; });
+    [self waitForExpectations:@[foreground] timeout:130];
+    XCTAssertTrue(connected.exists);
+}
+
 - (void)testScheduledReminderSurvivesAppTermination {
     XCUIApplication *app = [[XCUIApplication alloc] init];
     [app launch];
@@ -56,15 +115,25 @@
     [app.buttons[@"完成"] tap];
     XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:10]);
 
+    XCUIElementQuery *replies = [app.staticTexts matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"assistant："]];
+    NSUInteger priorReplies = replies.count;
+
     XCUIElement *message = app.textViews.firstMatch;
     XCTAssertTrue([message waitForExistenceWithTimeout:10]);
     [message tap];
     [message typeText:@"Reply with hi."];
+    NSPredicate *enabled = [NSPredicate predicateWithFormat:@"enabled == YES"];
+    XCTNSPredicateExpectation *ready = [[XCTNSPredicateExpectation alloc] initWithPredicate:enabled object:app.buttons[@"发送"]];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[ready] timeout:5], XCTWaiterResultCompleted,
+                   @"自动化输入未生效；请切换至苹果系统键盘后重试，不能计作模型请求。");
     [app.buttons[@"发送"] tap];
 
-    XCUIElement *reply = [[app.staticTexts matchingPredicate:
-        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"assistant："]] firstMatch];
-    XCTAssertTrue([reply waitForExistenceWithTimeout:120]);
+    NSPredicate *newReply = [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
+        return replies.count > priorReplies;
+    }];
+    XCTNSPredicateExpectation *generated = [[XCTNSPredicateExpectation alloc] initWithPredicate:newReply object:app];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[generated] timeout:120], XCTWaiterResultCompleted);
 }
 
 - (void)testConnectLocalMcpFixture {
