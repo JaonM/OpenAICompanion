@@ -17,7 +17,7 @@ Android App 位于 [`kmp/androidApp`](../kmp/androidApp)。界面、状态控制
 - App 通过 Android 系统文件选择器导入 GGUF 到应用私有目录，在设备上完成模型推理。MCP 连接仅接受 HTTPS 或本机 HTTP；OAuth 令牌和 A2A Bearer 令牌使用 Android Keystore 加密保存。
 - OAuth 使用系统浏览器与 `openai-companion://oauth/callback` 回跳；主 Activity 复用既有实例接收回跳，再由共享 KMP OAuth 客户端校验授权响应。
 - 通知在启用主动任务时申请 Android 13 及以上版本的 `POST_NOTIFICATIONS` 权限。用户拒绝时任务结果不会标记为已投递。
-- 主动推送默认关闭，可在设置中开启并选择 15 分钟、30 分钟、1 小时或 3 小时的发现间隔；任务到点执行和通知也受总开关控制。当前调度由 App 进程内协程运行，进程退出后无法保证继续发现或按时推送；系统级后台调度仍待实现和设备验证。
+- 主动推送默认关闭，可在设置中开启并选择 15 分钟、30 分钟、1 小时或 3 小时的发现间隔；任务到点执行和通知也受总开关控制。固定时间提醒已接入持久化 AlarmManager 排程及重启恢复；缺少精确闹钟权限时可能延迟。主动发现与实时推理仍需 App 可运行，系统强行停止和权限变化需真机验收。
 - 中长期记忆可通过自建 HTTPS 服务跨端同步，Android 使用 Keystore 保存访问令牌；服务部署与配置见[跨端记忆同步](memory_sync.md)。
 - 现有日历数据源会检查 `READ_CALENDAR`，但移动 App 尚未提供完整的日历授权入口与端到端验收。
 
