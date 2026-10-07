@@ -87,7 +87,7 @@ class McpServerManager {
             current.forEach { (serverId, connection) ->
                 connection.listTools().forEach { advertised ->
                     // A remote descriptor cannot opt itself into background execution or skip approval.
-                    val tool = if (connection is com.openai.companion.kmp.device.DeviceToolConnection) advertised
+                    val tool = if (connection is com.openai.companion.kmp.device.DeviceToolConnection || connection is CrossDeviceService) advertised
                         else advertised.copy(policy = ToolPolicy())
                     require(tool.name.isNotBlank()) { "MCP tool name must not be blank" }
                     check(names.add(tool.name)) { "Duplicate MCP tool name: ${tool.name}" }

@@ -47,6 +47,11 @@ interface MobileBackend {
     val proactiveTaskUpdates: StateFlow<List<ProactiveTask>>? get() = null
     suspend fun saveProactiveTask(task: ProactiveTask) = Unit
     suspend fun deleteProactiveTask(id: String) = Unit
+    val deviceEndpoint: String get() = ""
+    val deviceName: String get() = ""
+    val deviceAcceptsTasks: Boolean get() = false
+    val deviceStatus: StateFlow<String>? get() = null
+    suspend fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = Unit
     val a2aAgents: StateFlow<List<A2aAgent>>? get() = null
     val a2aTasks: StateFlow<List<A2aTask>>? get() = null
     suspend fun addA2aAgent(cardUrl: String) = Unit
@@ -83,6 +88,9 @@ class MobileController(
     private val pendingA2aApproval = MutableStateFlow<Pair<Long, CompletableDeferred<Boolean>>?>(null)
 
     fun start() = scope.launch {
+        backend.deviceStatus?.let { updates ->
+            scope.launch { updates.collect { value -> mutableState.update { it.copy(deviceStatus = value) } } }
+        }
         backend.a2aAgents?.let { updates ->
             scope.launch { updates.collect { value -> mutableState.update { it.copy(a2aAgents = value) } } }
         }
@@ -258,6 +266,10 @@ class MobileController(
         }
     }
 
+    override fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) {
+        scope.launch { perform { backend.configureDevices(endpoint, token, name, accepts) }; syncSettings() }
+    }
+
     override fun addA2aAgent(cardUrl: String) = launchA2aAction { backend.addA2aAgent(cardUrl) }
     override fun disableA2aAgent(id: String) = launchA2aAction { backend.disableA2aAgent(id) }
     override fun setA2aBearerToken(id: String, token: String) = launchA2aAction { backend.setA2aBearerToken(id, token) }
@@ -386,6 +398,9 @@ class MobileController(
                 commuteTime = backend.commuteTime,
                 proactiveTasks = backend.proactiveTasks,
                 proactiveSettings = backend.proactiveSettings,
+                deviceEndpoint = backend.deviceEndpoint,
+                deviceName = backend.deviceName,
+                deviceAcceptsTasks = backend.deviceAcceptsTasks,
                 memorySyncEndpoint = backend.memorySyncEndpoint,
                 memorySyncStatus = backend.memorySyncStatus,
             )

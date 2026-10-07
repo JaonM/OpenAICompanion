@@ -1,5 +1,7 @@
 package com.openai.companion.desktop
 
+import com.openai.companion.kmp.DeviceExecutionPanel
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -385,10 +387,11 @@ private fun CodexSettings(
     var apiKey by remember { mutableStateOf(backend.modelServe.apiKey) }
     var mcpEndpoint by remember { mutableStateOf(backend.mcpEndpoint) }
     var showTasks by remember { mutableStateOf(false) }
+    var showDevices by remember { mutableStateOf(false) }
     var connecting by remember { mutableStateOf(false) }
     DialogWindow(onCloseRequest = onClose, title = "设置", state = DialogState(width = 560.dp, height = 730.dp)) {
         MaterialTheme {
-            Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("模型与连接", style = MaterialTheme.typography.titleLarge)
                 Text("默认连接本机 Ollama，使用 Unsloth Qwen3.8-27B UD-Q4_K_M。", color = secondaryText,
                     style = MaterialTheme.typography.bodySmall)
@@ -409,6 +412,7 @@ private fun CodexSettings(
                 Text("主动提醒", style = MaterialTheme.typography.titleMedium)
                 Text("使用本地模型时，每轮对话后及后台每 30 分钟主动发现机会；App 运行期间按时调用 Harness 判断是否推送。",
                     color = secondaryText, style = MaterialTheme.typography.bodySmall)
+                Button(onClick = { showDevices = true }) { Text("跨设备执行与远端任务") }
                 Button(onClick = { showTasks = true }) { Text("管理主动任务") }
                 Spacer(Modifier.weight(1f))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -428,6 +432,13 @@ private fun CodexSettings(
                         }
                     }) { Text("保存设置") }
                 }
+            }
+        }
+    }
+    if (showDevices) DialogWindow(onCloseRequest = { showDevices = false }, title = "跨设备执行", state = DialogState(width = 620.dp, height = 760.dp)) {
+        MaterialTheme {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+                DeviceExecutionPanel(backend.devices, backend.a2a)
             }
         }
     }

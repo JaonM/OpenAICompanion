@@ -177,6 +177,14 @@ impl Session {
         };
         let result = async {
             let mut prompt = self.system_prompt.clone();
+            prompt.push_str("\nExecution routing: ordinary chat stays on this device. Use local tools when they satisfy \
+                the user's task. If another device is explicitly requested or required capabilities/resources are missing, \
+                use list_execution_devices and route_task when available. Use exact advertised capability names and \
+                resource references, never invent them. Only a REMOTE decision selects an agent for delegate_to_agent; \
+                WAITING requires explaining that execution will be queued. For NEEDS_USER_ACTION ask the user to resolve \
+                the condition. Honor an explicit target; never silently substitute another device or data source. \
+                A routing result is not an execution result. Replies, status queries and cancellation continue the \
+                existing task rather than creating a new delegation. Never retry or move a task whose execution is uncertain.");
             if let (Some(memory), Some(session_id)) = (&self.memory, self.trace_session_id) {
                 let summaries = memory.medium_summaries(session_id).map_err(memory_error)?;
                 append_medium_summaries(&mut prompt, &summaries, &user_input);

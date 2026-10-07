@@ -43,7 +43,7 @@ class AndroidMobileBackend(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
-    private val gate = Mutex()
+    private val gate = AgentExecutionGate()
     private val syncGate = Mutex()
     private val memorySyncWorker = MemorySyncWorker(
         enabled = { memorySyncEndpoint.isNotBlank() },
@@ -67,6 +67,17 @@ class AndroidMobileBackend(
     override val memorySyncStatus: String get() = mutableMemorySyncStatus.value
     private val a2a = A2aClient(a2aHttp, AndroidA2aStore(), AndroidA2aTokenStore(context),
         scope, approveA2a)
+    private val deviceSettings = DeviceSettingsFile(File(context.filesDir, "device-tasks.json"))
+    private val devices = CrossDeviceService(a2aHttp, a2a, AndroidA2aTokenStore(context),
+        deviceSettings::load, deviceSettings::save, "android",
+        calendarPermission::isForeground,
+        mcp::tools, { request -> withContext(Dispatchers.IO) { gate.withLock { bindings.executeDeviceTask(request) } } },
+        answerQuestion = { request -> withContext(Dispatchers.IO) { gate.withLock { bindings.answerDeviceQuestion(request) } } })
+    override val deviceEndpoint get() = devices.endpoint
+    override val deviceName get() = devices.deviceName
+    override val deviceAcceptsTasks get() = devices.acceptsTasks
+    override val deviceStatus get() = devices.status
+    override suspend fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = devices.configure(endpoint, token, name, accepts)
     private var initialized = false
 
     override var mealReminderEnabled: Boolean = false
@@ -98,6 +109,8 @@ class AndroidMobileBackend(
         }
         mcp.start()
         a2a.start()
+        mcp.attachDeviceRouting(devices)
+        devices.start(scope)
         registerA2aProvider(object : A2aProvider {
             override suspend fun listAgents() = a2a.listForModel()
             override suspend fun delegate(agentId: String, taskText: String) = a2a.delegate(agentId, taskText)
@@ -153,7 +166,7 @@ class AndroidMobileBackend(
         Unit
     }
     override suspend fun send(text: String, onText: (String) -> Unit) = withContext(Dispatchers.IO) {
-        gate.withLock {
+        gate.foreground {
             bindings.registerAgentEventSink(object : AppAgentEventSink {
                 override fun onReasoningDelta(text: String) = Unit
                 override fun onTextDelta(text: String) = onText(text)
@@ -167,8 +180,10 @@ class AndroidMobileBackend(
         Unit
     }
     override fun cancel() {
-        bindings.cancelAgentLoop()
-        model.cancel()
+        gate.cancelForeground {
+            bindings.cancelAgentLoop()
+            model.cancel()
+        }
     }
     fun onActivityResumed() {
         if (initialized) scope.launch { requestPermissionForEnabledTasks() }

@@ -1,5 +1,13 @@
 package com.openai.companion.desktop
 
+import com.openai.companion.kmp.*
+import uniffi.harness.A2aProvider
+import uniffi.harness.registerA2aProvider
+import uniffi.harness.appA2aListAgents
+import uniffi.harness.appA2aPutAgent
+import uniffi.harness.appA2aDeleteAgent
+import uniffi.harness.appA2aListTasks
+import uniffi.harness.appA2aPutTask
 import com.openai.companion.kmp.device.DeviceToolConnection
 import com.openai.companion.kmp.device.createDeviceTools
 import com.openai.companion.kmp.DesktopCalendarEventDataSource
@@ -93,6 +101,7 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
     private val bindings = GeneratedHarnessBindingsAdapter()
     private val manager = McpServerManager()
     private val preferences = Preferences.userNodeForPackage(DesktopBackend::class.java)
+    private val agentGate = AgentExecutionGate()
     private val approvalGate = Mutex()
     private val syncGate = Mutex()
     private val syncSecrets = DesktopSecretStore()
@@ -106,6 +115,23 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
         install(HttpTimeout) { requestTimeoutMillis = 30_000 }
     }
     private val syncClient = MemorySyncClient(syncHttp)
+    private val a2aTokens = object : A2aTokenStore {
+        override suspend fun load(agentId: String) = syncSecrets.read("a2a:$agentId")
+        override suspend fun save(agentId: String, token: String) = syncSecrets.write("a2a:$agentId", token)
+        override suspend fun delete(agentId: String) = syncSecrets.remove("a2a:$agentId")
+    }
+    val a2a = A2aClient(syncHttp, HarnessA2aStore(
+        { appA2aListAgents().value() }, { appA2aPutAgent(it).value() }, { appA2aDeleteAgent(it).value() },
+        { appA2aListTasks().value() }, { appA2aPutTask(it).value() }), a2aTokens, proactiveScope,
+        { request -> approveMcpTool("委托到 ${request.agent.name}", request.taskText) })
+    private val deviceSettings = DeviceSettingsFile(File(
+        System.getenv("COMPANION_DATA_DIR")?.takeIf(String::isNotBlank)
+            ?: (System.getProperty("user.home") + "/Library/Application Support/OpenAICompanion"), "device-tasks.json"))
+    val devices = CrossDeviceService(syncHttp, a2a, a2aTokens, deviceSettings::load, deviceSettings::save, "macos",
+        { withContext(Dispatchers.Main) { java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null } },
+        manager::tools, { request -> withContext(Dispatchers.IO) { agentGate.withLock { bindings.executeDeviceTask(request) } } },
+        answerQuestion = { request -> withContext(Dispatchers.IO) { agentGate.withLock { bindings.answerDeviceQuestion(request) } } })
+
     @Volatile var memorySyncEndpoint: String = preferences.get("memorySyncEndpoint", "")
         private set
     @Volatile var memorySyncStatus: String = "未配置"
@@ -156,6 +182,13 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
                 DesktopCalendarEventDataSource(),
                 { withContext(Dispatchers.Main) { java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null } }, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings))))
         registerMcpProvider(bindings, manager, ::approveMcpTool)
+        a2a.start()
+        registerA2aProvider(object : A2aProvider {
+            override suspend fun listAgents() = a2a.listForModel()
+            override suspend fun delegate(agentId: String, taskText: String) = a2a.delegate(agentId, taskText)
+        })
+        manager.attach("routing", devices)
+        devices.start(proactiveScope)
         initialized = true
         loadProactiveRules()
         proactiveSettings = Json.decodeFromString(appGetProactiveSettings().value())
@@ -396,6 +429,7 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
     suspend fun send(message: String, onEvent: (DesktopStreamEvent) -> Unit = {}): String {
         refreshMcp()
         return withContext(Dispatchers.IO) {
+        agentGate.foreground {
         bindings.registerAgentEventSink(object : AppAgentEventSink {
             override fun onReasoningDelta(text: String) = onEvent(DesktopStreamEvent.Reasoning(text))
             override fun onTextDelta(text: String) = onEvent(DesktopStreamEvent.Text(text))
@@ -415,6 +449,7 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
         }
         proactiveScope.launch { processPendingProactivePlans() }
         output
+        }
         }
     }
 
@@ -476,8 +511,10 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe()) {
     }
 
     fun cancel() {
-        cancelAgentLoop()
-        modelServe.cancelCurrentRequest()
+        agentGate.cancelForeground {
+            cancelAgentLoop()
+            modelServe.cancelCurrentRequest()
+        }
     }
 
     fun answerMcpApproval(id: Long, approved: Boolean) {

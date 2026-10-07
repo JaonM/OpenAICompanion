@@ -204,6 +204,8 @@ open class MobileMcpService(
         }
     }
 
+    suspend fun attachDeviceRouting(connection: CrossDeviceService) = manager.attach("routing", connection)
+
     suspend fun tools(): List<McpToolDescriptor> = manager.tools()
 
     private suspend fun restoreCredentials(previous: Pair<String?, McpOAuthTokens?>) = tokenGate.withLock {

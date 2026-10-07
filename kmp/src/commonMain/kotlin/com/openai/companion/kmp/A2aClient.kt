@@ -139,7 +139,9 @@ class A2aClient(
     suspend fun addAgent(rawCardUrl: String) {
         val cardUrl = rawCardUrl.trim()
         validateUrl(cardUrl)
-        val response = http.get(cardUrl)
+        val existing = store.agents().firstOrNull { it.id == cardUrl && it.bearerSupported }
+        val knownToken = existing?.let { tokens.load(it.id) }
+        val response = http.get(cardUrl) { knownToken?.let { header("Authorization", "Bearer $it") } }
         require(response.status.value == 200) { "读取 Agent Card 失败：HTTP ${response.status.value}" }
         val body = response.bodyAsText()
         require(body.length <= 512_000) { "Agent Card 过大" }
@@ -159,6 +161,22 @@ class A2aClient(
         }
         val id = cardUrl
         store.putAgent(A2aAgent(id, name, cardUrl, card))
+        reload()
+    }
+
+    /** Authenticated discovery by an explicitly configured personal-device gateway. */
+    suspend fun installDeviceAgent(cardUrl: String, card: JsonObject, token: String) {
+        validateUrl(cardUrl)
+        val selected = supportedInterface(card)
+        val origin = Url(cardUrl)
+        val destination = Url(field(selected, "url") ?: error("Agent endpoint missing"))
+        require(origin.protocol == destination.protocol && origin.host == destination.host && origin.port == destination.port) {
+            "设备 Agent 接口必须属于同一网关，不能向其他服务发送设备令牌"
+        }
+        val previous = store.agents().firstOrNull { it.id == cardUrl }
+        if (previous?.enabled == false) return
+        store.putAgent(A2aAgent(cardUrl, field(card, "name") ?: error("Agent name missing"), cardUrl, card))
+        tokens.save(cardUrl, token)
         reload()
     }
 
@@ -205,6 +223,7 @@ class A2aClient(
         try {
             task = fromSendResult(task, rpc(agent, "SendMessage", buildJsonObject {
                 put("message", userMessage(text))
+                put("configuration", buildJsonObject { put("returnImmediately", true) })
             }))
             store.putTask(task)
             reload()
@@ -253,6 +272,7 @@ class A2aClient(
         try {
             val result = rpc(agent, "SendMessage", buildJsonObject {
                 put("message", userMessage(text.trim(), task.remoteTaskId, task.contextId))
+                put("configuration", buildJsonObject { put("returnImmediately", true) })
             })
             store.putTask(fromSendResult(task, result))
             reload()
@@ -325,7 +345,9 @@ class A2aClient(
     private fun fromRemoteTask(local: A2aTask, remote: JsonObject): A2aTask {
         val remoteId = field(remote, "id") ?: error("A2A Task 缺少 id")
         val status = remote["status"] as? JsonObject ?: error("A2A Task 缺少 status")
-        val state = field(status, "state") ?: error("A2A Task 缺少 state")
+        val remoteState = field(status, "state") ?: error("A2A Task 缺少 state")
+        val uncertain = (remote["metadata"] as? JsonObject)?.get("executionUnknown")?.jsonPrimitive?.content == "true"
+        val state = if (uncertain) "EXECUTION_UNKNOWN" else remoteState
         val prompt = (status["message"] as? JsonObject)?.let(::textParts).orEmpty()
         val artifactObjects = (remote["artifacts"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
         val artifacts = artifactObjects.joinToString("\n") { textParts(it) }
@@ -333,7 +355,7 @@ class A2aClient(
             remoteTaskId = remoteId, contextId = field(remote, "contextId"), state = state,
             question = prompt.takeIf { state == "TASK_STATE_INPUT_REQUIRED" || state == "TASK_STATE_AUTH_REQUIRED" },
             result = artifacts.ifBlank { prompt.ifBlank { if (artifactObjects.isNotEmpty()) "远端返回了非文本内容" else "" } }
-                .takeIf { state in setOf("TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_REJECTED") },
+                .takeIf { state in setOf("TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_REJECTED", "EXECUTION_UNKNOWN") },
         )
     }
 }

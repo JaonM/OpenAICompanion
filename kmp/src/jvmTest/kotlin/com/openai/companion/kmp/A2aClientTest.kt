@@ -52,6 +52,38 @@ class A2aClientTest {
     }
 
     @Test
+    fun uncertainExecutionRemainsPollableUntilOriginalAttemptReportsResult() = runBlocking {
+        var requests = 0
+        val engine = MockEngine { request ->
+            val body = Json.parseToJsonElement((request.body as TextContent).text).jsonObject
+            val method = body["method"]!!.jsonPrimitive.content
+            val result = if (method == "SendMessage") {
+                assertEquals("true", body["params"]!!.jsonObject["configuration"]!!.jsonObject["returnImmediately"]!!.jsonPrimitive.content)
+                """{"task":{"id":"remote-1","contextId":"ctx-1","status":{"state":"TASK_STATE_WORKING","message":{"parts":[{"text":"Execution unknown"}]}},"metadata":{"executionUnknown":true}}}"""
+            } else {
+                assertEquals("GetTask", method)
+                """{"id":"remote-1","contextId":"ctx-1","status":{"state":"TASK_STATE_COMPLETED"},"artifacts":[{"parts":[{"text":"Recovered result"}]}]}"""
+            }
+            requests++
+            respond("""{"jsonrpc":"2.0","id":"1","result":$result}""", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val http = HttpClient(engine)
+        val client = A2aClient(http, TestA2aStore(), TestTokenStore(), scope) { true }
+        val card = Json.parseToJsonElement("""{"name":"Mac","supportedInterfaces":[{"url":"https://gateway.test/rpc","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"skills":[]}""").jsonObject
+        try {
+            client.installDeviceAgent("https://gateway.test/card", card, "secret")
+            client.delegate("https://gateway.test/card", "Do work")
+            assertEquals("EXECUTION_UNKNOWN", client.tasks.value.single().state)
+            assertTrue(!client.tasks.value.single().terminal)
+            client.refresh()
+            assertEquals("TASK_STATE_COMPLETED", client.tasks.value.single().state)
+            assertEquals("Recovered result", client.tasks.value.single().result)
+            assertEquals(2, requests)
+        } finally { scope.cancel(); http.close() }
+    }
+
+    @Test
     fun delegatesAndResumesTheSameRemoteTaskAfterUserInput() = runBlocking {
         val sent = mutableListOf<JsonObject>()
         val engine = MockEngine { request ->

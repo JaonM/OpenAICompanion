@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -64,6 +65,10 @@ data class MobileUiState(
     val mcpBusy: Boolean = false,
     val approval: MobileToolApproval? = null,
     val inputPrompt: MobileInputPrompt? = null,
+    val deviceEndpoint: String = "",
+    val deviceName: String = "",
+    val deviceAcceptsTasks: Boolean = false,
+    val deviceStatus: String = "未配置跨设备执行",
     val a2aAgents: List<A2aAgent> = emptyList(),
     val a2aTasks: List<A2aTask> = emptyList(),
     val a2aApproval: MobileA2aApproval? = null,
@@ -89,6 +94,7 @@ interface MobileActions {
     fun configureMemorySync(endpoint: String, token: String) = Unit
     fun syncMemories() = Unit
     fun deleteProactiveTask(id: String) = Unit
+    fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = Unit
     fun addA2aAgent(cardUrl: String)
     fun disableA2aAgent(id: String)
     fun setA2aBearerToken(id: String, token: String)
@@ -106,6 +112,10 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var draft by remember { mutableStateOf("") }
     var endpointDraft by remember(state.mcpEndpoint) { mutableStateOf(state.mcpEndpoint) }
     var oauthClientId by remember { mutableStateOf("") }
+    var deviceEndpointDraft by remember(state.deviceEndpoint) { mutableStateOf(state.deviceEndpoint) }
+    var deviceNameDraft by remember(state.deviceName) { mutableStateOf(state.deviceName) }
+    var deviceAcceptsDraft by remember(state.deviceAcceptsTasks) { mutableStateOf(state.deviceAcceptsTasks) }
+    var deviceTokenDraft by remember { mutableStateOf("") }
     var a2aCardDraft by remember { mutableStateOf("") }
     var memorySyncEndpointDraft by remember(state.memorySyncEndpoint) { mutableStateOf(state.memorySyncEndpoint) }
     var memorySyncTokenDraft by remember { mutableStateOf("") }
@@ -214,6 +224,21 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         Text("远程地址需使用 HTTPS；本机允许 HTTP。")
                         Spacer(Modifier.height(20.dp))
                         Text("远端 Agent（A2A）", style = MaterialTheme.typography.titleMedium)
+                        Text("跨设备执行", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(deviceTokenDraft, { deviceTokenDraft = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(deviceAcceptsDraft, { deviceAcceptsDraft = it })
+                            Text("允许本设备在前台接收任务")
+                        }
+                        Text(state.deviceStatus)
+                        Text("任务使用独立上下文；工具权限仍需本机确认。清空地址可停用。")
+                        Button(onClick = {
+                            actions.configureDevices(deviceEndpointDraft, deviceTokenDraft, deviceNameDraft, deviceAcceptsDraft)
+                            deviceTokenDraft = ""
+                        }) { Text("保存设备连接") }
+
                         OutlinedTextField(
                             value = a2aCardDraft,
                             onValueChange = { a2aCardDraft = it },
@@ -224,7 +249,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         Button(onClick = { actions.addA2aAgent(a2aCardDraft) }, enabled = a2aCardDraft.isNotBlank()) {
                             Text("添加 Agent")
                         }
-                        state.a2aAgents.filter { it.enabled }.forEach { agent ->
+                        state.a2aAgents.forEach { agent ->
                             var tokenDraft by remember(agent.id) { mutableStateOf("") }
                             Text("${agent.name} · ${agent.skills}")
                             Text(agent.interfaceUrl)
@@ -245,7 +270,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                     tokenDraft = ""
                                 }) { Text("保存访问令牌") }
                             }
-                            TextButton(onClick = { actions.disableA2aAgent(agent.id) }) { Text("停用") }
+                            TextButton(onClick = { if (agent.enabled) actions.disableA2aAgent(agent.id) else actions.addA2aAgent(agent.cardUrl) }) { Text(if (agent.enabled) "停用" else "启用") }
                         }
                     } }
                     state.activeSessionId == null -> {
@@ -423,6 +448,7 @@ private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions
                 "SEND_UNCERTAIN" -> "发送状态未知，请勿直接重发"
                 "REPLY_SUBMITTING" -> "正在提交回复"
                 "REPLY_UNCERTAIN" -> "回复状态未知，正在核查远端任务"
+                "EXECUTION_UNKNOWN" -> "设备失联，执行结果未知；正在核查，不会自动重试"
                 "CANCEL_UNCERTAIN" -> "取消状态未知，正在核查远端任务"
                 "TASK_STATE_SUBMITTED" -> "已提交"
                 "TASK_STATE_WORKING" -> "处理中"

@@ -1,6 +1,8 @@
 package com.openai.companion.ios
 
 import com.openai.companion.kmp.AppAgentEventSink
+import com.openai.companion.kmp.AgentExecutionGate
+import com.openai.companion.kmp.CrossDeviceService
 import com.openai.companion.kmp.A2aAgent
 import com.openai.companion.kmp.A2aClient
 import com.openai.companion.kmp.A2aDelegation
@@ -104,7 +106,7 @@ class IosMobileBackend(
     private val proactiveScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val proactiveWake = Channel<Unit>(Channel.CONFLATED)
     private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
-    private val agentGate = Mutex()
+    private val agentGate = AgentExecutionGate()
     private val syncGate = Mutex()
     private val memorySyncWorker = MemorySyncWorker(
         enabled = { memorySyncEndpoint.isNotBlank() },
@@ -119,6 +121,17 @@ class IosMobileBackend(
     private val mutableMemorySyncStatus = MutableStateFlow("未配置")
     override val memorySyncStatusUpdates: StateFlow<String> = mutableMemorySyncStatus.asStateFlow()
     override val memorySyncStatus: String get() = mutableMemorySyncStatus.value
+    private val devices = CrossDeviceService(a2aHttp, a2a, IosA2aTokenStore(),
+        { syncDefaults.stringForKey("deviceTasksConfig") ?: "{}" },
+        { syncDefaults.setObject(it, forKey = "deviceTasksConfig") }, "ios",
+        { withContext(Dispatchers.Main) { platform.UIKit.UIApplication.sharedApplication.applicationState == platform.UIKit.UIApplicationState.UIApplicationStateActive } },
+        mcp::tools, { request -> withContext(Dispatchers.Default) { agentGate.withLock { bindings.executeDeviceTask(request) } } },
+        answerQuestion = { request -> withContext(Dispatchers.Default) { agentGate.withLock { bindings.answerDeviceQuestion(request) } } })
+    override val deviceEndpoint get() = devices.endpoint
+    override val deviceName get() = devices.deviceName
+    override val deviceAcceptsTasks get() = devices.acceptsTasks
+    override val deviceStatus get() = devices.status
+    override suspend fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = devices.configure(endpoint, token, name, accepts)
     private var initialized = false
     override var mealReminderEnabled: Boolean = false
         private set
@@ -156,6 +169,8 @@ class IosMobileBackend(
         }
         mcp.start()
         a2a.start()
+        mcp.attachDeviceRouting(devices)
+        devices.start(proactiveScope)
         bindings.registerA2aProvider(a2a::listForModel, a2a::delegate)
         loadProactiveRules()
         proactiveSettings = Json.decodeFromString(appGetProactiveSettings().value())
@@ -214,7 +229,7 @@ class IosMobileBackend(
     }
 
     override suspend fun send(text: String, onText: (String) -> Unit) = withContext(Dispatchers.Default) {
-        agentGate.withLock {
+        agentGate.foreground {
         bindings.registerAgentEventSink(object : AppAgentEventSink {
             override fun onReasoningDelta(text: String) = Unit
             override fun onTextDelta(text: String) = onText(text)
@@ -458,8 +473,10 @@ class IosMobileBackend(
         }
 
     override fun cancel() {
-        bindings.cancelAgentLoop()
-        cancelLocalModel()
+        agentGate.cancelForeground {
+            bindings.cancelAgentLoop()
+            cancelLocalModel()
+        }
     }
 
     override suspend fun configureMcp(endpoint: String) {
