@@ -2,7 +2,7 @@
 
 iOS 的目标架构是 KMP + Compose Multiplatform 界面、Kotlin/Native 的 Rust Harness 绑定及 llama.cpp 端侧推理，不使用 Swift 源码。共享 Compose 界面位于 [`kmp/src/commonMain`](../kmp/src/commonMain)，MCP 客户端位于同一源码集；iOS 的 Compose `UIViewController` 工厂和 MCP 连接管理位于 [`kmp/src/iosMain`](../kmp/src/iosMain)。
 
-**模拟器基础功能已验收，真机验收尚未完成。** [`ios/OpenAICompanion.xcodeproj`](../ios/OpenAICompanion.xcodeproj) 的 App target 只编译 Objective-C 启动壳和 Objective-C++ llama.cpp 适配，Gradle 构建 `kmp/iosApp` 静态框架；旧 Swift 原型和 Swift UniFFI 生成文件已移除。`kmp/iosApp` 已增加 Kotlin/Native Harness 适配、MCP 服务、Compose 状态控制器、GGUF 文件导入和 llama.cpp C 桥接的组装代码。`kmp/iosRustBridge` 已能生成 Kotlin/Native UniFFI 源码。2026-09-26 已在 Xcode 27.0 环境完成 llama.cpp XCFramework、Apple Silicon 模拟器与 iPhone 的无签名 App 构建；iPhone 18 Pro 模拟器已安装并启动 App，首屏、本地 SQLite 初始化、单一持续对话与重启恢复，以及小型 GGUF 的端侧生成回复已在模拟器验证。本机 MCP 连接和 3 个工具的发现已通过模拟器 UI 测试；工具调用、OAuth 与真机端到端验收仍需完成。
+**基础对话与指定 Mac 跨设备委托已通过真机验收，完整生产验收尚未完成。** 最新结果见本文末尾及 [2026-10-08 验收记录](../scripts/acceptance/results-2026-10-08.json)。以下 2026-09 的构建与验证描述保留为历史记录。 [`ios/OpenAICompanion.xcodeproj`](../ios/OpenAICompanion.xcodeproj) 的 App target 只编译 Objective-C 启动壳和 Objective-C++ llama.cpp 适配，Gradle 构建 `kmp/iosApp` 静态框架；旧 Swift 原型和 Swift UniFFI 生成文件已移除。`kmp/iosApp` 已增加 Kotlin/Native Harness 适配、MCP 服务、Compose 状态控制器、GGUF 文件导入和 llama.cpp C 桥接的组装代码。`kmp/iosRustBridge` 已能生成 Kotlin/Native UniFFI 源码。2026-09-26 已在 Xcode 27.0 环境完成 llama.cpp XCFramework、Apple Silicon 模拟器与 iPhone 的无签名 App 构建；iPhone 18 Pro 模拟器已安装并启动 App，首屏、本地 SQLite 初始化、单一持续对话与重启恢复，以及小型 GGUF 的端侧生成回复已在模拟器验证。本机 MCP 连接和 3 个工具的发现已通过模拟器 UI 测试；工具调用、OAuth 与真机端到端验收仍需完成。
 
 ## 构建
 
@@ -42,6 +42,30 @@ KMP 共享客户端支持新版 `server/discover` 与逐请求元数据、旧版
 
 ## 范围与验证
 
-KMP + Compose 版本已有共享界面、状态控制器、MCP 客户端、Kotlin/Native Harness 适配和端侧模型源码，但尚不可作为已验收的 iOS MVP。每台设备计划保存自己的 SQLite；目前没有跨设备同步。
+KMP + Compose 版本已有共享界面、状态控制器、MCP 客户端、Kotlin/Native Harness 适配和端侧推理。每台设备保存自己的 SQLite；跨设备任务服务和记忆同步接口已实现，完整生产联调仍待验收，参见 [跨设备执行](cross_device_execution.md) 与 [记忆同步](memory_sync.md)。
 
 当前开发机已有 Xcode 27.0 与 iOS 27.0 模拟器运行时。`./scripts/ios-llama.sh` 已生成 llama.cpp XCFramework，`./scripts/ios-app-check.sh` 已通过模拟器 App 构建；`xcodebuild -sdk iphoneos CODE_SIGNING_ALLOWED=NO build` 也已通过。iPhone 18 Pro 模拟器上的 App 已安装和启动，首屏安全区域、持续运行和 SQLite 初始化已确认。CMake 3.31.10 此次从 Python wheel 临时安装在 `/private/tmp`，后续构建仍需系统提供 CMake 3.28+。已使用 SHA-256 校验的 SmolLM2-135M-Instruct Q4_K_M GGUF，在模拟器 UI 测试中验证模型识别、消息发送及助手回复；另一项 UI 测试验证单一持续对话、设置页和重启恢复。本机 MCP 连接已通过第三项 UI 测试；文件选择器导入、取消生成、MCP 工具调用与 OAuth 交互及真机行为仍需端到端验收。
+
+
+## 2026-10-08 交互优化方案与施工
+
+沿用 Mac 的蓝色主色、浅色/深色主题和单一持续对话，优先减少设置查找、历史阅读与任务查看之间的操作成本。施工位于共享 `CompanionMobileUi.kt`；Android 复用此界面，但本轮仅验收 iOS。
+
+| 操作场景 | 已实现的交互 |
+| --- | --- |
+| 阅读对话 | 靠近列表末尾时跟随新消息与正文增量；翻看历史时保留位置，提供“↓ 最新消息”按钮。 |
+| 输入与导航 | 输入框与纸飞机发送按钮同排，默认一行、按内容最多展开四行；模型状态放到框外，发送/停止点击区域保留；适配键盘，发送和切换页面时收起键盘；任务页、设置页来回切换保留未发送草稿。生成期间显示停止按钮。 |
+| 查看远端任务 | 顶栏“任务”与对话区“查看”进入独立任务页，最新任务在前；统一圆角卡片，区分状态与结果，保留刷新、回复、拒绝和取消。 |
+| 管理设置 | 总览展示七个功能分组与当前状态，进入具体表单后可返回“所有设置”或点击“完成”。模型、主动任务、跨设备、Agent、同步、MCP、工具扩展分别管理。 |
+| 阅读执行记录 | 工具与思考记录继续使用灰色小字单行省略，默认隐藏全文，点击展开；正文与审批确认仍正常显示。 |
+| 启用端侧工具 | 工具扩展放入独立分组，显示默认关闭的状态；启用与权限确认仍使用原业务动作。 |
+
+表单只调整显示与入口，既有保存、配对、OAuth、审批、委托与任务操作继续调用原有 `MobileActions`。令牌草稿仍掩码显示并在保存后清空；任务页切换本身不触发任务取消或重新发送。
+
+新增真机用例验证任务页/设置分组导航、草稿保留和实际提交的原文；普通对话、委托 Mac 并显示 `42`、工具记录折叠，以及设置和重启用例继续回归。XCTest 的 Compose TextView 在输入前后都可能没有 AX `value`，因此草稿保留通过真实截图与发送后的消息内容核验，不能把空 AX 属性判为实际丢稿。初次证书信任阻断、模拟器诊断中止和测试断言误判均保留历史证据；最终计数以结果记录为准。
+
+本轮未覆盖 VoiceOver、最大动态字体、横屏、iPad 多窗口、深色真机与长时间交互压力；这些项目仍待专项验收。实时思考流仍受原生后端当前能力限制，不因本次折叠样式变更而视为已验收。
+
+最终单排输入框与纸飞机发送按钮的签名包已安装在 iPhone 17 Pro Max / iOS 27.0.1，五项真机用例 **5 通过、0 失败、0 跳过**。普通对话用例要求新答案实际进入可视区，并验证翻看历史后点击“最新消息”可返回；委托 Mac 的新任务显示结果 `42`。设置总览、任务卡片与输入框截图已导出检查。Mac 核心业务代码本轮没有改动，端侧工具继续作为默认关闭的可选扩展。
+
+纸飞机为代码内的矢量图标，保留“发送”的无障碍名称；最小输入点击高度 44 dp，图标按钮使用标准交互尺寸。最终版本再次完成相同五项真机回归 **5/0/0**，共享 JVM 编译通过；尺寸和图标已从真实截图核对。

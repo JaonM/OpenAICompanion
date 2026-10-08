@@ -43,7 +43,7 @@
       "Later native clicks recovered. Actual send/context 42 then 50, reasoning toggle, settings save, normal relaunch and stop passed. Earlier blockers retained as history; keyboard automation remains unavailable."
     ],
     "pending": [
-      "GUI incremental streaming, keyboard shortcuts, native production Preferences persistence, outage/reconnect and remaining GUI approval/delegation flows",
+      "Native production Preferences persistence, outage/reconnect and remaining GUI approval/delegation flows",
       "System notification failed visual acceptance; App-exit reminder delivery and click routing pending",
       "Actual logout/login, reboot and sleep/wake recovery",
       "Credential continuity across packaged application upgrade",
@@ -81,8 +81,17 @@
       "normal_exit_relaunch": "passed: prior answer 42 and model settings restored",
       "preferences": "Isolated file-backed acceptance PreferencesFactory; native production Preferences not certified",
       "stop": "passed: UI displayed 生成已取消 and returned ready; database confirmed cancelled",
-      "shortcut": "Automation Command-comma did not open settings; native keyboard actions remain unavailable, pending manual verification",
-      "evidence": "/tmp/companion-mac-full-acceptance-20261008/gui-final-evidence.json"
+      "shortcut": "passed manually: Command-comma opened Settings; Command-Enter returned 42, completed turn 4 confirmed in database",
+      "evidence": "/tmp/companion-mac-full-acceptance-20261008/gui-final-evidence.json",
+      "incremental_body": "passed: observed 1..155 then 1..235 while busy; settings opened and returned during generation",
+      "stop_after_body": "passed: turn 5 cancelled after partial body; ready restored",
+      "recovery_after_stop": {
+        "turn": 6,
+        "state": "completed",
+        "steps": 1,
+        "output_exactly_1_to_1000": true
+      },
+      "device_panel": "passed: navigation and missing-token error feedback; returning retained draft; actual GUI pairing/delegation still pending"
     },
     "notification": {
       "result": "failed visible-delivery acceptance",
@@ -149,6 +158,72 @@
       "keyboard": "Only acceptance Debug builds with explicit launch flag opt out of keyboard extensions; normal launches retain third-party keyboard support.",
       "screenshots": "Collapsed/expanded real tool history visually inspected.",
       "reasoning_limit": "Historical reasoning role shares renderer; native backend does not currently display reasoning deltas, so no live thinking-stream acceptance claimed."
+    },
+    "interaction_optimization": {
+      "design": "docs/ios_mvp.md: 2026-10-08 interaction plan",
+      "implemented": [
+        "Seven settings groups with status overview and dedicated forms",
+        "Separate latest-first remote task page with rounded cards and highlighted results",
+        "Draft retention across task/settings navigation and keyboard dismissal",
+        "Follow conversation end with trailing anchor; preserve history reading; return-to-latest button",
+        "Gray folded tool/reasoning records and default-off optional device tools retained"
+      ],
+      "initial_physical": "Signed test build passed; first launch blocked by developer certificate trust; user confirmed trust and rerun started",
+      "first_physical_regression": {
+        "passed": 3,
+        "failed": 1,
+        "failure": "Test read Compose TextView AX value, which was null both before and after navigation; screenshot confirmed actual draft retained",
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-navigation-rerun-1008.xcresult"
+      },
+      "navigation_rerun": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-navigation-final-1008.xcresult",
+        "proof": "Draft actually submitted and original text visible in conversation"
+      },
+      "simulator_attempt": {
+        "observed_passed": 1,
+        "observed_failed": 1,
+        "failure": "Same empty AX value assertion",
+        "diagnostics": "Completed tests; post-failure sysdiagnose stalled and its process was interrupted. Retained logs, not counted as a certified final result bundle."
+      },
+      "pre_scroll_final": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-interaction-final-1008.xcresult"
+      },
+      "pending": [
+        "VoiceOver and maximum Dynamic Type",
+        "Landscape/iPad multi-window",
+        "Dark-mode device review and long interaction soak",
+        "Android real-device regression"
+      ],
+      "final_regression": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-interaction-plane-final-1008.xcresult",
+        "cases": [
+          "testCrossDeviceDelegatesToMacAndShowsResult",
+          "testLocalModelGeneratesReply (reply visible automatically; history scroll and return-to-latest)",
+          "testSettingsNavigationAndDraftPreservation (actual submitted text verified)",
+          "testSingleConversationAndSettingsSurviveRelaunch",
+          "testToolMessagesCollapseAndExpand"
+        ],
+        "screenshots": "/tmp/companion-physical-acceptance-20261007/ios-interaction-plane-final-attachments"
+      },
+      "composer": "User requested further reduction: single-row text and paper-plane FilledIconButton; BasicTextField starts at one line and expands to four; model status outside; input target minimum 44dp and icon-button standard touch target retained. Send accessibility name stays 发送.",
+      "scroll_review": "Earlier existence-only reply check did not prove visibility. Fixed follow state based on user dragging and a trailing end anchor; strengthened real-device hittable assertion passed.",
+      "temporary_simulator": "Independent acceptance simulator shut down; data retained.",
+      "compact_previous_regression": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-interaction-compact-final-1008.xcresult"
+      },
+      "final_shared_jvm_compile": "passed: /tmp/companion-ios-interaction-plane-jvm.log"
     }
   },
   "evidence_root": "/tmp/companion-mac-full-acceptance-20261008",
@@ -159,6 +234,15 @@
     "/tmp/companion-ios-ui-align-build-final.log",
     "/tmp/companion-ios-fold-final-build.log",
     "/tmp/companion-ios-fold-jvm.log",
-    "/tmp/companion-ios-fold-final-test.log"
+    "/tmp/companion-ios-fold-final-test.log",
+    "/tmp/companion-ios-navigation-build-final.log",
+    "/tmp/companion-ios-navigation-rerun-test.log",
+    "/tmp/companion-ios-navigation-final-test.log",
+    "/tmp/companion-ios-interaction-final-test.log",
+    "/tmp/companion-ios-interaction-scroll-final-test.log",
+    "/tmp/companion-ios-interaction-visible-final-test.log",
+    "/tmp/companion-ios-interaction-compact-final-test.log",
+    "/tmp/companion-ios-interaction-plane-final-test.log",
+    "/tmp/companion-ios-interaction-plane-jvm.log"
   ]
 }
