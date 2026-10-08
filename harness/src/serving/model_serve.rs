@@ -87,7 +87,7 @@ impl ModelServeWrapper {
     }
 
     pub async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, AgentError> {
-        self.complete_internal(request, true).await
+        self.complete_internal(request, true, false).await
     }
 
     /// Background memory work must not emit user-visible stream events.
@@ -98,25 +98,32 @@ impl ModelServeWrapper {
         if self.foreground_turns.load(Ordering::Acquire) != 0 {
             return Err(AgentError::Model("background memory work deferred during foreground turn".into()));
         }
-        self.complete_internal(request, false).await
+        self.complete_internal(request, false, false).await
     }
 
     pub(crate) async fn complete_with_events(
         &self,
         request: ModelRequest,
         emit_events: bool,
+        require_tool: bool,
     ) -> Result<ModelResponse, AgentError> {
-        self.complete_internal(request, emit_events).await
+        self.complete_internal(request, emit_events, require_tool).await
     }
 
     async fn complete_internal(
         &self,
         request: ModelRequest,
         emit_events: bool,
+        require_tool: bool,
     ) -> Result<ModelResponse, AgentError> {
-        let request_json = request.to_chat_completions_json().map_err(|error| {
+        let mut request_json = request.to_chat_completions_json().map_err(|error| {
             AgentError::Model(format!("failed to encode model request: {error}"))
         })?;
+        if require_tool {
+            let mut body: Value = serde_json::from_str(&request_json).expect("serialized model request");
+            body["tool_choice"] = Value::String("required".into());
+            request_json = body.to_string();
+        }
         let stream = Arc::new(StreamAccumulator {
             state: Mutex::new(StreamState::default()),
             sink: if emit_events {

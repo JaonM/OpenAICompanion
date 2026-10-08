@@ -250,6 +250,15 @@ where
             "route_task" => routed.is_none(),
             _ => true,
         });
+        let blocked_execution = current_turn.iter().rev().find_map(|message| match message {
+            Message::Tool { name, is_error, .. } if name == "delegate_to_agent" => Some(*is_error),
+            Message::Tool { name, content, is_error, .. } if name == "route_task" => Some(*is_error ||
+                serde_json::from_str::<serde_json::Value>(content).ok().is_some_and(|route|
+                    matches!(route["decision"].as_str(), Some("UNSUPPORTED" | "NEEDS_USER_ACTION")))),
+            _ => None,
+        }).unwrap_or(false);
+        let require_tool = explicit && !blocked_execution && offered.iter().any(|tool|
+            matches!(tool.name.as_str(), "route_task" | "delegate_to_agent" | "list_remote_agents" | "list_execution_devices"));
         let response = cancelable(
             &cancellation,
             model.complete_with_events(
@@ -261,6 +270,7 @@ where
                     tools: offered.clone(),
                 },
                 emit_events,
+                require_tool,
             ),
         )
         .await??;
@@ -272,6 +282,9 @@ where
         }
 
         if response.tool_calls.is_empty() {
+            if require_tool {
+                return Err(AgentError::Model("Remote task was not submitted: the model returned text without calling a routing or delegation tool.".into()));
+            }
             history.push(Message::Assistant {
                 content: response.content.clone(),
                 tool_calls: Vec::new(),
@@ -661,8 +674,10 @@ mod tests {
             executor.register(RoutingTool(name, output)).unwrap();
         }
         runtime().block_on(executor.initialize()).unwrap();
-        runtime().block_on(run(&model, &mut executor, &Configuration::default(), "", "委托给 Mac")).unwrap();
+        let error = runtime().block_on(run(&model, &mut executor, &Configuration::default(), "", "委托给 Mac")).unwrap_err();
+        assert!(error.to_string().contains("not submitted"));
         let requests = provider.requests.lock().unwrap();
+        assert!(requests.iter().all(|request| request["tool_choice"] == "required"));
         let names = |index: usize| requests[index]["tools"].as_array().unwrap().iter()
             .map(|tool| tool["function"]["name"].as_str().unwrap()).collect::<Vec<_>>();
         assert!(names(0).contains(&"list_execution_devices"));
