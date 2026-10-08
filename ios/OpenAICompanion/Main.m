@@ -7,6 +7,17 @@
 
 @implementation OCAppDelegate
 
+#if defined(COMPANION_UI_ACCEPTANCE)
+- (BOOL)application:(UIApplication *)application
+    shouldAllowExtensionPointIdentifier:(UIApplicationExtensionPointIdentifier)identifier {
+    // UI acceptance uses a keyboard XCTest can inspect; normal launches keep extensions.
+    if ([identifier isEqualToString:UIApplicationKeyboardExtensionPointIdentifier] &&
+        [NSProcessInfo.processInfo.environment[@"COMPANION_ACCEPTANCE_SYSTEM_KEYBOARD"] isEqualToString:@"1"])
+        return NO;
+    return YES;
+}
+#endif
+
 - (BOOL)application:(UIApplication *)application
     didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions {
     [UNUserNotificationCenter currentNotificationCenter].delegate = self;

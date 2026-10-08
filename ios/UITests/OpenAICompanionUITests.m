@@ -13,6 +13,12 @@
     self.continueAfterFailure = NO;
 }
 
+- (XCUIApplication *)acceptanceApp {
+    XCUIApplication *app = [[XCUIApplication alloc] init];
+    app.launchEnvironment = @{@"COMPANION_ACCEPTANCE_SYSTEM_KEYBOARD": @"1"};
+    return app;
+}
+
 - (void)retainScreenshot:(XCUIApplication *)app name:(NSString *)name {
     XCTAttachment *attachment = [XCTAttachment attachmentWithScreenshot:app.screenshot];
     attachment.name = name;
@@ -41,7 +47,7 @@
     NSDictionary *fixture = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     XCTAssertTrue([fixture[@"endpoint"] hasPrefix:@"https://"]);
     XCTAssertTrue([fixture[@"code"] length] > 0);
-    XCUIApplication *app = [[XCUIApplication alloc] init];
+    XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
     [app launch];
     [app.buttons[@"设置"] tap];
@@ -91,12 +97,32 @@
     return latest;
 }
 
+- (void)testToolMessagesCollapseAndExpand {
+    NSData *data = [NSData dataWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"]];
+    if (!data) XCTSkip(@"需要包含真实工具轨迹的独立验收 fixture。");
+    XCUIApplication *app = [self acceptanceApp];
+    [app launch];
+    XCUIElement *collapsed = [app.buttons matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"› 工具："]].firstMatch;
+    for (NSInteger i = 0; i < 20 && !collapsed.hittable; i++) [app swipeUp];
+    XCTAssertTrue(collapsed.hittable, @"没有找到默认折叠的真实工具记录。");
+    XCUIElement *body = [app.staticTexts matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"tool："]].firstMatch;
+    XCTAssertFalse(body.exists);
+    [self retainScreenshot:app name:@"Collapsed tool history"];
+    [collapsed tap];
+    XCTAssertTrue([body waitForExistenceWithTimeout:5]);
+    [self retainScreenshot:app name:@"Expanded tool history"];
+    [app.buttons[@"⌄ 工具"] tap];
+    XCTAssertFalse(body.exists);
+}
+
 // Requires the real phone to be paired and the acceptance Mac worker online.
 - (void)testCrossDeviceDelegatesToMacAndShowsResult {
     NSData *data = [NSData dataWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"]];
     if (!data) XCTSkip(@"需要独立真机跨设备验收 fixture。");
     NSDictionary *fixture = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    XCUIApplication *app = [[XCUIApplication alloc] init];
+    XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
     [app launch];
     [app.buttons[@"设置"] tap];
@@ -139,7 +165,7 @@
     NSDictionary *fixture = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     if (![fixture[@"completedTaskText"] length] || ![fixture[@"completedTaskResult"] length])
         XCTSkip(@"需要先完成并由服务端核验真实远端任务。");
-    XCUIApplication *app = [[XCUIApplication alloc] init];
+    XCUIApplication *app = [self acceptanceApp];
     [app launch];
     XCTAssertTrue([app.buttons[@"查看"] waitForExistenceWithTimeout:20]);
     [app.buttons[@"查看"] tap];
@@ -154,7 +180,7 @@
 }
 
 - (void)testScheduledReminderSurvivesAppTermination {
-    XCUIApplication *app = [[XCUIApplication alloc] init];
+    XCUIApplication *app = [self acceptanceApp];
     [app launch];
     [app.buttons[@"设置"] tap];
     if (![app.staticTexts[@"Acceptance scheduled notification"] waitForExistenceWithTimeout:5]) {
@@ -173,7 +199,7 @@
 }
 
 - (void)testSingleConversationAndSettingsSurviveRelaunch {
-    XCUIApplication *app = [[XCUIApplication alloc] init];
+    XCUIApplication *app = [self acceptanceApp];
     [app launch];
 
     XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:10]);
@@ -193,7 +219,7 @@
 - (void)testLocalModelGeneratesReply {
     NSData *data = [NSData dataWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"]];
     NSDictionary *fixture = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    XCUIApplication *app = [[XCUIApplication alloc] init];
+    XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
     [app launch];
 
@@ -237,7 +263,7 @@
     if (connection >= 0) close(connection);
     if (!available) XCTSkip(@"需要先运行 python3 scripts/mcp_smoke_server.py");
 
-    XCUIApplication *app = [[XCUIApplication alloc] init];
+    XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-mcpEndpoint", @"http://127.0.0.1:8765/mcp"];
     [app launch];
     [app.buttons[@"设置"] tap];
@@ -249,7 +275,7 @@
 }
 
 - (void)testDeviceToolExtensionIsOptional {
-    XCUIApplication *app = [[XCUIApplication alloc] init];
+    XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-mcpEndpoint", @"http://127.0.0.1:8765/mcp", @"-deviceToolsEnabled", @"NO"];
     [app launch];
     [app.buttons[@"设置"] tap];
