@@ -239,12 +239,15 @@ where
         cancelable(&cancellation, executor.sync_if_changed()).await??;
         let mut offered = executor.list_tools()?;
         let explicit = explicitly_remote(&user_input);
-        let routed = delegation_target(&history[previous_history.len()..], explicit);
+        let current_turn = &history[previous_history.len()..];
+        let routed = delegation_target(current_turn, explicit);
         let has_router = offered.iter().any(|tool| tool.name == "route_task");
         let can_delegate = routed.is_some() || (explicit && !has_router);
         offered.retain(|tool| match tool.name.as_str() {
             "delegate_to_agent" => can_delegate,
-            "list_remote_agents" => explicit || routed.is_some(),
+            "list_remote_agents" => explicit && !has_router,
+            "list_execution_devices" => !current_turn.iter().any(|message| matches!(message, Message::Tool { name, is_error: false, .. } if name == "list_execution_devices")),
+            "route_task" => routed.is_none(),
             _ => true,
         });
         let response = cancelable(
@@ -513,15 +516,17 @@ mod tests {
     }
 
     struct ScriptedModel {
+        requests: std::sync::Mutex<Vec<serde_json::Value>>,
         responses: std::sync::Mutex<Vec<ModelResponse>>,
     }
     #[async_trait::async_trait]
     impl crate::ModelServeCallback for ScriptedModel {
         async fn complete(
             &self,
-            _: String,
+            request: String,
             callback: std::sync::Arc<dyn crate::ModelStreamCallback>,
         ) -> Result<(), crate::ModelServeError> {
+            self.requests.lock().unwrap().push(serde_json::from_str(&request).unwrap());
             let response = self.responses.lock().unwrap().remove(0);
             let tool_calls = response
                 .tool_calls
@@ -549,6 +554,7 @@ mod tests {
 
     fn model(responses: Vec<ModelResponse>) -> ModelServeWrapper {
         ModelServeWrapper::new(std::sync::Arc::new(ScriptedModel {
+            requests: std::sync::Mutex::new(Vec::new()),
             responses: std::sync::Mutex::new(responses),
         }))
     }
@@ -628,6 +634,42 @@ mod tests {
                 }
             })
         }
+    }
+
+    #[test]
+    fn remote_tool_choices_progress_from_discovery_to_route_to_delegation() {
+        struct RoutingTool(&'static str, &'static str);
+        impl Tool for RoutingTool {
+            fn definition(&self) -> ToolDefinition { ToolDefinition::new(self.0, "Routing", "{}") }
+            fn execute(&self, _: ToolCall) -> crate::tool::ToolFuture {
+                let output = self.1;
+                Box::pin(async move { Ok(ToolOutput::success(output)) })
+            }
+        }
+        let provider = std::sync::Arc::new(ScriptedModel {
+            requests: std::sync::Mutex::new(Vec::new()),
+            responses: std::sync::Mutex::new(vec![
+                ModelResponse::with_tool_calls("", vec![ToolCall::new("d", "list_execution_devices", "{}")]),
+                ModelResponse::with_tool_calls("", vec![ToolCall::new("r", "route_task", r#"{"required_capabilities":["model.complete"]}"#)]),
+                ModelResponse::final_text("ready"),
+            ]),
+        });
+        let model = ModelServeWrapper::new(provider.clone());
+        let mut executor = crate::ToolRegistry::new(16).unwrap();
+        for (name, output) in [("list_execution_devices", "{}"), ("list_remote_agents", "[]"),
+            ("route_task", r#"{"decision":"REMOTE","agent_id":"mac"}"#), ("delegate_to_agent", "{}")] {
+            executor.register(RoutingTool(name, output)).unwrap();
+        }
+        runtime().block_on(executor.initialize()).unwrap();
+        runtime().block_on(run(&model, &mut executor, &Configuration::default(), "", "委托给 Mac")).unwrap();
+        let requests = provider.requests.lock().unwrap();
+        let names = |index: usize| requests[index]["tools"].as_array().unwrap().iter()
+            .map(|tool| tool["function"]["name"].as_str().unwrap()).collect::<Vec<_>>();
+        assert!(names(0).contains(&"list_execution_devices"));
+        assert!(!names(0).contains(&"list_remote_agents"));
+        assert!(!names(0).contains(&"delegate_to_agent"));
+        assert_eq!(names(1), vec!["route_task"]);
+        assert_eq!(names(2), vec!["delegate_to_agent"]);
     }
 
     #[test]
