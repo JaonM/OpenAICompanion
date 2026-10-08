@@ -19,6 +19,16 @@
     return app;
 }
 
+- (void)openSettingsSection:(NSString *)section app:(XCUIApplication *)app {
+    [app.buttons[@"设置"] tap];
+    XCUIElement *entry = [[app descendantsMatchingType:XCUIElementTypeAny]
+        matchingIdentifier:[@"settings-" stringByAppendingString:section]].firstMatch;
+    for (NSInteger i = 0; i < 6 && !entry.hittable; i++) [app swipeUp];
+    XCTAssertTrue(entry.hittable);
+    [entry tap];
+    XCTAssertTrue([app.buttons[@"‹ 所有设置"] waitForExistenceWithTimeout:5]);
+}
+
 - (void)retainScreenshot:(XCUIApplication *)app name:(NSString *)name {
     XCTAttachment *attachment = [XCTAttachment attachmentWithScreenshot:app.screenshot];
     attachment.name = name;
@@ -50,7 +60,7 @@
     XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
     [app launch];
-    [app.buttons[@"设置"] tap];
+    [self openSettingsSection:@"跨设备执行" app:app];
     XCUIElement *connected = [[app.staticTexts matchingPredicate:
         [NSPredicate predicateWithFormat:@"label CONTAINS %@ AND label CONTAINS %@", @"Acceptance iPhone", @"前台可接单"]] firstMatch];
     XCUIElement *endpoint = app.textViews[@"设备服务地址"];
@@ -73,7 +83,7 @@
     }
     [app terminate];
     [app launch];
-    [app.buttons[@"设置"] tap];
+    [self openSettingsSection:@"跨设备执行" app:app];
     for (NSInteger i = 0; i < 12 && !connected.hittable; i++) [app swipeUp];
     XCTAssertTrue([connected waitForExistenceWithTimeout:40]);
     // The host-side acceptance controller sends a task while the real app is
@@ -104,7 +114,7 @@
     [app launch];
     XCUIElement *collapsed = [app.buttons matchingPredicate:
         [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"› 工具："]].firstMatch;
-    for (NSInteger i = 0; i < 20 && !collapsed.hittable; i++) [app swipeUp];
+    for (NSInteger i = 0; i < 20 && !collapsed.hittable; i++) [app swipeDown];
     XCTAssertTrue(collapsed.hittable, @"没有找到默认折叠的真实工具记录。");
     XCUIElement *body = [app.staticTexts matchingPredicate:
         [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"tool："]].firstMatch;
@@ -117,6 +127,41 @@
     XCTAssertFalse(body.exists);
 }
 
+- (void)testSettingsNavigationAndDraftPreservation {
+    XCUIApplication *app = [self acceptanceApp];
+    [app launch];
+    NSString *draft = @"Draft retained across navigation";
+    [self enterAcceptanceText:draft field:app.textViews[@"输入消息"] app:app];
+    XCTAssertTrue(app.buttons[@"发送"].enabled, @"草稿输入未写入。");
+    [self retainScreenshot:app name:@"Draft before navigation"];
+    [app.buttons[@"任务"] tap];
+    XCTAssertTrue(app.buttons[@"刷新"].exists);
+    XCTAssertFalse(app.buttons[@"发送"].exists);
+    [app.buttons[@"对话"] tap];
+    [self retainScreenshot:app name:@"Draft after navigation"];
+    XCTAssertTrue(app.buttons[@"发送"].enabled, @"导航后草稿应仍可发送。");
+    [self openSettingsSection:@"跨设备执行" app:app];
+    XCTAssertTrue(app.textViews[@"设备服务地址"].exists);
+    [app.buttons[@"‹ 所有设置"] tap];
+    XCUIElement *model = [[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:@"settings-端侧模型"].firstMatch;
+    [model tap];
+    XCTAssertTrue(app.buttons[@"导入 GGUF"].exists);
+    [self retainScreenshot:app name:@"Grouped model settings"];
+    [app.buttons[@"‹ 所有设置"] tap];
+    [self retainScreenshot:app name:@"Settings overview"];
+    [app.buttons[@"完成"] tap];
+    [self retainScreenshot:app name:@"Draft after navigation"];
+    XCTAssertTrue(app.buttons[@"发送"].enabled, @"导航后草稿应仍可发送。");
+    // Compose TextView exposes no AX value on iOS. Verify the actual submitted
+    // text instead of inferring draft preservation from that empty property.
+    [app.buttons[@"发送"] tap];
+    XCUIElement *submitted = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:
+        [NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND label == %@",
+            @"conversation-message-", [@"user：" stringByAppendingString:draft]]].firstMatch;
+    XCTAssertTrue([submitted waitForExistenceWithTimeout:20]);
+    XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:120]);
+}
+
 // Requires the real phone to be paired and the acceptance Mac worker online.
 - (void)testCrossDeviceDelegatesToMacAndShowsResult {
     NSData *data = [NSData dataWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"]];
@@ -125,7 +170,7 @@
     XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
     [app launch];
-    [app.buttons[@"设置"] tap];
+    [self openSettingsSection:@"远端 Agent（A2A）" app:app];
     XCUIElement *enable = app.buttons[@"启用 Agent Acceptance Mac"];
     XCUIElement *disable = app.buttons[@"停用 Agent Acceptance Mac"];
     for (NSInteger i = 0; i < 15 && !enable.hittable && !disable.hittable; i++) [app swipeUp];
@@ -135,6 +180,7 @@
     [app.buttons[@"完成"] tap];
     if (app.buttons[@"查看"].exists) [app.buttons[@"查看"] tap];
     NSUInteger priorTask = [self latestRemoteTaskNumber:app];
+    if (app.buttons[@"对话"].exists) [app.buttons[@"对话"] tap];
     XCUIElement *message = app.textViews.firstMatch;
     XCTAssertTrue([message waitForExistenceWithTimeout:10]);
     [self enterAcceptanceText:fixture[@"routingPrompt"] ?: @"请把 17+25 的计算委托给 Acceptance Mac，完成后展示远端结果。不要在手机本地计算。" field:message app:app];
@@ -182,7 +228,7 @@
 - (void)testScheduledReminderSurvivesAppTermination {
     XCUIApplication *app = [self acceptanceApp];
     [app launch];
-    [app.buttons[@"设置"] tap];
+    [self openSettingsSection:@"主动任务" app:app];
     if (![app.staticTexts[@"Acceptance scheduled notification"] waitForExistenceWithTimeout:5]) {
         XCTSkip(@"需要在独立模拟器准备一次性提醒测试数据。");
     }
@@ -205,7 +251,7 @@
     XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:10]);
     XCTAssertFalse([app.buttons[@"新建会话"] exists]);
 
-    [app.buttons[@"设置"] tap];
+    [self openSettingsSection:@"端侧模型" app:app];
     XCTAssertTrue([app.buttons[@"导入 GGUF"] waitForExistenceWithTimeout:10]);
     [self retainScreenshot:app name:@"Companion settings"];
     [app.buttons[@"完成"] tap];
@@ -223,7 +269,7 @@
     app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
     [app launch];
 
-    [app.buttons[@"设置"] tap];
+    [self openSettingsSection:@"端侧模型" app:app];
     if (![app.staticTexts[@"端侧模型已导入"] waitForExistenceWithTimeout:5]) {
         XCTSkip(@"需要先把测试 GGUF 放入模拟器 App 的 Models 目录；运行 scripts/test-ios-model.sh。");
     }
@@ -237,7 +283,6 @@
     XCTAssertTrue(app.buttons[@"发送"].enabled, @"自动化输入未生效，不能计作模型请求。");
     [app.buttons[@"发送"] tap];
     // LazyColumn recycles older rows: visible reply counts cannot identify a new reply.
-    if (app.buttons[@"查看"].exists) [app.buttons[@"查看"] tap];
     XCUIElement *request = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:
         [NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND label == %@", @"conversation-message-", [@"user：" stringByAppendingString:prompt]]].firstMatch;
     for (NSInteger i = 0; i < 10 && !request.exists; i++) [app swipeDown];
@@ -250,7 +295,18 @@
     XCTAssertTrue([reply waitForExistenceWithTimeout:120]);
     XCTAssertTrue([reply.label hasPrefix:@"assistant："] && reply.label.length > [@"assistant：" length]);
     XCTAssertFalse([reply.label hasPrefix:@"assistant：{\"text\":"]);
+    XCTNSPredicateExpectation *visibleReply = [[XCTNSPredicateExpectation alloc]
+        initWithPredicate:[NSPredicate predicateWithFormat:@"hittable == YES"] object:reply];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[visibleReply] timeout:10], XCTWaiterResultCompleted,
+        @"新回复应自动进入可视区，不能只检查其存在。");
     [self retainScreenshot:app name:@"Companion conversation"];
+    if (fixture) {
+        [app swipeDown];
+        [app swipeDown];
+        XCTAssertTrue(app.buttons[@"↓ 最新消息"].exists);
+        [app.buttons[@"↓ 最新消息"] tap];
+        XCTAssertTrue(reply.hittable, @"返回最新消息后应显示刚生成的答案。");
+    }
 
 }
 
@@ -266,7 +322,7 @@
     XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-mcpEndpoint", @"http://127.0.0.1:8765/mcp"];
     [app launch];
-    [app.buttons[@"设置"] tap];
+    [self openSettingsSection:@"远程 MCP" app:app];
 
     XCUIElement *connected = [[app.staticTexts matchingPredicate:
         // Three fixture tools plus two shared device-routing tools.
@@ -278,7 +334,7 @@
     XCUIApplication *app = [self acceptanceApp];
     app.launchArguments = @[@"-mcpEndpoint", @"http://127.0.0.1:8765/mcp", @"-deviceToolsEnabled", @"NO"];
     [app launch];
-    [app.buttons[@"设置"] tap];
+    [self openSettingsSection:@"工具扩展" app:app];
     XCTAssertTrue([app.staticTexts[@"已连接 · 5 个工具"] waitForExistenceWithTimeout:20]);
     XCUIElement *toggle = app.buttons[@"端侧工具扩展开关"];
     XCTAssertTrue([toggle waitForExistenceWithTimeout:10]);
