@@ -134,6 +134,12 @@ static NSString *OCChunkJSON(NSString *text) {
         if (promptLength < 0) return @"聊天模板渲染失败。";
     }
     std::string prompt(promptBuffer.data(), static_cast<size_t>(promptLength));
+    char architecture[64] = {};
+    llama_model_meta_val_str(_model, "general.architecture", architecture, sizeof(architecture));
+    NSString *renderedPrompt = [[NSString alloc] initWithBytes:prompt.data()
+        length:prompt.size() encoding:NSUTF8StringEncoding];
+    if (renderedPrompt == nil) return @"聊天模板不是有效 UTF-8。";
+    prompt = OCLlamaGenerationPrompt(renderedPrompt, @(architecture)).UTF8String;
     if (prompt.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max() - 16)) {
         return @"对话上下文过长。";
     }

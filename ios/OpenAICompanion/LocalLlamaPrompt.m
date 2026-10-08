@@ -1,5 +1,10 @@
 #import "LocalLlamaPrompt.h"
 
+NSString *OCLlamaGenerationPrompt(NSString *prompt, NSString *architecture) {
+    return [architecture isEqualToString:@"qwen3"]
+        ? [prompt stringByAppendingString:@"<think>\n\n</think>\n\n"] : prompt;
+}
+
 NSArray<NSDictionary<NSString *, NSString *> *> *OCLlamaPromptMessages(NSArray *rawMessages) {
     NSMutableArray<NSDictionary<NSString *, NSString *> *> *messages = [NSMutableArray array];
     for (id raw in rawMessages) {

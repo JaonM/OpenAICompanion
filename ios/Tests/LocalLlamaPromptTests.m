@@ -3,6 +3,10 @@
 
 int main(void) {
     @autoreleasepool {
+        NSString *prefix = @"<|im_start|>assistant\n";
+        NSCAssert([OCLlamaGenerationPrompt(prefix, @"qwen3") isEqualToString:
+            [prefix stringByAppendingString:@"<think>\n\n</think>\n\n"]], @"Qwen3 must disable thinking before generation");
+        NSCAssert([OCLlamaGenerationPrompt(prefix, @"qwen2") isEqualToString:prefix], @"Other model prompts must remain unchanged");
         NSArray *history = @[
             @{ @"role": @"user", @"content": @"Find my meeting" },
             @{ @"role": @"assistant", @"content": @"", @"tool_calls": @[
