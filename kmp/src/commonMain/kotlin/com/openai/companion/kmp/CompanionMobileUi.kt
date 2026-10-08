@@ -1,5 +1,6 @@
 package com.openai.companion.kmp
 
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -11,7 +12,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -36,6 +44,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -131,6 +144,11 @@ interface MobileActions {
 @Composable
 fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var showSettings by remember { mutableStateOf(false) }
+    var showTasks by remember { mutableStateOf(false) }
+    var settingsSection by remember { mutableStateOf<String?>(null) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var followSentMessage by remember { mutableStateOf(false) }
+    var followLatest by remember { mutableStateOf(true) }
     var draft by remember { mutableStateOf("") }
     var endpointDraft by remember(state.mcpEndpoint) { mutableStateOf(state.mcpEndpoint) }
     var oauthClientId by remember { mutableStateOf("") }
@@ -144,12 +162,39 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var memorySyncTokenDraft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val uiScope = rememberCoroutineScope()
+    val nearLatest by remember {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val last = layout.visibleItemsInfo.lastOrNull()
+            layout.totalItemsCount == 0 || (last != null &&
+                (last.index == layout.totalItemsCount - 1 ||
+                    (last.index == layout.totalItemsCount - 2 &&
+                        last.offset + last.size <= layout.viewportEndOffset)))
+        }
+    }
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) followLatest = false
+        }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling && nearLatest) followLatest = true
+        }
+    }
+    LaunchedEffect(state.messages.size, state.streamedText.length) {
+        if (!showSettings && !showTasks && (followLatest || followSentMessage)) {
+            val last = state.messages.size + if (state.streamedText.isNotEmpty()) 1 else 0
+            if (last >= 0) listState.scrollToItem(last)
+            followSentMessage = false
+        }
+    }
     val approval = state.approval
     val inputPrompt = state.inputPrompt
 
     MaterialTheme(colorScheme = if (isSystemInDarkTheme()) companionDarkColors else companionLightColors) {
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(34.dp).background(MaterialTheme.colorScheme.primary,
@@ -158,170 +203,227 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (showSettings) "设置与模型" else "OpenAICompanion",
-                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text(if (showSettings) "个人助理偏好" else "持续对话 · ${if (state.sending) "正在处理" else "就绪"}",
+                        Text(if (showSettings) settingsSection ?: "设置" else if (showTasks) "远端任务" else "OpenAICompanion",
+                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (showSettings) "个人助理偏好" else if (showTasks) "${state.a2aTasks.count { !it.terminal }} 个进行中" else "持续对话 · ${if (state.sending) "正在处理" else "就绪"}",
                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { showSettings = !showSettings }) {
+                    if (!showSettings) TextButton(onClick = {
+                        keyboard?.hide()
+                        showTasks = !showTasks
+                    }) { Text(if (showTasks) "对话" else "任务") }
+                    TextButton(onClick = {
+                        keyboard?.hide()
+                        showSettings = !showSettings
+                        settingsSection = null
+                    }) {
                         Text(if (showSettings) "完成" else "设置")
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 when {
-                    showSettings -> { Column(Modifier.weight(1f).background(MaterialTheme.colorScheme.surfaceVariant)
+                    showSettings -> { key(settingsSection) { Column(Modifier.weight(1f).background(MaterialTheme.colorScheme.surfaceVariant)
                         .verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MobileSectionTitle("端侧模型")
-                        Text(state.modelStatus)
-                        OutlinedButton(onClick = actions::importModel) { Text("导入 GGUF") }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(state.deviceToolsEnabled, actions::setDeviceToolsEnabled,
-                                modifier = Modifier.semantics { contentDescription = "端侧工具扩展开关" })
-                            Text("启用端侧工具扩展（设备上下文与日历）")
+                        if (settingsSection == null) {
+                            Text("按功能管理你的助理", style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            MobileSettingsEntry("端侧模型", state.modelStatus) { settingsSection = "端侧模型" }
+                            MobileSettingsEntry("主动任务", state.backgroundReminderStatus) { settingsSection = "主动任务" }
+                            MobileSettingsEntry("跨设备执行", state.deviceStatus) { settingsSection = "跨设备执行" }
+                            MobileSettingsEntry("远端 Agent（A2A）", "${state.a2aAgents.count { it.enabled }} 个已启用") { settingsSection = "远端 Agent（A2A）" }
+                            MobileSettingsEntry("记忆点跨端同步", state.memorySyncStatus) { settingsSection = "记忆点跨端同步" }
+                            MobileSettingsEntry("远程 MCP", state.mcpStatus) { settingsSection = "远程 MCP" }
+                            MobileSettingsEntry("工具扩展", if (state.deviceToolsEnabled) "已开启" else "默认关闭 · 可选扩展") { settingsSection = "工具扩展" }
+                        } else {
+                            TextButton(onClick = { settingsSection = null }) { Text("‹ 所有设置") }
                         }
-                        Text("扩展默认关闭；启用后，日历访问仍需逐次确认和系统权限。")
-                        Spacer(Modifier.height(20.dp))
-                        MobileSectionTitle("主动任务")
-                        Row {
-                            Checkbox(state.proactiveSettings.enabled, { enabled ->
-                                actions.saveProactiveConfig(state.proactiveSettings.copy(enabled = enabled))
-                            }, modifier = Modifier.semantics { contentDescription = "主动推送开关" })
-                            Text("开启主动推送")
+                        if (settingsSection == "端侧模型") {
+                            MobileSectionTitle("端侧模型")
+                            Text(state.modelStatus)
+                            OutlinedButton(onClick = actions::importModel) { Text("导入 GGUF") }
                         }
-                        Text(state.backgroundReminderStatus)
-                        Text("固定计划由系统提醒；实时条件检查与模型任务仍需要可运行的执行端。")
-                        if (state.reminderSettingsAvailable) TextButton(onClick = actions::openReminderSettings) { Text("配置精确提醒权限") }
-                        Text("后台发现间隔")
-                        listOf(15L, 30L, 60L, 180L).chunked(2).forEach { pair ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                pair.forEach { minutes ->
-                                    OutlinedButton(onClick = {
-                                        actions.saveProactiveConfig(state.proactiveSettings.copy(discoveryIntervalMinutes = minutes))
-                                    }, enabled = state.proactiveSettings.discoveryIntervalMinutes != minutes,
-                                        modifier = Modifier.weight(1f)) {
-                                        Text(if (minutes < 60) "${minutes} 分钟" else "${minutes / 60} 小时")
+                        if (settingsSection == "工具扩展") {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(state.deviceToolsEnabled, actions::setDeviceToolsEnabled,
+                                    modifier = Modifier.semantics { contentDescription = "端侧工具扩展开关" })
+                                Text("启用端侧工具扩展（设备上下文与日历）")
+                            }
+                            Text("扩展默认关闭；启用后，日历访问仍需逐次确认和系统权限。")
+                            Text(state.mcpStatus, style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(20.dp))
+                        }
+                        if (settingsSection == "主动任务") {
+                            MobileSectionTitle("主动任务")
+                            Row {
+                                Checkbox(state.proactiveSettings.enabled, { enabled ->
+                                    actions.saveProactiveConfig(state.proactiveSettings.copy(enabled = enabled))
+                                }, modifier = Modifier.semantics { contentDescription = "主动推送开关" })
+                                Text("开启主动推送")
+                            }
+                            Text(state.backgroundReminderStatus)
+                            Text("固定计划由系统提醒；实时条件检查与模型任务仍需要可运行的执行端。")
+                            if (state.reminderSettingsAvailable) TextButton(onClick = actions::openReminderSettings) { Text("配置精确提醒权限") }
+                            Text("后台发现间隔")
+                            listOf(15L, 30L, 60L, 180L).chunked(2).forEach { pair ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    pair.forEach { minutes ->
+                                        OutlinedButton(onClick = {
+                                            actions.saveProactiveConfig(state.proactiveSettings.copy(discoveryIntervalMinutes = minutes))
+                                        }, enabled = state.proactiveSettings.discoveryIntervalMinutes != minutes,
+                                            modifier = Modifier.weight(1f)) {
+                                            Text(if (minutes < 60) "${minutes} 分钟" else "${minutes / 60} 小时")
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Text("端侧模型根据记忆点和可用查询工具推理未来可帮助的任务；到点后再次查询实时信息。")
-                        state.proactiveTasks.forEach { task ->
-                            Row {
-                                Checkbox(task.enabled, { enabled ->
-                                    actions.saveProactiveTask(task.copy(enabled = enabled))
-                                })
-                                Text(task.title)
-                                TextButton(onClick = { actions.deleteProactiveTask(task.scenario) }) { Text("删除") }
+                            Text("端侧模型根据记忆点和可用查询工具推理未来可帮助的任务；到点后再次查询实时信息。")
+                            state.proactiveTasks.forEach { task ->
+                                Row {
+                                    Checkbox(task.enabled, { enabled ->
+                                        actions.saveProactiveTask(task.copy(enabled = enabled))
+                                    })
+                                    Text(task.title)
+                                    TextButton(onClick = { actions.deleteProactiveTask(task.scenario) }) { Text("删除") }
+                                }
                             }
+                            Spacer(Modifier.height(20.dp))
                         }
-                        Spacer(Modifier.height(20.dp))
-                        MobileSectionTitle("记忆点跨端同步")
-                        OutlinedTextField(
-                            value = memorySyncEndpointDraft,
-                            onValueChange = { memorySyncEndpointDraft = it },
-                            label = { Text("HTTPS 同步接口地址") },
-                            modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        )
-                        OutlinedTextField(
-                            value = memorySyncTokenDraft,
-                            onValueChange = { memorySyncTokenDraft = it },
-                            label = { Text("访问令牌（留空保留已保存令牌）") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        )
-                        Text(state.memorySyncStatus)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
-                                actions.configureMemorySync(memorySyncEndpointDraft, memorySyncTokenDraft)
-                                memorySyncTokenDraft = ""
-                            }) { Text("保存并同步") }
-                            OutlinedButton(onClick = actions::syncMemories) { Text("立即同步") }
-                        }
-                        Spacer(Modifier.height(20.dp))
-                        MobileSectionTitle("远程 MCP")
-                        OutlinedTextField(
-                            value = endpointDraft,
-                            onValueChange = { endpointDraft = it },
-                            label = { Text("MCP 服务地址") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                        )
-                        Text(state.mcpStatus)
-                        Button(
-                            onClick = { actions.configureMcp(endpointDraft) },
-                            enabled = !state.mcpBusy,
-                        ) { Text(if (state.mcpBusy) "处理中…" else "连接 / 更新") }
-                        if (state.mcpStatus.startsWith("需要 OAuth")) {
+                        if (settingsSection == "记忆点跨端同步") {
+                            MobileSectionTitle("记忆点跨端同步")
                             OutlinedTextField(
-                                value = oauthClientId,
-                                onValueChange = { oauthClientId = it.trim() },
-                                label = { Text("OAuth Client ID（可选）") },
+                                value = memorySyncEndpointDraft,
+                                onValueChange = { memorySyncEndpointDraft = it },
+                                label = { Text("HTTPS 同步接口地址") },
+                                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                            )
+                            OutlinedTextField(
+                                value = memorySyncTokenDraft,
+                                onValueChange = { memorySyncTokenDraft = it },
+                                label = { Text("访问令牌（留空保留已保存令牌）") },
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                            )
+                            Text(state.memorySyncStatus)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    actions.configureMemorySync(memorySyncEndpointDraft, memorySyncTokenDraft)
+                                    memorySyncTokenDraft = ""
+                                }) { Text("保存并同步") }
+                                OutlinedButton(onClick = actions::syncMemories) { Text("立即同步") }
+                            }
+                            Spacer(Modifier.height(20.dp))
+                        }
+                        if (settingsSection == "远程 MCP") {
+                            MobileSectionTitle("远程 MCP")
+                            OutlinedTextField(
+                                value = endpointDraft,
+                                onValueChange = { endpointDraft = it },
+                                label = { Text("MCP 服务地址") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true,
                             )
+                            Text(state.mcpStatus)
                             Button(
-                                onClick = { actions.authorizeMcp(oauthClientId) },
+                                onClick = { actions.configureMcp(endpointDraft) },
                                 enabled = !state.mcpBusy,
-                            ) { Text("在浏览器中授权") }
-                            Text("留空将尝试动态注册；也可填写已预注册的 Client ID。")
-                        }
-                        Text("远程地址需使用 HTTPS；本机允许 HTTP。")
-                        Spacer(Modifier.height(20.dp))
-                        MobileSectionTitle("远端 Agent（A2A）")
-                        MobileSectionTitle("跨设备执行")
-                        OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "设备服务地址" })
-                        OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "本设备名称" })
-                        OutlinedTextField(deviceTokenDraft, { deviceTokenDraft = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(pairingCode, { pairingCode = it }, label = { Text("一次性配对码（10 分钟有效）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "一次性配对码" })
-                        OutlinedButton(enabled = pairingCode.isNotBlank(), onClick = {
-                            actions.pairDevice(deviceEndpointDraft, pairingCode, deviceNameDraft, deviceAcceptsDraft)
-                            pairingCode = ""
-                        }) { Text("使用配对码连接") }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(deviceAcceptsDraft, { deviceAcceptsDraft = it }, modifier = Modifier.semantics { contentDescription = "前台接单开关" })
-                            Text("允许本设备在前台接收任务")
-                        }
-                        Text(state.deviceStatus)
-                        Text("任务使用独立上下文；工具权限仍需本机确认。清空地址可停用。")
-                        Button(onClick = {
-                            actions.configureDevices(deviceEndpointDraft, deviceTokenDraft, deviceNameDraft, deviceAcceptsDraft)
-                            deviceTokenDraft = ""
-                        }) { Text("保存设备连接") }
-
-                        OutlinedTextField(
-                            value = a2aCardDraft,
-                            onValueChange = { a2aCardDraft = it },
-                            label = { Text("Agent Card 地址") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                        )
-                        Button(onClick = { actions.addA2aAgent(a2aCardDraft) }, enabled = a2aCardDraft.isNotBlank()) {
-                            Text("添加 Agent")
-                        }
-                        state.a2aAgents.forEach { agent ->
-                            var tokenDraft by remember(agent.id) { mutableStateOf("") }
-                            Text("${agent.name} · ${agent.skills}")
-                            Text(agent.interfaceUrl)
-                            if (agent.requiresAuthentication) {
-                                Text(if (agent.bearerSupported) "此 Agent 要求 Bearer 认证。" else "此 Agent 的认证方式暂不支持。")
-                            }
-                            if (agent.bearerSupported) {
+                            ) { Text(if (state.mcpBusy) "处理中…" else "连接 / 更新") }
+                            if (state.mcpStatus.startsWith("需要 OAuth")) {
                                 OutlinedTextField(
-                                    value = tokenDraft,
-                                    onValueChange = { tokenDraft = it },
-                                    label = { Text("Bearer 访问令牌") },
+                                    value = oauthClientId,
+                                    onValueChange = { oauthClientId = it.trim() },
+                                    label = { Text("OAuth Client ID（可选）") },
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true,
-                                    visualTransformation = PasswordVisualTransformation(),
                                 )
-                                TextButton(enabled = tokenDraft.isNotBlank(), onClick = {
-                                    actions.setA2aBearerToken(agent.id, tokenDraft)
-                                    tokenDraft = ""
-                                }) { Text("保存访问令牌") }
+                                Button(
+                                    onClick = { actions.authorizeMcp(oauthClientId) },
+                                    enabled = !state.mcpBusy,
+                                ) { Text("在浏览器中授权") }
+                                Text("留空将尝试动态注册；也可填写已预注册的 Client ID。")
                             }
-                            TextButton(onClick = { if (agent.enabled) actions.disableA2aAgent(agent.id) else actions.addA2aAgent(agent.cardUrl) }, modifier = Modifier.semantics { contentDescription = "${if (agent.enabled) "停用" else "启用"} Agent ${agent.name}" }) { Text(if (agent.enabled) "停用" else "启用") }
+                            Text("远程地址需使用 HTTPS；本机允许 HTTP。")
+                            Spacer(Modifier.height(20.dp))
                         }
-                    } }
+                        if (settingsSection == "跨设备执行") {
+                            MobileSectionTitle("跨设备执行")
+                            OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "设备服务地址" })
+                            OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "本设备名称" })
+                            OutlinedTextField(deviceTokenDraft, { deviceTokenDraft = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(pairingCode, { pairingCode = it }, label = { Text("一次性配对码（10 分钟有效）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "一次性配对码" })
+                            OutlinedButton(enabled = pairingCode.isNotBlank(), onClick = {
+                                actions.pairDevice(deviceEndpointDraft, pairingCode, deviceNameDraft, deviceAcceptsDraft)
+                                pairingCode = ""
+                            }) { Text("使用配对码连接") }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(deviceAcceptsDraft, { deviceAcceptsDraft = it }, modifier = Modifier.semantics { contentDescription = "前台接单开关" })
+                                Text("允许本设备在前台接收任务")
+                            }
+                            Text(state.deviceStatus)
+                            Text("任务使用独立上下文；工具权限仍需本机确认。清空地址可停用。")
+                            Button(onClick = {
+                                actions.configureDevices(deviceEndpointDraft, deviceTokenDraft, deviceNameDraft, deviceAcceptsDraft)
+                                deviceTokenDraft = ""
+                            }) { Text("保存设备连接") }
+                        }
+                        if (settingsSection == "远端 Agent（A2A）") {
+                            MobileSectionTitle("远端 Agent（A2A）")
+                            OutlinedTextField(
+                                value = a2aCardDraft,
+                                onValueChange = { a2aCardDraft = it },
+                                label = { Text("Agent Card 地址") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                            )
+                            Button(onClick = { actions.addA2aAgent(a2aCardDraft) }, enabled = a2aCardDraft.isNotBlank()) {
+                                Text("添加 Agent")
+                            }
+                            state.a2aAgents.forEach { agent ->
+                                var tokenDraft by remember(agent.id) { mutableStateOf("") }
+                                Text("${agent.name} · ${agent.skills}")
+                                Text(agent.interfaceUrl)
+                                if (agent.requiresAuthentication) {
+                                    Text(if (agent.bearerSupported) "此 Agent 要求 Bearer 认证。" else "此 Agent 的认证方式暂不支持。")
+                                }
+                                if (agent.bearerSupported) {
+                                    OutlinedTextField(
+                                        value = tokenDraft,
+                                        onValueChange = { tokenDraft = it },
+                                        label = { Text("Bearer 访问令牌") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                    )
+                                    TextButton(enabled = tokenDraft.isNotBlank(), onClick = {
+                                        actions.setA2aBearerToken(agent.id, tokenDraft)
+                                        tokenDraft = ""
+                                    }) { Text("保存访问令牌") }
+                                }
+                                TextButton(onClick = { if (agent.enabled) actions.disableA2aAgent(agent.id) else actions.addA2aAgent(agent.cardUrl) }, modifier = Modifier.semantics { contentDescription = "${if (agent.enabled) "停用" else "启用"} Agent ${agent.name}" }) { Text(if (agent.enabled) "停用" else "启用") }
+                            }
+                        }
+                    } } }
+                    showTasks -> {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("执行进度与结果", style = MaterialTheme.typography.labelMedium)
+                            TextButton(onClick = actions::refreshA2aTasks) { Text("刷新") }
+                        }
+                        LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (state.a2aTasks.isEmpty()) item {
+                                Text("暂无远端任务。回到对话，告诉助理需要哪台设备协助。",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            items(state.a2aTasks.sortedByDescending { it.id }, key = { it.id }) { task ->
+                                val agentName = state.a2aAgents.firstOrNull { it.id == task.agentId }?.name ?: task.agentId
+                                A2aTaskCard(task, agentName, actions)
+                            }
+                        }
+                    }
                     state.activeSessionId == null -> {
                         Text("正在加载对话…")
                     }
@@ -333,11 +435,8 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Row {
                                     TextButton(onClick = {
-                                        uiScope.launch {
-                                            listState.animateScrollToItem(
-                                                state.messages.size + if (state.streamedText.isNotEmpty()) 1 else 0,
-                                            )
-                                        }
+                                        keyboard?.hide()
+                                        showTasks = true
                                     }) { Text("查看") }
                                     TextButton(onClick = actions::refreshA2aTasks) { Text("刷新") }
                                 }
@@ -346,7 +445,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 20.dp),
                             verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                            if (state.messages.isEmpty() && state.streamedText.isEmpty() && state.a2aTasks.isEmpty()) {
+                            if (state.messages.isEmpty() && state.streamedText.isEmpty()) {
                                 item {
                                     Column(Modifier.fillMaxWidth().padding(vertical = 48.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally) {
@@ -366,31 +465,51 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             if (state.streamedText.isNotEmpty()) {
                                 item { MobileMessageRow(MobileMessage("assistant", state.streamedText)) }
                             }
-                            items(state.a2aTasks) { task ->
-                                val agentName = state.a2aAgents.firstOrNull { it.id == task.agentId }?.name ?: task.agentId
-                                A2aTaskCard(task, agentName, actions)
-                            }
+                            // A trailing anchor reaches the end even when a single reply is taller than the viewport.
+                            item(key = "conversation-end") { Spacer(Modifier.height(1.dp)) }
                         }
-                        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shadowElevation = 3.dp,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                                OutlinedTextField(value = draft, onValueChange = { draft = it },
-                                    placeholder = { Text("给 Companion 发送消息…") },
-                                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "输入消息" },
-                                    minLines = 2, maxLines = 5,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent))
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(state.modelStatus, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.weight(1f))
-                                    if (state.sending) TextButton(onClick = actions::cancel) { Text("停止") }
-                                    Button(enabled = !state.sending && draft.isNotBlank(), shape = RoundedCornerShape(10.dp),
-                                        onClick = { actions.send(draft.trim()); draft = "" }) { Text("发送") }
+                        if (!nearLatest) TextButton(onClick = {
+                            followLatest = true
+                            uiScope.launch {
+                                listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                            }
+                        }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("↓ 最新消息") }
+                        Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shadowElevation = 2.dp,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                BasicTextField(value = draft, onValueChange = { draft = it },
+                                    modifier = Modifier.weight(1f).heightIn(min = 44.dp)
+                                        .semantics { contentDescription = "输入消息" },
+                                    minLines = 1, maxLines = 4,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    decorationBox = { input ->
+                                        Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterStart) {
+                                            if (draft.isEmpty()) Text("给 Companion 发送消息…",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            input()
+                                        }
+                                    })
+                                if (state.sending) TextButton(onClick = actions::cancel) { Text("停止") }
+                                else FilledIconButton(enabled = draft.isNotBlank(),
+                                    modifier = Modifier.semantics { contentDescription = "发送" },
+                                    onClick = {
+                                        followSentMessage = true
+                                        followLatest = true
+                                        actions.send(draft.trim())
+                                        draft = ""
+                                        keyboard?.hide()
+                                    }) {
+                                    Icon(sendPaperPlane, contentDescription = null, modifier = Modifier.size(20.dp))
                                 }
                             }
                         }
+                        Text(state.modelStatus, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 6.dp))
                     }
                 }
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error,
@@ -511,10 +630,13 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
 @Composable
 private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions) {
     var reply by remember(task.id) { mutableStateOf("") }
-    Surface(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), tonalElevation = 3.dp) {
-        Column(Modifier.padding(12.dp)) {
+    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("远端任务 · $agentName", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { contentDescription = "远端任务编号 ${task.id} · $agentName" })
-            Text(task.requestText)
+            Text(task.requestText, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(when (task.state) {
                 "SUBMITTING" -> "正在提交"
                 "SEND_UNCERTAIN" -> "发送状态未知，请勿直接重发"
@@ -531,12 +653,21 @@ private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions
                 "TASK_STATE_CANCELED" -> "已取消"
                 "TASK_STATE_REJECTED" -> "远端已拒绝"
                 else -> task.state
-            })
+            }, style = MaterialTheme.typography.labelMedium,
+                color = if (task.state == "TASK_STATE_FAILED") MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary)
             task.question?.let { Text("远端请求：$it") }
             if (task.state == "TASK_STATE_AUTH_REQUIRED") {
                 Text("请按远端说明完成授权；访问令牌可在设置中为该 Agent 单独保存。")
             }
-            task.result?.let { Text("远端结果：$it", modifier = Modifier.semantics { contentDescription = "任务 ${task.id} 远端结果：$it" }) }
+            task.result?.let { result ->
+                Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer) {
+                    Text("远端结果：$result", modifier = Modifier.padding(12.dp).semantics {
+                        contentDescription = "任务 ${task.id} 远端结果：$result"
+                    })
+                }
+            }
             if (task.state == "TASK_STATE_INPUT_REQUIRED") {
                 OutlinedTextField(reply, { reply = it }, label = { Text("回复该远端任务") }, modifier = Modifier.fillMaxWidth())
                 Row {
@@ -550,6 +681,36 @@ private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions
             if (!task.terminal && task.remoteTaskId != null) {
                 TextButton(onClick = { actions.cancelA2aTask(task.id) }) { Text("取消任务") }
             }
+        }
+    }
+}
+
+private val sendPaperPlane = ImageVector.Builder("SendPaperPlane", 20.dp, 20.dp, 24f, 24f).apply {
+    path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f) {
+        moveTo(21f, 3f)
+        lineTo(3f, 10f)
+        lineTo(10f, 13f)
+        lineTo(13f, 21f)
+        close()
+        moveTo(10f, 13f)
+        lineTo(21f, 3f)
+    }
+}.build()
+
+@Composable
+private fun MobileSettingsEntry(title: String, summary: String, onClick: () -> Unit) {
+    Surface(onClick = onClick, modifier = Modifier.fillMaxWidth().testTag("settings-$title"),
+        shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(summary, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Text("›", modifier = Modifier.padding(start = 12.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
