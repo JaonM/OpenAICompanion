@@ -562,6 +562,24 @@ private fun MobileSectionTitle(title: String) {
 
 @Composable
 private fun MobileMessageRow(message: MobileMessage, modifier: Modifier = Modifier) {
+    if (message.role == "tool" || message.role == "reasoning") {
+        var expanded by remember(message) { mutableStateOf(false) }
+        val title = if (message.role == "tool") "工具" else "思考过程"
+        val preview = message.content.lineSequence().firstOrNull().orEmpty().take(64)
+        Column(Modifier.fillMaxWidth().padding(start = 38.dp)) {
+            TextButton(onClick = { expanded = !expanded },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                Text(if (expanded) "⌄ $title" else "› $title：$preview…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (expanded) Text(message.content, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = modifier.semantics { contentDescription = "${message.role}：${message.content}" })
+        }
+        return
+    }
     val user = message.role == "user"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         if (!user) {
