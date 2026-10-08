@@ -122,6 +122,7 @@ pub(crate) fn discover_from_memories(
             tokio::time::timeout(
                 std::time::Duration::from_secs(120),
                 model.complete_silent(ModelRequest {
+                    response_format: None,
                     system_prompt: prompt.into(),
                     user_input: String::new(),
                     history: vec![Message::User {
@@ -246,6 +247,7 @@ fn process_turn(
             tokio::time::timeout(
                 std::time::Duration::from_secs(120),
                 model.complete_silent(ModelRequest {
+                    response_format: None,
                     system_prompt: prompt.into(),
                     user_input: String::new(),
                     history: vec![Message::User {

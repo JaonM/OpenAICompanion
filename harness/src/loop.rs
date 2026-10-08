@@ -68,6 +68,7 @@ where
         user_input,
         &mut observe,
         true,
+        None,
     )
     .await
 }
@@ -93,6 +94,7 @@ where
         user_input,
         &mut |_| Ok(()),
         false,
+        None,
     )
     .await
 }
@@ -103,7 +105,36 @@ pub(crate) async fn run_device_task<E: ToolExecutor + Sync>(
     system_prompt: &str, history: &[Message], input: String,
 ) -> Result<AgentRun, AgentError> {
     run_with_history_observed_mode(model, executor, config, system_prompt, history,
-        input, &mut |_| Ok(()), false).await
+        input, &mut |_| Ok(()), false, Some(crate::types::device_task_response_format())).await
+}
+
+/// Repeated delegation is a fresh action. Keep unrelated reference context and
+/// the durable trace, but omit prior submissions and copied submission replies.
+fn fresh_delegation_history(history: &[Message], input: &str) -> Vec<Message> {
+    let starts: Vec<usize> = history.iter().enumerate().filter_map(|(i, m)|
+        matches!(m, Message::User { .. }).then_some(i)).collect();
+    let turns: Vec<_> = starts.iter().enumerate().map(|(n, &start)|
+        &history[start..starts.get(n + 1).copied().unwrap_or(history.len())]).collect();
+    let delegates = |turn: &[Message]| turn.iter().any(|m|
+        matches!(m, Message::Assistant { tool_calls, .. }
+            if tool_calls.iter().any(|c| c.name == "delegate_to_agent")));
+    if !turns.iter().any(|turn| delegates(turn)
+        && matches!(&turn[0], Message::User { content } if content == input)) {
+        return history.to_vec();
+    }
+    let submission_replies: Vec<_> = turns.iter().filter(|turn| delegates(turn))
+        .flat_map(|turn| turn.iter()).filter_map(|m| match m {
+            Message::Assistant { content, tool_calls } if tool_calls.is_empty() && !content.is_empty() => Some(content),
+            _ => None,
+        }).collect();
+    let mut result = history[..starts.first().copied().unwrap_or(history.len())].to_vec();
+    for turn in turns {
+        let repeated = matches!(&turn[0], Message::User { content } if content == input);
+        let copied = turn.iter().any(|m| matches!(m, Message::Assistant { content, .. }
+            if submission_replies.contains(&content)));
+        if !repeated && !delegates(turn) && !copied { result.extend_from_slice(turn); }
+    }
+    result
 }
 
 async fn run_with_history_observed_mode<E, O>(
@@ -115,6 +146,7 @@ async fn run_with_history_observed_mode<E, O>(
     user_input: impl Into<String>,
     observe: &mut O,
     emit_events: bool,
+    response_format: Option<serde_json::Value>,
 ) -> Result<AgentRun, AgentError>
 where
     E: ToolExecutor + Sync,
@@ -161,6 +193,16 @@ where
     history.push(Message::User {
         content: user_input.clone(),
     });
+    let model_history = if emit_events {
+        fresh_delegation_history(previous_history, &user_input)
+    } else {
+        previous_history.to_vec()
+    };
+    let system_prompt = if emit_events {
+        format!("{system_prompt}\nEach new user request to execute or delegate is a fresh action, even when its text repeats. Historical task handles are not proof that this new request was submitted. Only a tool result from this turn can confirm submission.")
+    } else {
+        system_prompt.to_owned()
+    };
     let mut reasoning = String::new();
 
     for step in 0..config.max_step {
@@ -169,9 +211,10 @@ where
             &cancellation,
             model.complete_with_events(
                 ModelRequest {
-                    system_prompt: system_prompt.to_owned(),
+                    response_format: response_format.clone(),
+                    system_prompt: system_prompt.clone(),
                     user_input: user_input.clone(),
-                    history: history.clone(),
+                    history: model_history.iter().cloned().chain(history[previous_history.len()..].iter().cloned()).collect(),
                     tools: executor.list_tools()?,
                 },
                 emit_events,
@@ -706,5 +749,31 @@ mod tests {
             .enable_time()
             .build()
             .expect("test Tokio runtime should be created")
+    }
+}
+
+#[cfg(test)]
+mod delegation_context_tests {
+    use super::*;
+    #[test]
+    fn repeated_delegation_keeps_other_context_and_durable_history() {
+        let input = "Delegate this to Mac";
+        let history = vec![
+            Message::User { content: "The input is 17 + 25".into() },
+            Message::Assistant { content: "Understood".into(), tool_calls: vec![] },
+            Message::User { content: input.into() },
+            Message::Assistant { content: "".into(), tool_calls: vec![ToolCall::new("c1", "delegate_to_agent", "{}")] },
+            Message::Tool { call_id: "c1".into(), name: "delegate_to_agent".into(), content: "old handle".into(), is_error: false },
+            Message::Assistant { content: "Submitted old task".into(), tool_calls: vec![] },
+        ];
+        assert_eq!(fresh_delegation_history(&history, input), history[..2]);
+        assert_eq!(fresh_delegation_history(&history, "What happened?"), history);
+        let mut replay = history.clone();
+        replay.extend([Message::User { content: input.into() }, Message::Assistant { content: "Submitted old task".into(), tool_calls: vec![] }]);
+        assert_eq!(fresh_delegation_history(&replay, input), history[..2]);
+        let mut copied = history.clone();
+        copied.extend([Message::User { content: "A different delegation request".into() }, Message::Assistant { content: "Submitted old task".into(), tool_calls: vec![] }]);
+        assert_eq!(fresh_delegation_history(&copied, input), history[..2]);
+        assert_eq!(history.len(), 6);
     }
 }

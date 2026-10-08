@@ -120,6 +120,7 @@ pub enum Message {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRequest {
+    pub response_format: Option<serde_json::Value>,
     pub system_prompt: String,
     pub user_input: String,
     pub history: Vec<Message>,
@@ -147,10 +148,11 @@ impl ModelRequest {
             .iter()
             .map(crate::tool_definition_to_function_schema)
             .collect::<Result<Vec<_>, _>>()?;
-        serde_json::to_string(&serde_json::json!({
-            "messages": messages,
-            "tools": tools,
-        }))
+        let mut body = serde_json::json!({"messages": messages, "tools": tools});
+        if let Some(format) = &self.response_format {
+            body["response_format"] = format.clone();
+        }
+        serde_json::to_string(&body)
     }
 }
 
@@ -258,4 +260,29 @@ pub struct AgentRun {
     pub history: Vec<Message>,
     pub steps: usize,
     pub termination: TerminationReason,
+}
+
+/// Constrain device task generation and validate the response again at the boundary.
+pub(crate) fn device_task_response_format() -> serde_json::Value {
+    serde_json::json!({"type":"json_schema","json_schema":{
+        "name":"device_task_result","strict":true,"schema":{
+            "type":"object","properties":{
+                "state":{"type":"string","enum":["completed","input_required","failed"]},
+                "text":{"type":"string"}
+            },"required":["state","text"],"additionalProperties":false
+        }
+    }})
+}
+#[cfg(test)]
+mod response_format_tests {
+    use super::*;
+    #[test]
+    fn device_contract_crosses_model_callback_but_chat_is_unconstrained() {
+        let mut request = ModelRequest { response_format: None, system_prompt: "".into(), user_input: "hi".into(), history: vec![], tools: vec![] };
+        let chat: serde_json::Value = serde_json::from_str(&request.to_chat_completions_json().unwrap()).unwrap();
+        assert!(chat.get("response_format").is_none());
+        request.response_format = Some(device_task_response_format());
+        let task: serde_json::Value = serde_json::from_str(&request.to_chat_completions_json().unwrap()).unwrap();
+        assert_eq!(task["response_format"]["json_schema"]["schema"]["properties"]["state"]["enum"], serde_json::json!(["completed", "input_required", "failed"]));
+    }
 }

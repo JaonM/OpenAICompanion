@@ -83,6 +83,7 @@ fn process_turn(
         "now_unix_seconds": now_unix_seconds(),
     });
     let response = runtime.block_on(model.complete_silent(ModelRequest {
+            response_format: None,
             system_prompt: "从本轮用户输入提取未来有用的原子记忆点。只把用户明确说出的内容当作事实，不推断敏感属性，不从助手回答或工具结果提取。短期上下文无需保存。中期用于有期限的计划或进行中的事项；长期用于明确且持续有效的事实、偏好、约束或明确要求记住的内容。相同内容不重复。用户明确纠正已有记忆时填写 replaces_id；明确完成或取消中期事项时 action=archive。输出严格 JSON 数组，每项仅包含 action(upsert|archive)、tier(long|medium)、kind(preference|fact|goal|constraint)、topic_id、content、evidence（用户输入中的连续原文）、expires_at（Unix 秒，可为 null）、replaces_id（整数，可为 null）。无合适内容输出 []。中期若无明确到期时间，expires_at 为 null。最多 3 项。".into(),
             user_input: String::new(),
             history: vec![Message::User { content: input.to_string() }],

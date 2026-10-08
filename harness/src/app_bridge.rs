@@ -645,21 +645,15 @@ pub fn app_execute_device_task(request_json: String) -> AppResult {
                 "You execute a bounded task delegated to this device. Use only the supplied task context and tools. \
                  Never delegate to another agent. Previously recorded tool results are already executed; do not repeat them. \
                  If information or user action is needed, stop and ask a precise question. \
-                 Your final response MUST be a JSON object with state (completed, input_required, or failed) and text. \
+                 Your final response MUST have exactly this shape: {\"state\":\"completed\",\"text\":\"answer\"}. \
+                 state is a string: completed, input_required, or failed; never boolean keys. text is a nonempty string. \
                  Do not claim a tool operation succeeded unless its result confirms success.",
                 &history, input).await?;
-            let output = serde_json::from_str::<Value>(run.output.trim()).ok();
             let (status, body) = if run.termination != TerminationReason::Completed {
                 ("TASK_STATE_FAILED", "执行达到步骤上限".to_owned())
-            } else if let Some(value) = output {
-                let status = match value["state"].as_str() {
-                    Some("input_required") => "TASK_STATE_INPUT_REQUIRED",
-                    Some("completed") => "TASK_STATE_COMPLETED",
-                    _ => "TASK_STATE_FAILED",
-                };
-                (status, value["text"].as_str().filter(|s| !s.trim().is_empty()).unwrap_or("执行器返回无效结果").to_owned())
             } else {
-                ("TASK_STATE_FAILED", "执行器未返回有效的任务状态".to_owned())
+                parse_device_task_result(&run.output).unwrap_or_else(||
+                    ("TASK_STATE_FAILED", "执行器未返回有效的任务状态".to_owned()))
             };
             let body = body.chars().take(16_000).collect::<String>();
             let checkpoint = serde_json::to_value(&run.history).map_err(|e| crate::AgentError::InvalidAction(e.to_string()))?;
@@ -673,6 +667,21 @@ pub fn app_execute_device_task(request_json: String) -> AppResult {
         Ok(value) => AppResult::success(value),
         Err(error) => AppResult::failure(error),
     }
+}
+
+fn parse_device_task_result(output: &str) -> Option<(&'static str, String)> {
+    let value: Value = serde_json::from_str(output.trim()).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 2 { return None; }
+    let text = object.get("text")?.as_str()?.trim();
+    if text.is_empty() { return None; }
+    let status = match object.get("state")?.as_str()? {
+        "completed" => "TASK_STATE_COMPLETED",
+        "input_required" => "TASK_STATE_INPUT_REQUIRED",
+        "failed" => "TASK_STATE_FAILED",
+        _ => return None,
+    };
+    Some((status, text.to_owned()))
 }
 
 struct DeviceTaskExecutor {
@@ -788,6 +797,7 @@ pub fn app_answer_device_question(request_json: String) -> AppResult {
         let state = app_state()?;
         let model = crate::ModelServeWrapper::registered().map_err(|e| e.to_string())?;
         let response = state.runtime.block_on(model.complete_silent(crate::ModelRequest {
+            response_format: None,
             system_prompt: "A delegated agent asks a clarification. Return JSON {\"answer\":null} unless the original \
                 task explicitly contains a factual answer. If it does, answer must be a short exact verbatim excerpt \
                 from the original task. Never infer a missing fact, make a new choice, approve an action, disclose \
@@ -807,5 +817,20 @@ pub fn app_answer_device_question(request_json: String) -> AppResult {
     match result {
         Ok(value) => AppResult::success(value),
         Err(error) => AppResult::failure(error),
+    }
+}
+
+#[cfg(test)]
+mod device_result_tests {
+    use super::parse_device_task_result;
+    #[test]
+    fn accepts_only_explicit_states_with_nonempty_text() {
+        for (state, expected) in [("completed", "TASK_STATE_COMPLETED"), ("input_required", "TASK_STATE_INPUT_REQUIRED"), ("failed", "TASK_STATE_FAILED")] {
+            assert_eq!(parse_device_task_result(&serde_json::json!({"state":state,"text":"42"}).to_string()), Some((expected, "42".into())));
+        }
+        for bad in [r#"{"completed":true,"input_required":false,"text":"42"}"#,
+            r#"{"state":"completed","text":" "}"#, r#"{"state":true,"text":"42"}"#,
+            r#"{"state":"unknown","text":"42"}"#, r#"{"state":"completed","text":"42","extra":true}"#,
+            "42", "```json\n{}\n```"] { assert!(parse_device_task_result(bad).is_none(), "{bad}"); }
     }
 }

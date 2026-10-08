@@ -7,6 +7,21 @@ int main(void) {
         NSCAssert([OCLlamaGenerationPrompt(prefix, @"qwen3") isEqualToString:
             [prefix stringByAppendingString:@"<think>\n\n</think>\n\n"]], @"Qwen3 must disable thinking before generation");
         NSCAssert([OCLlamaGenerationPrompt(prefix, @"qwen2") isEqualToString:prefix], @"Other model prompts must remain unchanged");
+        NSDictionary *task = @{@"response_format": @{@"type": @"json_schema", @"json_schema": @{@"name": @"device_task_result"}}};
+        NSCAssert(OCLlamaResponseGrammar(@{}, @[]) == nil, @"Ordinary chat must remain unconstrained");
+        NSString *chatTools = OCLlamaResponseGrammar(@{}, @[@"delegate_to_agent"]);
+        NSCAssert([chatTools containsString:@"root ::= ws (chat-result | tool-call)"], @"Routing calls and normal replies require valid JSON");
+        NSDictionary *submitted = @{@"messages": @[@{@"role": @"tool", @"name": @"delegate_to_agent",
+            @"content": @"{\"local_task_id\":1,\"remote_task_id\":\"remote1\"}"}]};
+        NSCAssert([OCLlamaResponseGrammar(submitted, @[@"delegate_to_agent"]) hasPrefix:@"root ::= ws (chat-result)"], @"Accepted delegation must not be resubmitted");
+        NSDictionary *rejected = @{@"messages": @[@{@"role": @"tool", @"name": @"delegate_to_agent", @"content": @"{\"error\":\"unknown agent\"}"}]};
+        NSCAssert([OCLlamaResponseGrammar(rejected, @[@"delegate_to_agent"]) hasPrefix:@"root ::= ws (chat-result | tool-call)"], @"Failed delegation may be corrected");
+        NSString *noTools = OCLlamaResponseGrammar(task, @[]);
+        NSCAssert([noTools containsString:@"input_required"], @"Task status grammar missing");
+        NSCAssert(![noTools containsString:@"tool-call"], @"No unoffered tool branch");
+        NSString *withTools = OCLlamaResponseGrammar(task, @[@"calendar.find"]);
+        NSCAssert([withTools containsString:@"tool-call"], @"Tool use must remain available");
+        NSCAssert([withTools containsString:@"calendar.find"], @"Offered tool name missing");
         NSArray *history = @[
             @{ @"role": @"user", @"content": @"Find my meeting" },
             @{ @"role": @"assistant", @"content": @"", @"tool_calls": @[
