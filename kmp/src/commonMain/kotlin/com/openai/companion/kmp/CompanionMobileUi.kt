@@ -428,20 +428,6 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         Text("正在加载对话…")
                     }
                     else -> {
-                        if (state.a2aTasks.isNotEmpty()) {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("远端任务 ${state.a2aTasks.count { !it.terminal }} 个进行中",
-                                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Row {
-                                    TextButton(onClick = {
-                                        keyboard?.hide()
-                                        showTasks = true
-                                    }) { Text("查看") }
-                                    TextButton(onClick = actions::refreshA2aTasks) { Text("刷新") }
-                                }
-                            }
-                        }
                         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 20.dp),
                             verticalArrangement = Arrangement.spacedBy(20.dp)) {

@@ -130,6 +130,7 @@
 - (void)testSettingsNavigationAndDraftPreservation {
     XCUIApplication *app = [self acceptanceApp];
     [app launch];
+    XCTAssertFalse(app.buttons[@"刷新"].exists, @"对话页不应常驻远端任务刷新栏。");
     NSString *draft = @"Draft retained across navigation";
     [self enterAcceptanceText:draft field:app.textViews[@"输入消息"] app:app];
     XCTAssertTrue(app.buttons[@"发送"].enabled, @"草稿输入未写入。");
@@ -138,6 +139,7 @@
     XCTAssertTrue(app.buttons[@"刷新"].exists);
     XCTAssertFalse(app.buttons[@"发送"].exists);
     [app.buttons[@"对话"] tap];
+    XCTAssertFalse(app.buttons[@"刷新"].exists);
     [self retainScreenshot:app name:@"Draft after navigation"];
     XCTAssertTrue(app.buttons[@"发送"].enabled, @"导航后草稿应仍可发送。");
     [self openSettingsSection:@"跨设备执行" app:app];
@@ -178,7 +180,7 @@
     if (enable.hittable) [enable tap];
     XCTAssertTrue([disable waitForExistenceWithTimeout:20]);
     [app.buttons[@"完成"] tap];
-    if (app.buttons[@"查看"].exists) [app.buttons[@"查看"] tap];
+    if (app.buttons[@"任务"].exists) [app.buttons[@"任务"] tap];
     NSUInteger priorTask = [self latestRemoteTaskNumber:app];
     if (app.buttons[@"对话"].exists) [app.buttons[@"对话"] tap];
     XCUIElement *message = app.textViews.firstMatch;
@@ -189,8 +191,8 @@
     XCTAssertTrue([app.buttons[@"发送一次"] waitForExistenceWithTimeout:120], @"未产生远端委托确认，不能计作跨设备路由成功。");
     XCTAssertTrue(app.staticTexts[@"Acceptance Mac"].exists);
     [app.buttons[@"发送一次"] tap];
-    XCTAssertTrue([app.buttons[@"查看"] waitForExistenceWithTimeout:20]);
-    [app.buttons[@"查看"] tap];
+    XCTAssertTrue([app.buttons[@"任务"] waitForExistenceWithTimeout:20]);
+    [app.buttons[@"任务"] tap];
     __block NSUInteger createdTask = 0;
     NSPredicate *newTask = [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
         createdTask = [self latestRemoteTaskNumber:app];
@@ -213,8 +215,8 @@
         XCTSkip(@"需要先完成并由服务端核验真实远端任务。");
     XCUIApplication *app = [self acceptanceApp];
     [app launch];
-    XCTAssertTrue([app.buttons[@"查看"] waitForExistenceWithTimeout:20]);
-    [app.buttons[@"查看"] tap];
+    XCTAssertTrue([app.buttons[@"任务"] waitForExistenceWithTimeout:20]);
+    [app.buttons[@"任务"] tap];
     NSNumber *number = fixture[@"completedLocalTaskId"] ?: @1;
     NSString *title = [NSString stringWithFormat:@"远端任务编号 %@ · Acceptance Mac", number];
     for (NSInteger i = 0; i < 10 && !app.staticTexts[title].exists; i++) [app swipeUp];
