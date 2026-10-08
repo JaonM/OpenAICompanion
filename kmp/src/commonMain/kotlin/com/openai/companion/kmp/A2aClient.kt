@@ -205,8 +205,12 @@ class A2aClient(
     }).toString()
 
     suspend fun delegate(agentId: String, taskText: String): String {
-        val agent = agents.value.firstOrNull { it.id == agentId && it.enabled }
-            ?: return "{\"error\":\"未找到已启用的远端 Agent\"}"
+        val configured = agents.value
+        val target = agentId.trim()
+        val knownId = configured.firstOrNull { it.id == target }
+        val agent = (if (knownId != null) knownId.takeIf { it.enabled }
+            else configured.filter { it.enabled && it.name == target }.singleOrNull())
+            ?: return "{\"error\":\"未找到唯一已启用的远端 Agent；请使用 list_remote_agents 返回的 agent_id\"}"
         val text = taskText.trim()
         if (text.isEmpty()) return "{\"error\":\"委托内容为空\"}"
         if (agent.requiresAuthentication && !agent.bearerSupported) {

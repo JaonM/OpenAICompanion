@@ -22,6 +22,39 @@ import kotlin.test.assertTrue
 
 class A2aClientTest {
     @Test
+    fun uniqueEnabledNameResolvesToCanonicalIdAndRequiresApproval() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val store = TestA2aStore()
+        var approvedId = ""
+        var sends = 0
+        val http = HttpClient(MockEngine { request ->
+            sends++
+            assertEquals("https://gateway.test/rpc", request.url.toString())
+            respond("""{"jsonrpc":"2.0","id":"1","result":{"task":{"id":"r1","status":{"state":"TASK_STATE_COMPLETED"}}}}""", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        })
+        val client = A2aClient(http, store, TestTokenStore(), scope) { approvedId = it.agent.id; true }
+        val card = Json.parseToJsonElement("""{"name":"Acceptance Mac","supportedInterfaces":[{"url":"https://gateway.test/rpc","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"skills":[]}""").jsonObject
+        try {
+            client.installDeviceAgent("https://gateway.test/card", card, "secret")
+            client.delegate("Acceptance Mac", "17 + 25")
+            assertEquals("https://gateway.test/card", approvedId)
+            assertEquals("https://gateway.test/card", store.tasks().single().agentId)
+            assertEquals(1, sends)
+            client.installDeviceAgent("https://gateway.test/other-card", card, "secret")
+            assertTrue(client.delegate("Acceptance Mac", "17 + 25").contains("error"))
+            assertEquals(1, sends)
+            assertTrue(client.delegate("Unknown", "17 + 25").contains("error"))
+            client.disableAgent("https://gateway.test/other-card")
+            client.disableAgent("https://gateway.test/card")
+            val spoof = JsonObject(card + ("name" to kotlinx.serialization.json.JsonPrimitive("https://gateway.test/card")))
+            client.installDeviceAgent("https://gateway.test/third-card", spoof, "secret")
+            assertTrue(client.delegate("https://gateway.test/card", "17 + 25").contains("error"))
+            assertTrue(client.delegate("Acceptance Mac", "17 + 25").contains("error"))
+            assertEquals(1, sends)
+        } finally { scope.cancel(); http.close() }
+    }
+
+    @Test
     fun gatewayReceiptRecoversLostAcknowledgementAfterClientRestartWithoutResend() = runBlocking {
         var sends = 0
         var messageId = ""
