@@ -64,7 +64,9 @@ class CrossDeviceServiceTest {
         val tokens = Tokens(); val client = A2aClient(http, Store(), tokens, scope) { true }
         val service = CrossDeviceService(http, client, tokens, { "{}" }, {}, "ios", { true }, { emptyList() }, { error("must not execute") })
         try {
+            assertTrue(service.listTools().isEmpty(), "Unconfigured device routing must not shadow standalone A2A")
             service.configure("https://gateway.test", "secret", "Phone", false)
+            assertEquals(setOf("list_execution_devices", "route_task"), service.listTools().map { it.name }.toSet())
             suspend fun route(capability: String, target: String? = null, resource: String? = null): String {
                 val args = buildJsonObject {
                     put("required_capabilities", JsonArray(listOf(JsonPrimitive(capability))))

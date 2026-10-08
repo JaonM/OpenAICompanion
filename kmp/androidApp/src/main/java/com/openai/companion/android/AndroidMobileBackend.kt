@@ -183,10 +183,12 @@ class AndroidMobileBackend(
         appDeleteSession(id).value()
         Unit
     }
-    override suspend fun send(text: String, onText: (String) -> Unit) = withContext(Dispatchers.IO) {
+    override suspend fun send(text: String, onText: (String) -> Unit) = send(text, onText, {})
+
+    override suspend fun send(text: String, onText: (String) -> Unit, onReasoning: (String) -> Unit) = withContext(Dispatchers.IO) {
         gate.foreground {
             bindings.registerAgentEventSink(object : AppAgentEventSink {
-                override fun onReasoningDelta(text: String) = Unit
+                override fun onReasoningDelta(text: String) = onReasoning(text)
                 override fun onTextDelta(text: String) = onText(text)
                 override fun onCompleted(finalText: String) = Unit
                 override fun onError(errorJson: String) = Unit

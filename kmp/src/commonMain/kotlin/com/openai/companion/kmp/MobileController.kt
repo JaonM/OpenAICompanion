@@ -25,6 +25,7 @@ interface MobileBackend {
     suspend fun openSession(id: Long): List<MobileMessage>
     suspend fun deleteSession(id: Long)
     suspend fun send(text: String, onText: (String) -> Unit)
+    suspend fun send(text: String, onText: (String) -> Unit, onReasoning: (String) -> Unit) = send(text, onText)
     fun cancel()
     suspend fun configureMcp(endpoint: String)
     suspend fun authorizeMcp(clientId: String)
@@ -71,6 +72,10 @@ interface MobileBackend {
     val mcpStatus: String
     val mcpStatusUpdates: StateFlow<String>? get() = null
     val modelStatus: String
+    val modelEngines: List<String> get() = emptyList()
+    val modelEngine: String get() = "llama.cpp"
+    val modelImportLabel: String get() = "导入 GGUF"
+    suspend fun selectModelEngine(engine: String) = Unit
 }
 
 /** Shared presentation and approval lifecycle for the Compose mobile screen. */
@@ -183,11 +188,11 @@ class MobileController(
 
     override fun send(text: String) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || state.value.activeSessionId == null || state.value.sending) return
+        if (trimmed.isEmpty() || state.value.activeSessionId == null || state.value.sending || state.value.modelChanging) return
         val id = state.value.activeSessionId ?: return
         mutableState.update {
             it.copy(
-                sending = true, error = null, streamedText = "",
+                sending = true, error = null, streamedText = "", streamedReasoning = "",
                 messages = it.messages + MobileMessage("user", trimmed),
             )
         }
@@ -195,9 +200,11 @@ class MobileController(
             try {
                 backend.refreshMcp()
                 syncSettings()
-                backend.send(trimmed) { delta ->
+                backend.send(trimmed, onText = { delta ->
                     mutableState.update { it.copy(streamedText = it.streamedText + delta) }
-                }
+                }, onReasoning = { delta ->
+                    mutableState.update { it.copy(streamedReasoning = boundedReasoning(it.streamedReasoning, delta)) }
+                })
                 mutableState.update {
                     it.copy(messages = backend.openSession(id), sessions = backend.sessions())
                 }
@@ -208,7 +215,7 @@ class MobileController(
                 }
             } finally {
                 syncSettings()
-                mutableState.update { it.copy(sending = false, streamedText = "") }
+                mutableState.update { it.copy(sending = false, streamedText = "", streamedReasoning = "") }
             }
         }
     }
@@ -235,12 +242,21 @@ class MobileController(
         launchMcpAction { backend.authorizeMcp(clientId) }
     }
 
-    override fun importModel() {
+    override fun selectModelEngine(engine: String) {
+        if (state.value.sending || state.value.modelChanging) return
+        mutableState.update { it.copy(modelChanging = true) }
         scope.launch {
-            perform {
-                backend.importModel()
-                syncSettings()
-            }
+            try { perform { backend.selectModelEngine(engine); syncSettings() } }
+            finally { mutableState.update { it.copy(modelChanging = false) } }
+        }
+    }
+
+    override fun importModel() {
+        if (state.value.sending || state.value.modelChanging) return
+        mutableState.update { it.copy(modelChanging = true) }
+        scope.launch {
+            try { perform { backend.importModel(); syncSettings() } }
+            finally { mutableState.update { it.copy(modelChanging = false) } }
         }
     }
 
@@ -412,6 +428,9 @@ class MobileController(
                 deviceToolsEnabled = backend.deviceToolsEnabled,
                 mcpStatus = backend.mcpStatus,
                 modelStatus = backend.modelStatus,
+                modelEngines = backend.modelEngines,
+                modelEngine = backend.modelEngine,
+                modelImportLabel = backend.modelImportLabel,
                 mealReminderEnabled = backend.mealReminderEnabled,
                 commuteReminderEnabled = backend.commuteReminderEnabled,
                 mealTime = backend.mealTime,
@@ -427,4 +446,13 @@ class MobileController(
             )
         }
     }
+}
+
+/** Bound live rendering while the full trace remains in Harness storage. */
+internal fun boundedReasoning(current: String, delta: String): String {
+    if (current.endsWith("…") && current.length >= 1200) return current
+    val combined = current + delta
+    if (combined.length <= 1200) return combined
+    val end = if (combined[1199].isHighSurrogate()) 1199 else 1200
+    return combined.take(end) + "…"
 }

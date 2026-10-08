@@ -1,5 +1,10 @@
 package com.openai.companion.ios
 
+import com.openai.companion.ios.llama.oc_mlx_generate
+import com.openai.companion.ios.llama.oc_mlx_download
+import com.openai.companion.ios.llama.oc_mlx_cancel
+import com.openai.companion.ios.llama.oc_mlx_unload
+import com.openai.companion.ios.llama.oc_llama_destroy
 import com.openai.companion.ios.llama.oc_llama_cancel
 import com.openai.companion.ios.llama.oc_llama_create
 import com.openai.companion.ios.llama.oc_llama_free_string
@@ -26,15 +31,37 @@ import platform.Foundation.NSFileManager
 import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSUserDefaults
 
-/** Kotlin/Native model callback for Harness; the C ABI delegates decoding to llama.cpp. */
+/** Kotlin/Native model callback; both native engines share the serialized model gate. */
 @OptIn(ExperimentalForeignApi::class)
 class IosLocalLlamaModel : AppModelServe {
-    private val engine = oc_llama_create() ?: error("无法创建 llama.cpp 引擎")
+    private var engine = oc_llama_create() ?: error("无法创建 llama.cpp 引擎")
     private val gate = Mutex()
     private val defaults = NSUserDefaults.standardUserDefaults
     private val importer = IosGgufImporter()
 
+    val selectedEngine: String get() = defaults.stringForKey("localInferenceEngine")?.takeIf { it == "MLX" } ?: "llama.cpp"
+    val importLabel: String get() = if (selectedEngine == "MLX") "下载 Qwen3.5 MLX 4bit（约 3.06 GB）" else "导入 GGUF"
+
+    suspend fun selectEngine(name: String) = withContext(Dispatchers.Default) {
+        require(name in listOf("llama.cpp", "MLX")) { "未知推理引擎" }
+        gate.withLock {
+            if (name != selectedEngine) {
+                oc_llama_destroy(engine)
+                engine = oc_llama_create() ?: error("无法创建 llama.cpp 引擎")
+                oc_mlx_unload()
+                defaults.setObject(name, forKey = "localInferenceEngine")
+            }
+        }
+    }
+
     suspend fun importModel() {
+        if (selectedEngine == "MLX") {
+            withContext(Dispatchers.Default) { gate.withLock {
+                oc_mlx_unload()
+                checkNative(oc_mlx_download(mlxDirectory()))
+            } }
+            return
+        }
         val imported = importer.import()
         withContext(Dispatchers.Default) {
             gate.withLock {
@@ -60,24 +87,25 @@ class IosLocalLlamaModel : AppModelServe {
     override suspend fun complete(requestJson: String, callback: ModelStreamCallback): Unit =
         withContext(Dispatchers.Default) {
             gate.withLock {
-                val path = modelPath() ?: error("请先导入 GGUF 模型")
+                val useMLX = selectedEngine == "MLX"
+                val path = if (useMLX) mlxDirectory().also { check(mlxReady()) { "请先下载 MLX 模型" } }
+                    else modelPath() ?: error("请先导入 GGUF 模型")
                 memScoped {
-                    checkNative(oc_llama_load(engine, path))
+                    if (!useMLX) checkNative(oc_llama_load(engine, path))
                     val sink = StableRef.create(ChunkSink(callback))
                     try {
                         LocalModelContext.complete(requestJson) { fittedRequest ->
-                            checkNative(oc_llama_generate(
-                                engine, fittedRequest, MAX_OUTPUT_TOKENS,
-                                staticCFunction { chunk, context ->
+                            val onChunk = staticCFunction { chunk: CPointer<ByteVar>?, context: kotlinx.cinterop.COpaquePointer? ->
                                     if (context != null) {
                                         val target = context.asStableRef<ChunkSink>().get()
                                         target.emit(chunk?.toKString())
                                     }
-                                }, sink.asCPointer(),
-                            ))
+                                }
+                            checkNative(if (useMLX) oc_mlx_generate(path, fittedRequest, MAX_OUTPUT_TOKENS, onChunk, sink.asCPointer())
+                                else oc_llama_generate(engine, fittedRequest, MAX_OUTPUT_TOKENS, onChunk, sink.asCPointer()))
                         }
                         sink.get().failure?.let { throw it }
-                        if (defaults.boolForKey("acceptanceActivateImportedModel")) {
+                        if (!useMLX && defaults.boolForKey("acceptanceActivateImportedModel")) {
                             val domain = NSBundle.mainBundle.bundleIdentifier?.let(defaults::persistentDomainForName)
                             val previous = domain?.get(MODEL_FILE_KEY) as? String
                             val name = path.substringAfterLast('/')
@@ -98,9 +126,13 @@ class IosLocalLlamaModel : AppModelServe {
             }
         }
 
-    fun cancel() = oc_llama_cancel(engine)
+    fun cancel() {
+        oc_llama_cancel(engine)
+        oc_mlx_cancel()
+    }
 
     fun status(): String {
+        if (selectedEngine == "MLX") return if (mlxReady()) "MLX 模型可用 · Qwen3.5-4B-MLX-4bit" else "请下载 Qwen3.5 MLX 4bit 模型"
         val path = modelPath() ?: return "请导入 GGUF 模型"
         return if (NSFileManager.defaultManager.fileExistsAtPath(path)) "端侧模型已导入 · ${path.substringAfterLast('/').removeSuffix(".gguf")}"
             else "模型文件丢失，请重新导入"
@@ -112,6 +144,10 @@ class IosLocalLlamaModel : AppModelServe {
             name == name.substringAfterLast('\\') && name != "..") { "本地模型文件名无效" }
         return modelDirectory() + name
     }
+
+    private fun mlxDirectory() = NSHomeDirectory() + "/Library/Application Support/OpenAICompanion/MLXModels/Qwen3.5-4B-MLX-4bit"
+    private fun mlxReady() = listOf("config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json", "chat_template.jinja")
+        .all { NSFileManager.defaultManager.fileExistsAtPath(mlxDirectory() + "/" + it) }
 
     private fun modelDirectory() = NSHomeDirectory() + "/Library/Application Support/OpenAICompanion/Models/"
 

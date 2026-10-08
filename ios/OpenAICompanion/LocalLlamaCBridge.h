@@ -17,6 +17,13 @@ char *oc_llama_generate(OCLlamaHandle handle, const char *request_json_utf8,
 void oc_llama_cancel(OCLlamaHandle handle);
 void oc_llama_free_string(char *value);
 
+/* MLX Swift adapter; errors use the same malloc/free ownership as llama.cpp. */
+char *oc_mlx_generate(const char *model_directory, const char *request_json,
+                      int max_tokens, OCLlamaOnChunk on_chunk, void *context);
+char *oc_mlx_download(const char *model_directory);
+void oc_mlx_cancel(void);
+void oc_mlx_unload(void);
+
 #ifdef __cplusplus
 }
 #endif

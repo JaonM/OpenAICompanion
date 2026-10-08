@@ -257,7 +257,7 @@ class CrossDeviceService(
         }
     }
 
-    override suspend fun listTools() = listOf(
+    override suspend fun listTools() = if (endpoint.isBlank()) emptyList() else listOf(
         McpToolDescriptor("list_execution_devices", "List paired devices, exact capability names, resource references and availability. Use only when a task needs device execution.", "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}", routingPolicy),
         McpToolDescriptor("route_task", "Resolve execution for a task. Ordinary chat stays local. Use model.complete for reasoning, arithmetic and text generation. Specify exact capability names from list_execution_devices; never invent capabilities or resources. This tool selects a device but does not execute. For REMOTE use delegate_to_agent with the returned agent_id. NEEDS_USER_ACTION means ask the user; do not silently switch data sources.",
             """{"type":"object","properties":{"required_capabilities":{"type":"array","items":{"type":"string"}},"resource_refs":{"type":"array","items":{"type":"string"}},"target_device":{"type":"string"}},"required":["required_capabilities"],"additionalProperties":false}""", routingPolicy),

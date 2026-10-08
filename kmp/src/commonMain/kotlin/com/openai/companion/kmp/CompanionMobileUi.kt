@@ -1,5 +1,7 @@
 package com.openai.companion.kmp
 
+import kotlinx.serialization.json.jsonObject
+
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -28,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.graphics.SolidColor
@@ -93,8 +96,13 @@ data class MobileUiState(
     val activeSessionId: Long? = null,
     val messages: List<MobileMessage> = emptyList(),
     val streamedText: String = "",
+    val streamedReasoning: String = "",
     val sending: Boolean = false,
     val modelStatus: String = "未导入端侧模型",
+    val modelEngines: List<String> = emptyList(),
+    val modelEngine: String = "llama.cpp",
+    val modelImportLabel: String = "导入 GGUF",
+    val modelChanging: Boolean = false,
     val mealReminderEnabled: Boolean = false,
     val commuteReminderEnabled: Boolean = false,
     val mealTime: String = "19:00",
@@ -133,6 +141,7 @@ interface MobileActions {
     fun authorizeMcp(clientId: String)
     fun answerApproval(id: Long, allow: Boolean)
     fun answerInput(id: Long, contentJson: String?)
+    fun selectModelEngine(engine: String) = Unit
     fun importModel()
     fun saveProactiveSettings(mealEnabled: Boolean, mealTime: String,
         commuteEnabled: Boolean, commuteTime: String)
@@ -165,7 +174,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var followLatest by remember { mutableStateOf(true) }
     var draft by remember { mutableStateOf("") }
     val sendDraft = {
-        if (!state.sending && state.activeSessionId != null && draft.isNotBlank()) {
+        if (!state.sending && !state.modelChanging && state.activeSessionId != null && draft.isNotBlank()) {
             followSentMessage = true
             followLatest = true
             actions.send(draft.trim())
@@ -205,11 +214,14 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
             if (!scrolling && nearLatest) followLatest = true
         }
     }
-    LaunchedEffect(state.messages.size, state.streamedText.length, state.sending) {
+    LaunchedEffect(state.messages.size, state.streamedText.length, state.streamedReasoning.length, state.sending, state.a2aTasks) {
         if (!showSettings && !showTasks && (followLatest || followSentMessage)) {
-            val last = state.messages.size + (if (state.streamedText.isNotEmpty()) 1 else 0) +
+            val last = state.messages.size +
+                (if (state.sending && state.streamedReasoning.isNotEmpty()) 1 else 0) +
+                (if (state.sending && state.streamedText.isNotEmpty()) 1 else 0) +
                 (if (state.sending) 1 else 0)
-            if (last >= 0) listState.scrollToItem(last)
+            // Schedule scrolling with layout instead of forcing remeasure while text nodes update.
+            if (last >= 0) listState.requestScrollToItem(last)
             followSentMessage = false
         }
     }
@@ -264,8 +276,19 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         }
                         if (settingsSection == "端侧模型") {
                             MobileSectionTitle("端侧模型")
-                            Text(state.modelStatus)
-                            OutlinedButton(onClick = actions::importModel) { Text("导入 GGUF") }
+                            if (state.modelEngines.isNotEmpty()) {
+                                Text("推理引擎", style = MaterialTheme.typography.labelLarge)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    state.modelEngines.forEach { engine ->
+                                        FilterChip(selected = state.modelEngine == engine,
+                                            enabled = !state.sending && !state.modelChanging,
+                                            onClick = { actions.selectModelEngine(engine) }, label = { Text(engine) })
+                                    }
+                                }
+                            }
+                            Text(if (state.modelChanging) "正在准备模型…" else state.modelStatus)
+                            OutlinedButton(enabled = !state.sending && !state.modelChanging,
+                                onClick = actions::importModel) { Text(state.modelImportLabel) }
                         }
                         if (settingsSection == "工具扩展") {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -469,11 +492,28 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                     }
                                 }
                             }
-                            itemsIndexed(state.messages) { index, message ->
-                                MobileMessageRow(message, Modifier.testTag("conversation-message-$index-${message.role}"))
+                            itemsIndexed(state.messages, key = { index, message -> "message-$index-${message.role}" },
+                                contentType = { _, message -> message.role }) { index, message ->
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    MobileMessageRow(message, Modifier.testTag("conversation-message-$index-${message.role}"))
+                                    val task = delegatedTaskId(message)?.let { id -> state.a2aTasks.firstOrNull { it.id == id } }
+                                    if (task != null) {
+                                        val name = state.a2aAgents.firstOrNull { it.id == task.agentId }?.name ?: task.agentId
+                                        A2aTaskCard(task, name, actions)
+                                    }
+                                }
                             }
-                            if (state.streamedText.isNotEmpty()) {
-                                item { MobileMessageRow(MobileMessage("assistant", state.streamedText)) }
+                            if (state.sending && state.streamedReasoning.isNotEmpty()) {
+                                item(key = "reasoning-streaming") {
+                                    Text("思考过程：${state.streamedReasoning}",
+                                        modifier = Modifier.fillMaxWidth().padding(start = 38.dp).testTag("reasoning-streaming"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            if (state.sending && state.streamedText.isNotEmpty()) {
+                                item(key = "assistant-streaming") { MobileMessageRow(MobileMessage("assistant", state.streamedText), Modifier.testTag("assistant-streaming")) }
                             }
                             if (state.sending) {
                                 item(key = "assistant-thinking") { MobileThinkingBubble(state.streamedText.isEmpty()) }
@@ -515,7 +555,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                         }
                                     })
                                 if (state.sending) TextButton(onClick = actions::cancel) { Text("停止") }
-                                else FilledIconButton(enabled = draft.isNotBlank(),
+                                else FilledIconButton(enabled = draft.isNotBlank() && !state.modelChanging,
                                     modifier = Modifier.testTag("send-message").semantics { contentDescription = "发送" },
                                     onClick = sendDraft) {
                                     Icon(sendPaperPlane, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -795,4 +835,13 @@ private fun MobileMessageRow(message: MobileMessage, modifier: Modifier = Modifi
             }
         }
     }
+}
+
+/** Associate a durable remote receipt with its originating conversation turn. */
+internal fun delegatedTaskId(message: MobileMessage): Long? {
+    if (message.role != "tool" || !message.content.startsWith("delegate_to_agent: ")) return null
+    return runCatching {
+        Json.parseToJsonElement(message.content.removePrefix("delegate_to_agent: "))
+            .jsonObject["local_task_id"]?.jsonPrimitive?.content?.toLongOrNull()
+    }.getOrNull()
 }

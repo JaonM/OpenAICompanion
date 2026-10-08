@@ -94,6 +94,9 @@ class IosMobileBackend(
     private val importLocalModel: suspend () -> Unit,
     private val localModelStatus: () -> String,
     private val cancelLocalModel: () -> Unit,
+    private val localModelEngine: () -> String = { "llama.cpp" },
+    private val localModelImportLabel: () -> String = { "导入 GGUF" },
+    private val selectLocalModelEngine: suspend (String) -> Unit = {},
 ) : MobileBackend {
     private val codec = CompanionConversationCodec()
     private val bindings = IosHarnessBindings()
@@ -167,6 +170,10 @@ class IosMobileBackend(
     override val mcpStatus: String get() = mcp.status
     override val mcpStatusUpdates: StateFlow<String> get() = mcp.statusUpdates
     override val modelStatus: String get() = localModelStatus()
+    override val modelEngines: List<String> get() = listOf("llama.cpp", "MLX")
+    override val modelEngine: String get() = localModelEngine()
+    override val modelImportLabel: String get() = localModelImportLabel()
+    override suspend fun selectModelEngine(engine: String) = selectLocalModelEngine(engine)
     override val a2aAgents: StateFlow<List<A2aAgent>> get() = a2a.agents
     override val a2aTasks: StateFlow<List<A2aTask>> get() = a2a.tasks
 
@@ -244,10 +251,12 @@ class IosMobileBackend(
         Unit
     }
 
-    override suspend fun send(text: String, onText: (String) -> Unit) = withContext(Dispatchers.Default) {
+    override suspend fun send(text: String, onText: (String) -> Unit) = send(text, onText, {})
+
+    override suspend fun send(text: String, onText: (String) -> Unit, onReasoning: (String) -> Unit) = withContext(Dispatchers.Default) {
         agentGate.foreground {
         bindings.registerAgentEventSink(object : AppAgentEventSink {
-            override fun onReasoningDelta(text: String) = Unit
+            override fun onReasoningDelta(text: String) = onReasoning(text)
             override fun onTextDelta(text: String) = onText(text)
             override fun onCompleted(finalText: String) = Unit
             override fun onError(errorJson: String) = Unit

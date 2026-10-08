@@ -12,6 +12,9 @@ class IosMobileHost(
     importLocalModel: suspend () -> Unit,
     localModelStatus: () -> String,
     cancelLocalModel: () -> Unit,
+    localModelEngine: () -> String = { "llama.cpp" },
+    localModelImportLabel: () -> String = { "导入 GGUF" },
+    selectLocalModelEngine: suspend (String) -> Unit = {},
 ) {
     private val scope = MainScope()
     private val controller = MobileController(scope) { approve, requestInput, approveA2a ->
@@ -23,6 +26,9 @@ class IosMobileHost(
             importLocalModel = importLocalModel,
             localModelStatus = localModelStatus,
             cancelLocalModel = cancelLocalModel,
+            localModelEngine = localModelEngine,
+            localModelImportLabel = localModelImportLabel,
+            selectLocalModelEngine = selectLocalModelEngine,
         )
     }
 
@@ -41,5 +47,8 @@ fun createIosMobileHost(): IosMobileHost {
         importLocalModel = localModel::importModel,
         localModelStatus = localModel::status,
         cancelLocalModel = localModel::cancel,
+        localModelEngine = { localModel.selectedEngine },
+        localModelImportLabel = { localModel.importLabel },
+        selectLocalModelEngine = localModel::selectEngine,
     )
 }

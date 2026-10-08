@@ -22,6 +22,44 @@ import kotlin.test.assertTrue
 
 class MobileControllerTest {
     @Test
+    fun remoteResultIsLinkedOnlyToTheActualDelegationReceipt() {
+        assertEquals(42L, delegatedTaskId(MobileMessage("tool", "delegate_to_agent: {\"local_task_id\":42}")))
+        assertNull(delegatedTaskId(MobileMessage("user", "delegate_to_agent: {\"local_task_id\":42}")))
+        assertNull(delegatedTaskId(MobileMessage("tool", "other: {\"local_task_id\":42}")))
+        assertNull(delegatedTaskId(MobileMessage("tool", "delegate_to_agent: malformed")))
+    }
+
+    @Test
+    fun reasoningPreviewIsBoundedWithoutSplittingEmoji() {
+        assertEquals("思考中", boundedReasoning("思考", "中"))
+        val limited = boundedReasoning("a".repeat(1199), "😀tail")
+        assertEquals("a".repeat(1199) + "…", limited)
+        assertEquals(limited, boundedReasoning(limited, "more"))
+    }
+
+    @Test
+    fun reasoningStreamsBeforeAnswerAndClearsWhenFinished() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val controller = MobileController(scope) { approve, _ ->
+            object : MobileBackend by FakeMobileBackend(approve) {
+                override suspend fun send(text: String, onText: (String) -> Unit, onReasoning: (String) -> Unit) {
+                    onReasoning("先计算"); onReasoning("17+25")
+                    release.await(); onText("42")
+                }
+            }
+        }
+        try {
+            controller.start().join(); controller.send("17+25")
+            val state = withTimeout(1000) { controller.state.first { it.streamedReasoning == "先计算17+25" } }
+            assertTrue(state.sending); assertEquals("", state.streamedText)
+            release.complete(Unit)
+            val done = withTimeout(1000) { controller.state.first { !it.sending } }
+            assertEquals("", done.streamedReasoning)
+        } finally { scope.cancel() }
+    }
+
+    @Test
     fun a2aDelegationApprovalIsPinnedToItsRequestAndRequiresAnExplicitAnswer() = runBlocking {
         lateinit var approveA2a: suspend (A2aDelegation) -> Boolean
         val controller = MobileController(this) { approve, _, a2a ->
@@ -210,6 +248,55 @@ class MobileControllerTest {
             controller.state.first { !it.mcpBusy && it.error == "MCP endpoint is unavailable" }
         }
         assertFalse(failed.mcpBusy)
+    }
+
+    @Test
+    fun engineSwitchBlocksConcurrentDownloadAndSendThenPublishesSelection() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        var selected = "llama.cpp"
+        var switches = 0
+        var downloads = 0
+        var sends = 0
+        val controller = MobileController(this) { approve, _ ->
+            val delegate = FakeMobileBackend(approve)
+            object : MobileBackend by delegate {
+                override val modelEngines = listOf("llama.cpp", "MLX")
+                override val modelEngine: String get() = selected
+                override val modelImportLabel: String get() = if (selected == "MLX") "下载 MLX" else "导入 GGUF"
+                override suspend fun selectModelEngine(engine: String) { switches++; release.await(); selected = engine }
+                override suspend fun importModel() { downloads++ }
+                override suspend fun send(text: String, onText: (String) -> Unit) { sends++ }
+            }
+        }
+        controller.start().join()
+        controller.selectModelEngine("MLX")
+        assertTrue(controller.state.value.modelChanging)
+        controller.selectModelEngine("llama.cpp")
+        controller.importModel()
+        controller.send("should not send during model switch")
+        release.complete(Unit)
+        val done = withTimeout(1_000) { controller.state.first { !it.modelChanging && it.modelEngine == "MLX" } }
+        assertEquals(1, switches)
+        assertEquals(0, downloads)
+        assertEquals(0, sends)
+        assertEquals("下载 MLX", done.modelImportLabel)
+    }
+
+    @Test
+    fun failedModelDownloadReenablesControlsAndSuppressesDuplicateRequests() = runBlocking {
+        var downloads = 0
+        val controller = MobileController(this) { approve, _ ->
+            val delegate = FakeMobileBackend(approve)
+            object : MobileBackend by delegate {
+                override suspend fun importModel() { downloads++; error("model checksum mismatch") }
+            }
+        }
+        controller.start().join()
+        controller.importModel()
+        controller.importModel()
+        val failed = withTimeout(1_000) { controller.state.first { !it.modelChanging && it.error == "model checksum mismatch" } }
+        assertEquals(1, downloads)
+        assertFalse(failed.modelChanging)
     }
 
     private class FakeMobileBackend(

@@ -22,6 +22,15 @@ int main(void) {
         NSCAssert(OCLlamaStreamingChatText(@"{\"tool_call\":{\"name\":\"x\",\"arguments\":{\"text\":\"secret") == nil, @"Tool arguments must never stream as chat text");
         NSCAssert(OCLlamaStreamingChatText(@"{\"state\":\"completed\",\"text\":\"42") == nil, @"Task state JSON must stay atomic");
         NSCAssert(OCLlamaStreamingChatText(@"{\"text\":\"\\uDE00") == nil, @"Invalid lone surrogates must not stream");
+        NSString *reasoningStream = @"逐步思考😀</think>{\"text\":\"42\"}";
+        NSString *priorReasoning = @"";
+        for (NSUInteger n = 1; n <= reasoningStream.length; n++) {
+            NSString *partial = OCLlamaStreamingReasoningText([reasoningStream substringToIndex:n]);
+            NSCAssert(priorReasoning.length == 0 || [partial hasPrefix:priorReasoning], @"Reasoning deltas must be monotonic");
+            NSCAssert(![partial containsString:@"</think>"] && ![partial containsString:@"text"], @"Thinking markers and answers cannot leak");
+            priorReasoning = partial;
+        }
+        NSCAssert([priorReasoning isEqualToString:@"逐步思考😀"], @"Reasoning must end exactly before the marker");
         NSString *encodedText = @"{\"text\":\"你好\\n\\\"quoted\\\"\\\\path \\uD83D\\uDE00\"}";
         NSString *previousText = @"";
         for (NSUInteger length = 1; length <= encodedText.length; length++) {
@@ -34,6 +43,8 @@ int main(void) {
         NSCAssert([previousText isEqualToString:@"你好\n\"quoted\"\\path 😀"], @"Final streamed answer must exactly preserve escapes and Unicode");
         NSDictionary *task = @{@"response_format": @{@"type": @"json_schema", @"json_schema": @{@"name": @"device_task_result"}}};
         NSCAssert(OCLlamaResponseGrammar(@{}, @[]) == nil, @"Ordinary chat must remain unconstrained");
+        NSString *requiredTool = OCLlamaResponseGrammar(@{@"tool_choice": @"required"}, @[@"route_task"]);
+        NSCAssert([requiredTool hasPrefix:@"root ::= ws (tool-call) ws"], @"Required execution cannot be replaced by a chat acknowledgement");
         NSString *chatTools = OCLlamaResponseGrammar(@{}, @[@"delegate_to_agent"]);
         NSCAssert([chatTools containsString:@"root ::= ws (chat-result | tool-call)"], @"Routing calls and normal replies require valid JSON");
         NSString *noTools = OCLlamaResponseGrammar(task, @[]);
@@ -49,6 +60,12 @@ int main(void) {
         NSCAssert([agentsGrammar containsString:@"agent-id ::="], @"Discovered IDs must constrain delegation arguments");
         NSCAssert([agentsGrammar containsString:@"generic-call | delegate-call"], @"Other tools must stay available");
         NSCAssert([agentsGrammar containsString:@"https://example.com/mac"], @"URL literals must not contain unsupported GBNF slash escapes");
+        NSDictionary *routed = @{@"messages": @[
+            @{@"role": @"tool", @"name": @"list_remote_agents", @"content": @"[{\"agent_id\":\"https://example.com/old\"}]"},
+            @{@"role": @"tool", @"name": @"route_task", @"content": @"{\"decision\":\"REMOTE\",\"agent_id\":\"https://example.com/new\"}"}
+        ]};
+        NSString *routedGrammar = OCLlamaResponseGrammar(routed, @[@"delegate_to_agent"]);
+        NSCAssert([routedGrammar containsString:@"https://example.com/new"] && ![routedGrammar containsString:@"https://example.com/old"], @"Current route must override older discovered targets");
         NSString *delegateOnly = OCLlamaResponseGrammar(discovery, @[@"delegate_to_agent"]);
         NSCAssert([delegateOnly containsString:@"tool-call ::= delegate-call"], @"Delegation must not escape through generic arguments");
         NSCAssert(![delegateOnly containsString:@"generic-call ::="], @"No generic delegation bypass");

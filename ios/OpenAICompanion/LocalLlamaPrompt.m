@@ -19,6 +19,16 @@ NSDictionary<NSString *, NSString *> *OCLlamaSplitThinkingResponse(NSString *out
     };
 }
 
+NSString *OCLlamaStreamingReasoningText(NSString *output) {
+    NSString *marker = @"</think>";
+    NSRange end = [output rangeOfString:marker];
+    if (end.location != NSNotFound) return [output substringToIndex:end.location];
+    for (NSUInteger n = MIN(output.length, marker.length - 1); n > 0; n--) {
+        if ([output hasSuffix:[marker substringToIndex:n]]) return [output substringToIndex:output.length - n];
+    }
+    return output;
+}
+
 NSString *OCLlamaStreamingChatText(NSString *output) {
     NSRange prefix = [output rangeOfString:@"^\\s*\\{\\s*\"text\"\\s*:\\s*\"" options:NSRegularExpressionSearch];
     if (prefix.location == NSNotFound) return nil;
@@ -60,9 +70,10 @@ NSString *OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *too
         [format[@"json_schema"] isKindOfClass:NSDictionary.class] &&
         [format[@"json_schema"][@"name"] isEqual:@"device_task_result"];
     if (!deviceTask && !toolNames.count) return nil;
+    BOOL requireTool = toolNames.count && [request[@"tool_choice"] isEqual:@"required"];
     NSMutableString *grammar = [NSMutableString stringWithString:
-        deviceTask ? @"root ::= ws (task-result" : @"root ::= ws (chat-result"];
-    if (toolNames.count) [grammar appendString:@" | tool-call"];
+        requireTool ? @"root ::= ws (tool-call" : (deviceTask ? @"root ::= ws (task-result" : @"root ::= ws (chat-result")];
+    if (toolNames.count && !requireTool) [grammar appendString:@" | tool-call"];
     [grammar appendString:@") ws\n"
         @"task-result ::= \"{\" ws \"\\\"state\\\"\" ws \":\" ws state ws \",\" ws \"\\\"text\\\"\" ws \":\" ws string ws \"}\"\n"
         @"chat-result ::= \"{\" ws \"\\\"text\\\"\" ws \":\" ws string ws \"}\"\n"
@@ -78,8 +89,14 @@ NSString *OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *too
         NSArray *agentIDs = @[];
         for (NSDictionary *message in request[@"messages"]) {
             if (![message isKindOfClass:NSDictionary.class] || ![message[@"role"] isEqual:@"tool"] ||
-                ![message[@"name"] isEqual:@"list_remote_agents"] ||
                 ![message[@"content"] isKindOfClass:NSString.class]) continue;
+            if ([message[@"name"] isEqual:@"route_task"]) {
+                id route = [NSJSONSerialization JSONObjectWithData:[message[@"content"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                agentIDs = [route isKindOfClass:NSDictionary.class] && [route[@"agent_id"] isKindOfClass:NSString.class] &&
+                    [route[@"agent_id"] length] && ([@[@"REMOTE", @"WAITING"] containsObject:route[@"decision"]]) ? @[route[@"agent_id"]] : @[];
+                continue;
+            }
+            if (![message[@"name"] isEqual:@"list_remote_agents"]) continue;
             id agents = [NSJSONSerialization JSONObjectWithData:
                 [message[@"content"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
             NSMutableArray *ids = [NSMutableArray array];

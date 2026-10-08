@@ -218,19 +218,21 @@ static NSString *OCChunkJSON(NSString *text, NSString *field = @"content") {
     // Chat text can stream from its JSON envelope; task states and tool calls stay atomic.
     const bool streamChat = ![request[@"response_format"] isKindOfClass:NSDictionary.class];
     NSString *streamedAnswer = @"";
-    bool reasoningSent = false;
+    NSString *streamedReasoning = @"";
     auto emitProgress = [&]() {
-        if (!buffered || !streamChat) return;
+        if (!buffered) return;
         NSString *answer = bufferedOutput;
         if (thinking) {
+            NSString *reasoning = OCLlamaStreamingReasoningText(bufferedOutput);
+            if (reasoning.length > streamedReasoning.length) {
+                onChunk(OCChunkJSON([reasoning substringFromIndex:streamedReasoning.length], @"reasoning_content"));
+                streamedReasoning = [reasoning copy];
+            }
             NSDictionary *parts = OCLlamaSplitThinkingResponse(bufferedOutput);
             if (parts == nil) return;
-            if (!reasoningSent) {
-                if ([parts[@"reasoning"] length]) onChunk(OCChunkJSON(parts[@"reasoning"], @"reasoning_content"));
-                reasoningSent = true;
-            }
             answer = parts[@"text"];
         }
+        if (!streamChat) return;
         NSString *text = grammar != nil ? OCLlamaStreamingChatText(answer) : answer;
         if (text.length > streamedAnswer.length && (streamedAnswer.length == 0 || [text hasPrefix:streamedAnswer])) {
             onChunk(OCChunkJSON([text substringFromIndex:streamedAnswer.length]));
@@ -295,7 +297,9 @@ static NSString *OCChunkJSON(NSString *text, NSString *field = @"content") {
         if (thinking) {
             NSDictionary *parts = OCLlamaSplitThinkingResponse(bufferedOutput);
             if (parts == nil) return @"模型思考未完成，请重试。";
-            if (!reasoningSent && [parts[@"reasoning"] length]) onChunk(OCChunkJSON(parts[@"reasoning"], @"reasoning_content"));
+            NSString *reasoning = parts[@"reasoning"];
+            if (reasoning.length > streamedReasoning.length)
+                onChunk(OCChunkJSON([reasoning substringFromIndex:streamedReasoning.length], @"reasoning_content"));
             bufferedOutput = [parts[@"text"] mutableCopy];
         }
         NSString *output = [bufferedOutput stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];

@@ -19,4 +19,6 @@ FOUNDATION_EXPORT NSString * _Nullable OCLlamaStreamingChatText(NSString *output
 /** Constrains task states and offered tool calls; tool-enabled chat replies use a text envelope. */
 FOUNDATION_EXPORT NSString * _Nullable OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *toolNames);
 
+FOUNDATION_EXPORT NSString *OCLlamaStreamingReasoningText(NSString *output);
+
 NS_ASSUME_NONNULL_END
