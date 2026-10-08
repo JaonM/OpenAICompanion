@@ -19,6 +19,41 @@ NSDictionary<NSString *, NSString *> *OCLlamaSplitThinkingResponse(NSString *out
     };
 }
 
+NSString *OCLlamaStreamingChatText(NSString *output) {
+    NSRange prefix = [output rangeOfString:@"^\\s*\\{\\s*\"text\"\\s*:\\s*\"" options:NSRegularExpressionSearch];
+    if (prefix.location == NSNotFound) return nil;
+    NSUInteger start = NSMaxRange(prefix), end = start;
+    while (end < output.length) {
+        unichar c = [output characterAtIndex:end];
+        if (c == '"') break;
+        if (c == '\\') {
+            if (end + 1 >= output.length) break;
+            if ([output characterAtIndex:end + 1] == 'u') {
+                if (end + 6 > output.length) break;
+                unsigned value = 0;
+                NSScanner *hex = [NSScanner scannerWithString:[output substringWithRange:NSMakeRange(end + 2, 4)]];
+                if (![hex scanHexInt:&value] || !hex.isAtEnd) return nil;
+                if (value >= 0xD800 && value <= 0xDBFF) {
+                    if (end + 12 > output.length) break;
+                    if (![[output substringWithRange:NSMakeRange(end + 6, 2)] isEqualToString:@"\\u"]) return nil;
+                    unsigned low = 0;
+                    hex = [NSScanner scannerWithString:[output substringWithRange:NSMakeRange(end + 8, 4)]];
+                    if (![hex scanHexInt:&low] || !hex.isAtEnd || low < 0xDC00 || low > 0xDFFF) return nil;
+                    end += 12;
+                } else {
+                    if (value >= 0xDC00 && value <= 0xDFFF) return nil;
+                    end += 6;
+                }
+            } else end += 2;
+        } else end++;
+    }
+    NSString *literal = [NSString stringWithFormat:@"[\"%@\"]", [output substringWithRange:NSMakeRange(start, end - start)]];
+    NSData *data = [literal dataUsingEncoding:NSUTF8StringEncoding];
+    if (data == nil) return nil;
+    NSArray *decoded = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [decoded isKindOfClass:NSArray.class] && [decoded.firstObject isKindOfClass:NSString.class] ? decoded.firstObject : nil;
+}
+
 NSString *OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *toolNames) {
     NSDictionary *format = request[@"response_format"];
     BOOL deviceTask = [format isKindOfClass:NSDictionary.class] && [format[@"type"] isEqual:@"json_schema"] &&

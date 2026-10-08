@@ -215,6 +215,28 @@ static NSString *OCChunkJSON(NSString *text, NSString *field = @"content") {
 
     std::string pendingUTF8;
     NSMutableString *bufferedOutput = buffered ? [NSMutableString string] : nil;
+    // Chat text can stream from its JSON envelope; task states and tool calls stay atomic.
+    const bool streamChat = ![request[@"response_format"] isKindOfClass:NSDictionary.class];
+    NSString *streamedAnswer = @"";
+    bool reasoningSent = false;
+    auto emitProgress = [&]() {
+        if (!buffered || !streamChat) return;
+        NSString *answer = bufferedOutput;
+        if (thinking) {
+            NSDictionary *parts = OCLlamaSplitThinkingResponse(bufferedOutput);
+            if (parts == nil) return;
+            if (!reasoningSent) {
+                if ([parts[@"reasoning"] length]) onChunk(OCChunkJSON(parts[@"reasoning"], @"reasoning_content"));
+                reasoningSent = true;
+            }
+            answer = parts[@"text"];
+        }
+        NSString *text = grammar != nil ? OCLlamaStreamingChatText(answer) : answer;
+        if (text.length > streamedAnswer.length && (streamedAnswer.length == 0 || [text hasPrefix:streamedAnswer])) {
+            onChunk(OCChunkJSON([text substringFromIndex:streamedAnswer.length]));
+            streamedAnswer = [text copy];
+        }
+    };
     for (int32_t i = 0; i < outputLimit; i++) {
         if (shouldCancel()) return @"生成已取消";
         llama_token token = llama_sampler_sample(sampler.get(), context.get(), -1);
@@ -237,6 +259,7 @@ static NSString *OCChunkJSON(NSString *text, NSString *field = @"content") {
                 if (buffered) [bufferedOutput appendString:text];
                 else onChunk(OCChunkJSON(text));
                 pendingUTF8.clear();
+                emitProgress();
             }
         }
         if (!thinkingFinished) {
@@ -272,7 +295,7 @@ static NSString *OCChunkJSON(NSString *text, NSString *field = @"content") {
         if (thinking) {
             NSDictionary *parts = OCLlamaSplitThinkingResponse(bufferedOutput);
             if (parts == nil) return @"模型思考未完成，请重试。";
-            if ([parts[@"reasoning"] length]) onChunk(OCChunkJSON(parts[@"reasoning"], @"reasoning_content"));
+            if (!reasoningSent && [parts[@"reasoning"] length]) onChunk(OCChunkJSON(parts[@"reasoning"], @"reasoning_content"));
             bufferedOutput = [parts[@"text"] mutableCopy];
         }
         NSString *output = [bufferedOutput stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -306,7 +329,10 @@ static NSString *OCChunkJSON(NSString *text, NSString *field = @"content") {
         } else if (output.length > 0) {
             NSString *text = ![request[@"response_format"] isKindOfClass:NSDictionary.class] &&
                 [wrapper[@"text"] isKindOfClass:NSString.class] ? wrapper[@"text"] : bufferedOutput;
-            onChunk(OCChunkJSON(text));
+            if (streamChat) {
+                if (streamedAnswer.length && ![text hasPrefix:streamedAnswer]) return @"模型流式正文与最终答案不一致。";
+                if (text.length > streamedAnswer.length) onChunk(OCChunkJSON([text substringFromIndex:streamedAnswer.length]));
+            } else onChunk(OCChunkJSON(text));
         } else {
             return @"模型未返回正文或工具调用。";
         }

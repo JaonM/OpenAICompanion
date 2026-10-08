@@ -13,6 +13,9 @@ FOUNDATION_EXPORT NSString *OCLlamaGenerationPrompt(NSString *prompt, NSString *
 /** Splits a completed thinking block; nil means thinking did not finish. */
 FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> * _Nullable OCLlamaSplitThinkingResponse(NSString *output);
 
+/** Decodes the complete prefix of a chat text envelope; never returns tool/task JSON. */
+FOUNDATION_EXPORT NSString * _Nullable OCLlamaStreamingChatText(NSString *output);
+
 /** Constrains task states and offered tool calls; tool-enabled chat replies use a text envelope. */
 FOUNDATION_EXPORT NSString * _Nullable OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *toolNames);
 

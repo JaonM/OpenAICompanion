@@ -14,6 +14,24 @@ int main(void) {
         NSCAssert([thinking[@"text"] isEqualToString:@"{\"text\":\"42\"}"], @"Only answer may enter JSON parser");
         NSCAssert(OCLlamaSplitThinkingResponse(@"未结束的思考") == nil, @"Incomplete thinking is not an answer");
         NSCAssert([OCLlamaSplitThinkingResponse(@"</think>你好")[@"text"] isEqualToString:@"你好"], @"Empty thinking must work");
+        NSCAssert([OCLlamaStreamingChatText(@" { \"text\" : \"你好") isEqualToString:@"你好"], @"Partial chat text must stream without JSON framing");
+        NSCAssert([OCLlamaStreamingChatText(@"{\"text\":\"a\\") isEqualToString:@"a"], @"An incomplete escape must not leak");
+        NSCAssert([OCLlamaStreamingChatText(@"{\"text\":\"a\\u4F") isEqualToString:@"a"], @"An incomplete Unicode escape must wait");
+        NSCAssert([OCLlamaStreamingChatText(@"{\"text\":\"a\\uD83D") isEqualToString:@"a"], @"An incomplete surrogate pair must wait");
+        NSCAssert([OCLlamaStreamingChatText(@"{\"text\":\"a\\uD83D\\uDE00") isEqualToString:@"a😀"], @"Surrogate pairs must decode together");
+        NSCAssert(OCLlamaStreamingChatText(@"{\"tool_call\":{\"name\":\"x\",\"arguments\":{\"text\":\"secret") == nil, @"Tool arguments must never stream as chat text");
+        NSCAssert(OCLlamaStreamingChatText(@"{\"state\":\"completed\",\"text\":\"42") == nil, @"Task state JSON must stay atomic");
+        NSCAssert(OCLlamaStreamingChatText(@"{\"text\":\"\\uDE00") == nil, @"Invalid lone surrogates must not stream");
+        NSString *encodedText = @"{\"text\":\"你好\\n\\\"quoted\\\"\\\\path \\uD83D\\uDE00\"}";
+        NSString *previousText = @"";
+        for (NSUInteger length = 1; length <= encodedText.length; length++) {
+            NSString *partial = OCLlamaStreamingChatText([encodedText substringToIndex:length]);
+            if (partial != nil) {
+                NSCAssert(previousText.length == 0 || [partial hasPrefix:previousText], @"Token-boundary decoding must be monotonic at %lu: <%@> -> <%@>", (unsigned long)length, previousText, partial);
+                previousText = partial;
+            }
+        }
+        NSCAssert([previousText isEqualToString:@"你好\n\"quoted\"\\path 😀"], @"Final streamed answer must exactly preserve escapes and Unicode");
         NSDictionary *task = @{@"response_format": @{@"type": @"json_schema", @"json_schema": @{@"name": @"device_task_result"}}};
         NSCAssert(OCLlamaResponseGrammar(@{}, @[]) == nil, @"Ordinary chat must remain unconstrained");
         NSString *chatTools = OCLlamaResponseGrammar(@{}, @[@"delegate_to_agent"]);
