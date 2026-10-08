@@ -21,6 +21,8 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>连接你配置的局域网设备服务和工具服务，执行你确认的跨设备任务。</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
