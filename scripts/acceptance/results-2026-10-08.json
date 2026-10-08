@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-08",
+  "scope": "Mac acceptance audit and iOS appearance/icon regression; full release acceptance remains pending",
+  "mac": {
+    "artifact": "/tmp/companion-mac-full-acceptance-build/compose/binaries/main/app/OpenAICompanion.app",
+    "package_build": "passed",
+    "dmg_checksum": "passed",
+    "codesign_structure": "passed; not notarization approval",
+    "rust": {
+      "passed": 63,
+      "failed": 0
+    },
+    "jvm": {
+      "tests": 115,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "live_local_model_enabled": true,
+      "packaged_worker_keychain_mcp_fixtures_enabled": true
+    },
+    "service": {
+      "passed": 22,
+      "failed": 0
+    },
+    "launchagent": {
+      "result": "passed with fresh isolated credentials",
+      "gateway": "loopback HTTP; original HTTPS path separately verified",
+      "real_model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M",
+      "task_id": "c46563cd471143a495065052c64465d8",
+      "output": "42",
+      "normal_restart": "passed: runs 1 to 2",
+      "crash_restart": "passed: runs 2 to 3 after SIGKILL",
+      "completed_task_artifact_unchanged": true,
+      "temporary_job_removed": true,
+      "temporary_keychain_item_removed": true
+    },
+    "observations": [
+      "New package path reading a previously created Keychain item blocked in SecItemCopyMatching; fresh isolated item worked. Upgrade credential access remains pending.",
+      "Mac actual GUI displayed ready with real local model; automation clicks and typing produced no state change, manual assistance requested. UI flow is not certified."
+    ],
+    "pending": [
+      "Actual GUI send, stream, stop, shortcuts, settings and relaunch persistence",
+      "System notification delivery outside App",
+      "Actual logout/login, reboot and sleep/wake recovery",
+      "Credential continuity across packaged application upgrade",
+      "External real MCP/OAuth and real memory-sync provider end-to-end",
+      "Model-quality and automatic capability routing evaluation",
+      "Load/soak, network outage recovery and older macOS/Intel compatibility",
+      "Developer ID signing/notarization and production service deployment"
+    ],
+    "device_tools": "optional extension, disabled by default; real calendar permission/write acceptance excluded"
+  },
+  "ios": {
+    "icon": "added: opaque 1024x1024 blue/white star; compiled AppIcon metadata, signed build and device installation passed",
+    "ui": "shared Mac light/dark palette, header, message layout, composer and settings spacing; real screenshots visually inspected",
+    "regression": {
+      "passed": 1,
+      "failed": 2,
+      "skipped": 0,
+      "passed_case": "testSingleConversationAndSettingsSurviveRelaunch",
+      "failed_cases": [
+        "testLocalModelGeneratesReply",
+        "testCrossDeviceDelegatesToMacAndShowsResult"
+      ],
+      "failure": "System keyboard assertion failed; video confirmed third-party keyboard. Pending user switch and rerun."
+    },
+    "evidence": "/tmp/companion-physical-acceptance-20261007/ios-ui-icon-1008.xcresult"
+  },
+  "evidence_root": "/tmp/companion-mac-full-acceptance-20261008",
+  "logs": [
+    "/tmp/companion-mac-full-jvm-verified.log",
+    "/tmp/companion-mac-full-rust.log",
+    "/tmp/companion-mac-full-service.log",
+    "/tmp/companion-ios-ui-align-build-final.log"
+  ]
+}

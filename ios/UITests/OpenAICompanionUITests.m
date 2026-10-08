@@ -13,6 +13,13 @@
     self.continueAfterFailure = NO;
 }
 
+- (void)retainScreenshot:(XCUIApplication *)app name:(NSString *)name {
+    XCTAttachment *attachment = [XCTAttachment attachmentWithScreenshot:app.screenshot];
+    attachment.name = name;
+    attachment.lifetime = XCTAttachmentLifetimeKeepAlways;
+    [self addAttachment:attachment];
+}
+
 - (void)enterAcceptanceText:(NSString *)text field:(XCUIElement *)field app:(XCUIApplication *)app {
     for (NSInteger i = 0; i < 5 && !field.hittable; i++) [app swipeUp];
     XCTAssertTrue(field.hittable);
@@ -123,6 +130,7 @@
         [NSString stringWithFormat:@"任务 %lu 远端结果：42", (unsigned long)createdTask],
         [NSString stringWithFormat:@"任务 %lu 远端结果：17 + 25 = 42", (unsigned long)createdTask]];
     XCTAssertTrue([[app.staticTexts matchingPredicate:newResult].firstMatch waitForExistenceWithTimeout:180]);
+    [self retainScreenshot:app name:@"Companion remote task"];
 }
 
 // Verify the card for a host-verified real task; this does not submit a new task.
@@ -173,6 +181,7 @@
 
     [app.buttons[@"设置"] tap];
     XCTAssertTrue([app.buttons[@"导入 GGUF"] waitForExistenceWithTimeout:10]);
+    [self retainScreenshot:app name:@"Companion settings"];
     [app.buttons[@"完成"] tap];
 
     [app terminate];
@@ -215,6 +224,7 @@
     XCTAssertTrue([reply waitForExistenceWithTimeout:120]);
     XCTAssertTrue([reply.label hasPrefix:@"assistant："] && reply.label.length > [@"assistant：" length]);
     XCTAssertFalse([reply.label hasPrefix:@"assistant：{\"text\":"]);
+    [self retainScreenshot:app name:@"Companion conversation"];
 
 }
 
