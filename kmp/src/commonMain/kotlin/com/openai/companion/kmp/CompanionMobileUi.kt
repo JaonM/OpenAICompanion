@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -31,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -316,10 +318,11 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             }
                         }
                         LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-                            items(state.messages) { message ->
+                            itemsIndexed(state.messages) { index, message ->
                                 Text(
                                     text = "${message.role}：${message.content}",
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                                        .testTag("conversation-message-$index-${message.role}"),
                                 )
                             }
                             if (state.streamedText.isNotEmpty()) {
@@ -464,7 +467,7 @@ private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions
     var reply by remember(task.id) { mutableStateOf("") }
     Surface(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), tonalElevation = 3.dp) {
         Column(Modifier.padding(12.dp)) {
-            Text("远端任务 · $agentName", style = MaterialTheme.typography.titleSmall)
+            Text("远端任务 · $agentName", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { contentDescription = "远端任务编号 ${task.id} · $agentName" })
             Text(task.requestText)
             Text(when (task.state) {
                 "SUBMITTING" -> "正在提交"
@@ -487,7 +490,7 @@ private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions
             if (task.state == "TASK_STATE_AUTH_REQUIRED") {
                 Text("请按远端说明完成授权；访问令牌可在设置中为该 Agent 单独保存。")
             }
-            task.result?.let { Text("远端结果：$it") }
+            task.result?.let { Text("远端结果：$it", modifier = Modifier.semantics { contentDescription = "任务 ${task.id} 远端结果：$it" }) }
             if (task.state == "TASK_STATE_INPUT_REQUIRED") {
                 OutlinedTextField(reply, { reply = it }, label = { Text("回复该远端任务") }, modifier = Modifier.fillMaxWidth())
                 Row {

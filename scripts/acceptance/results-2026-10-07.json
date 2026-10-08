@@ -103,13 +103,12 @@
       "tls": "iPhone App accepted original test CA after user enabled full trust; no bypass"
     },
     "pending": [
-      "iPhone-to-Mac delegation and return UI",
-      "Mac-to-iPhone foreground execution: retest after model task-state failure",
       "follow-up and reply UI",
       "network-switch recovery",
       "sleep/login recovery",
       "minimum supported OS",
-      "production HTTPS deployment"
+      "production HTTPS deployment",
+      "capability/resource-based automatic device selection on real devices"
     ],
     "test_setup_issues": [
       "Third-party keyboard prevented input; switched to system keyboard and model test passed",
@@ -197,6 +196,90 @@
         }
       },
       "overall": "Not accepted: structured task state, automatic Agent selection and repeated-request handling failed"
+    },
+    "cross_device_fixes_2026_10_08": {
+      "scope": "Targeted iOS/Mac regressions passed; full production acceptance remains pending. Earlier failures above are historical evidence.",
+      "fixes": [
+        "Strict task state schema and iOS grammar; malformed states remain failures",
+        "Valid offered-tool JSON with unwrapped normal chat text",
+        "Unique enabled display names resolve to canonical agent IDs before approval/authentication",
+        "Repeated delegation excludes old submission replies from model context without changing durable trace",
+        "Confirmed foreground submission ends local generation with a deterministic acknowledgement"
+      ],
+      "rust": {
+        "passed": 63,
+        "failed": 0
+      },
+      "jvm": {
+        "tests": 115,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "isolated_worker_keychain_mcp_fixtures": "passed"
+      },
+      "ios_prompt_grammar_check": "passed",
+      "signed_build": "passed",
+      "ui_runs": [
+        {
+          "bundle": "fixed-receipt-route.xcresult",
+          "cases": [
+            "testCrossDeviceDelegatesToMacAndShowsResult",
+            "testLocalModelGeneratesReply"
+          ],
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "bundle": "fixed-receipt-repeat-and-pairing.xcresult",
+          "cases": [
+            "testCrossDeviceDelegatesToMacAndShowsResult",
+            "testCrossDevicePairingAndForegroundExecution"
+          ],
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "named_target_prompt": "请把 17+25 的计算委托给 Acceptance Mac，完成后展示远端结果。不要在手机本地计算。",
+      "mac_worker": "Final isolated packaged worker with real local Ollama model over the existing HTTPS acceptance service",
+      "new_delegations": [
+        {
+          "local_task_id": 6,
+          "remote_task_id": "cd9c88135a18454a8db67b8f0b14037d",
+          "state": "TASK_STATE_COMPLETED",
+          "result": "42",
+          "delegate_calls": 1,
+          "local_loop_steps": 1
+        },
+        {
+          "local_task_id": 7,
+          "remote_task_id": "bc8abdb074c440c994c451abfaf7b4db",
+          "state": "TASK_STATE_COMPLETED",
+          "result": "42",
+          "delegate_calls": 1,
+          "local_loop_steps": 1
+        }
+      ],
+      "submission_acknowledgement": "远端任务已提交，请在任务卡查看进度和结果。",
+      "phone_foreground_execution": {
+        "task_id": "a6b529cba17243aab87ec107eb9d1347",
+        "state": "TASK_STATE_COMPLETED",
+        "result": "42",
+        "artifact": "42",
+        "model_response": {
+          "state": "completed",
+          "text": "42"
+        }
+      },
+      "ordinary_chat": {
+        "status": "passed",
+        "tool_calls": 0,
+        "reply": "你好！",
+        "text_envelope_unwrapped": true
+      },
+      "acceptance_assertion_fixes": "Identify task-specific results and the fresh request/reply pair; allow execution status to return to ready. Prior mixed regression run had two assertion failures, corrected and rerun in the final UI runs.",
+      "remaining": "Existing pending items and platform/production limits remain; optional device tools stay disabled."
     }
   }
 }

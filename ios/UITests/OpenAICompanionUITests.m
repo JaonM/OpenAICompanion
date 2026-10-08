@@ -68,7 +68,20 @@
     XCTestExpectation *foreground = [self expectationWithDescription:@"Foreground device task window"];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [foreground fulfill]; });
     [self waitForExpectations:@[foreground] timeout:130];
-    XCTAssertTrue(connected.exists);
+    // Completing a real task temporarily displays its execution/result status.
+    XCTAssertTrue([connected waitForExistenceWithTimeout:40]);
+}
+
+- (NSUInteger)latestRemoteTaskNumber:(XCUIApplication *)app {
+    NSUInteger latest = 0;
+    XCUIElementQuery *titles = [app.staticTexts matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"远端任务编号 "]];
+    for (XCUIElement *title in titles.allElementsBoundByIndex) {
+        NSScanner *scanner = [NSScanner scannerWithString:[title.label substringFromIndex:[@"远端任务编号 " length]]];
+        NSInteger number = 0;
+        if ([scanner scanInteger:&number] && number > 0) latest = MAX(latest, (NSUInteger)number);
+    }
+    return latest;
 }
 
 // Requires the real phone to be paired and the acceptance Mac worker online.
@@ -87,13 +100,8 @@
     if (enable.hittable) [enable tap];
     XCTAssertTrue([disable waitForExistenceWithTimeout:20]);
     [app.buttons[@"完成"] tap];
-    XCUIElementQuery *results = [app.staticTexts matchingPredicate:
-        [NSPredicate predicateWithFormat:@"label == %@ OR label == %@", @"远端结果：42", @"远端结果：17 + 25 = 42"]];
-    if (app.buttons[@"查看"].exists) {
-        [app.buttons[@"查看"] tap];
-        [results.firstMatch waitForExistenceWithTimeout:5];
-    }
-    NSUInteger priorResults = results.count;
+    if (app.buttons[@"查看"].exists) [app.buttons[@"查看"] tap];
+    NSUInteger priorTask = [self latestRemoteTaskNumber:app];
     XCUIElement *message = app.textViews.firstMatch;
     XCTAssertTrue([message waitForExistenceWithTimeout:10]);
     [self enterAcceptanceText:fixture[@"routingPrompt"] ?: @"请把 17+25 的计算委托给 Acceptance Mac，完成后展示远端结果。不要在手机本地计算。" field:message app:app];
@@ -104,11 +112,17 @@
     [app.buttons[@"发送一次"] tap];
     XCTAssertTrue([app.buttons[@"查看"] waitForExistenceWithTimeout:20]);
     [app.buttons[@"查看"] tap];
-    NSPredicate *newResult = [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
-        return results.count > priorResults;
+    __block NSUInteger createdTask = 0;
+    NSPredicate *newTask = [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
+        createdTask = [self latestRemoteTaskNumber:app];
+        return createdTask > priorTask;
     }];
-    XCTNSPredicateExpectation *completed = [[XCTNSPredicateExpectation alloc] initWithPredicate:newResult object:app];
-    XCTAssertEqual([XCTWaiter waitForExpectations:@[completed] timeout:180], XCTWaiterResultCompleted);
+    XCTNSPredicateExpectation *created = [[XCTNSPredicateExpectation alloc] initWithPredicate:newTask object:app];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[created] timeout:20], XCTWaiterResultCompleted);
+    NSPredicate *newResult = [NSPredicate predicateWithFormat:@"label == %@ OR label == %@",
+        [NSString stringWithFormat:@"任务 %lu 远端结果：42", (unsigned long)createdTask],
+        [NSString stringWithFormat:@"任务 %lu 远端结果：17 + 25 = 42", (unsigned long)createdTask]];
+    XCTAssertTrue([[app.staticTexts matchingPredicate:newResult].firstMatch waitForExistenceWithTimeout:180]);
 }
 
 // Verify the card for a host-verified real task; this does not submit a new task.
@@ -121,10 +135,13 @@
     [app launch];
     XCTAssertTrue([app.buttons[@"查看"] waitForExistenceWithTimeout:20]);
     [app.buttons[@"查看"] tap];
-    XCTAssertTrue([app.staticTexts[@"远端任务 · Acceptance Mac"] waitForExistenceWithTimeout:10]);
+    NSNumber *number = fixture[@"completedLocalTaskId"] ?: @1;
+    NSString *title = [NSString stringWithFormat:@"远端任务编号 %@ · Acceptance Mac", number];
+    for (NSInteger i = 0; i < 10 && !app.staticTexts[title].exists; i++) [app swipeUp];
+    XCTAssertTrue([app.staticTexts[title] waitForExistenceWithTimeout:10]);
     XCTAssertTrue(app.staticTexts[fixture[@"completedTaskText"]].exists);
     XCTAssertTrue(app.staticTexts[@"已完成"].exists);
-    NSString *result = [@"远端结果：" stringByAppendingString:fixture[@"completedTaskResult"]];
+    NSString *result = [NSString stringWithFormat:@"任务 %@ 远端结果：%@", number, fixture[@"completedTaskResult"]];
     XCTAssertTrue(app.staticTexts[result].exists);
 }
 
@@ -178,25 +195,27 @@
     [app.buttons[@"完成"] tap];
     XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:10]);
 
-    XCUIElementQuery *replies = [app.staticTexts matchingPredicate:
-        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"assistant："]];
-    NSUInteger priorReplies = replies.count;
-
+    NSString *prompt = [@"Reply with hi. Acceptance request " stringByAppendingString:NSUUID.UUID.UUIDString];
     XCUIElement *message = app.textViews.firstMatch;
     XCTAssertTrue([message waitForExistenceWithTimeout:10]);
-    [message tap];
-    [message typeText:@"Reply with hi."];
-    NSPredicate *enabled = [NSPredicate predicateWithFormat:@"enabled == YES"];
-    XCTNSPredicateExpectation *ready = [[XCTNSPredicateExpectation alloc] initWithPredicate:enabled object:app.buttons[@"发送"]];
-    XCTAssertEqual([XCTWaiter waitForExpectations:@[ready] timeout:5], XCTWaiterResultCompleted,
-                   @"自动化输入未生效；请切换至苹果系统键盘后重试，不能计作模型请求。");
+    [self enterAcceptanceText:prompt field:message app:app];
+    XCTAssertTrue(app.buttons[@"发送"].enabled, @"自动化输入未生效，不能计作模型请求。");
     [app.buttons[@"发送"] tap];
+    // LazyColumn recycles older rows: visible reply counts cannot identify a new reply.
+    if (app.buttons[@"查看"].exists) [app.buttons[@"查看"] tap];
+    XCUIElement *request = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:
+        [NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND label == %@", @"conversation-message-", [@"user：" stringByAppendingString:prompt]]].firstMatch;
+    for (NSInteger i = 0; i < 10 && !request.exists; i++) [app swipeDown];
+    XCTAssertTrue([request waitForExistenceWithTimeout:10]);
+    NSScanner *scanner = [NSScanner scannerWithString:[request.identifier substringFromIndex:[@"conversation-message-" length]]];
+    NSInteger index = -1;
+    XCTAssertTrue([scanner scanInteger:&index] && index >= 0);
+    NSString *replyId = [NSString stringWithFormat:@"conversation-message-%ld-assistant", (long)(index + 1)];
+    XCUIElement *reply = [[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:replyId].firstMatch;
+    XCTAssertTrue([reply waitForExistenceWithTimeout:120]);
+    XCTAssertTrue([reply.label hasPrefix:@"assistant："] && reply.label.length > [@"assistant：" length]);
+    XCTAssertFalse([reply.label hasPrefix:@"assistant：{\"text\":"]);
 
-    NSPredicate *newReply = [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
-        return replies.count > priorReplies;
-    }];
-    XCTNSPredicateExpectation *generated = [[XCTNSPredicateExpectation alloc] initWithPredicate:newReply object:app];
-    XCTAssertEqual([XCTWaiter waitForExpectations:@[generated] timeout:120], XCTWaiterResultCompleted);
 }
 
 - (void)testConnectLocalMcpFixture {
