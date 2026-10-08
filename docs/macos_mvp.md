@@ -66,10 +66,12 @@ LOCAL_MODEL_INTEGRATION=1 HARNESS_LIBRARY_PATH=../harness/target/release/libharn
 | 后台进程恢复 | 临时 job 经 SIGTERM 和 SIGKILL 后分别自动重启；完成任务结果不变。安装包 fixture 检查同目录进程互斥、重启不重复模型调用 | 执行中崩溃、长时间网络故障的系统级演练 |
 | 主动任务与提醒 | 计划、调度与持久化相关 Rust/JVM 回归通过 | Mac 系统通知实际送达、App 退出后的提醒与提醒点击回流 |
 | Keychain | 独立新凭据保存、读取、清理通过 | 应用升级时旧凭据访问连续性；本轮新包路径读取旧测试项曾卡在 `SecItemCopyMatching` |
-| 桌面 UI | 实际安装包启动、模型就绪及浅色布局已观察 | 对话输入、发送、快捷键、设置及实际重启的完整流程：自动化输入未生效，已请求人工协助 |
+| 桌面 UI | 实际安装包启动、模型就绪及浅色布局已观察；用户反馈暂时无法点击，随后恢复，线程栈未发现 Java 死锁 | 自动化仍未能写入，已请求手动发送核对；对话、快捷键、设置和重启完整流程待验收，暂不能认定通过 |
 | 端侧工具扩展 | 协议、审批、日历幂等写入 fixture 回归通过，开关默认关闭 | 真正系统日历权限与写入，保留为扩展项 |
 | 分发与兼容性 | 当前 Apple Silicon 构建、DMG 校验及签名结构校验通过 | Developer ID、公证、旧系统/Intel、负载与长时间运行 |
 
 本轮 Rust **63/0**、JVM **115 项，0 失败、0 错误、0 跳过**、服务端 **22/0**。JVM 开启 `LOCAL_MODEL_INTEGRATION=1`，实际运行本地模型；另开启 packaged worker、Keychain 和 MCP fixture。LaunchAgent 的独立真实任务为 `c46563cd471143a495065052c64465d8`；新凭据重测使用仅绑定 loopback 的开发 HTTP 服务，原有 HTTPS 路径独立验证，不能将其计为新的 HTTPS 联调。临时 job 和该专用 Keychain 项已清理，原真机 HTTPS worker 恢复运行。
 
 证据汇总见 [本轮验收结果](../scripts/acceptance/results-2026-10-08.json)，历史跨设备证据见 [跨设备记录](cross_device_execution.md)。本地日志、任务结果与进程恢复记录位于 `/tmp/companion-mac-full-acceptance-20261008`；原始凭据与真机附件不提交仓库。
+
+iOS 已增加蓝底白色星形 App 图标并完成签名构建、真机安装。移动端复用 Mac 的浅色/深色配色，调整标题、消息与输入区；设置重启保持用例通过。第三方键盘造成的首次输入测试失败保留为历史证据，用户切换系统键盘后，普通聊天与委托 Mac 用例重跑 **2/0/0**，最终三项 UI 用例均通过，跨设备返回 `42`。真实对话与任务截图已检查。

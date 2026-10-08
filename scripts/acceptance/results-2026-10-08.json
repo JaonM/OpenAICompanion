@@ -37,7 +37,9 @@
     "observations": [
       "New package path reading a previously created Keychain item blocked in SecItemCopyMatching; fresh isolated item worked. Upgrade credential access remains pending.",
       "Mac actual GUI displayed ready with real local model; automation clicks and typing produced no state change, manual assistance requested. UI flow is not certified.",
-      "A separate GUI test copy with unique CFBundleIdentifier was tried to rule out multiple-instance targeting. Native UI tool then failed: Sky Computer Use native pipe closed before response. No GUI operation passed; original package remained unchanged."
+      "A separate GUI test copy with unique CFBundleIdentifier was tried to rule out multiple-instance targeting. Native UI tool then failed: Sky Computer Use native pipe closed before response. No GUI operation passed; original package remained unchanged.",
+      "User also reported the Mac window could not be clicked manually. GUI thread dump showed AWT event thread idle waiting for events, not a Java deadlock. Scope clarification requested; this is an unresolved acceptance failure, not merely an automation limitation.",
+      "User subsequently reported the Mac window recovered. Native screenshot showed active window chrome; automation still did not enter text. Manual send/result check requested; GUI acceptance remains pending."
     ],
     "pending": [
       "Actual GUI send, stream, stop, shortcuts, settings and relaunch persistence",
@@ -55,6 +57,19 @@
     "icon": "added: opaque 1024x1024 blue/white star; compiled AppIcon metadata, signed build and device installation passed",
     "ui": "shared Mac light/dark palette, header, message layout, composer and settings spacing; real screenshots visually inspected",
     "regression": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "cases": [
+        "testSingleConversationAndSettingsSurviveRelaunch (first run)",
+        "testLocalModelGeneratesReply (rerun)",
+        "testCrossDeviceDelegatesToMacAndShowsResult (rerun)"
+      ],
+      "rerun_evidence": "/tmp/companion-physical-acceptance-20261007/ios-ui-icon-final-1008.xcresult",
+      "keyboard": "User switched to Apple system keyboard; real screenshots confirmed."
+    },
+    "evidence": "/tmp/companion-physical-acceptance-20261007/ios-ui-icon-1008.xcresult",
+    "regression_initial": {
       "passed": 1,
       "failed": 2,
       "skipped": 0,
@@ -65,7 +80,11 @@
       ],
       "failure": "System keyboard assertion failed; video confirmed third-party keyboard. Pending user switch and rerun."
     },
-    "evidence": "/tmp/companion-physical-acceptance-20261007/ios-ui-icon-1008.xcresult"
+    "cross_device_rerun": {
+      "remote_task": "f3c5fea5d0b545eb86598f33c79eaa5e",
+      "state": "TASK_STATE_COMPLETED",
+      "output": "42"
+    }
   },
   "evidence_root": "/tmp/companion-mac-full-acceptance-20261008",
   "logs": [
