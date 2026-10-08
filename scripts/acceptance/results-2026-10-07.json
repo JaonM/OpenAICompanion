@@ -69,7 +69,28 @@
       "result": "Passed preflight",
       "model": "local Qwen3.8-27B-GGUF UD-Q4_K_M",
       "output": "42",
-      "restart": "completed task state, attempt and output unchanged"
+      "restart": "completed task state, attempt and output unchanged",
+      "retest_2026_10_08": {
+        "result": "Passed",
+        "path": "real HTTPS A2A request, packaged background worker, real local model, GetTask and artifact",
+        "state": "TASK_STATE_COMPLETED",
+        "output": "42"
+      },
+      "followup_2026_10_08": {
+        "result": "Passed API with real model",
+        "initial_state": "TASK_STATE_INPUT_REQUIRED",
+        "reply_state": "TASK_STATE_COMPLETED",
+        "same_task_and_context": true,
+        "output": "Hello, Ada!",
+        "ui": "Not covered"
+      },
+      "cancel_2026_10_08": {
+        "result": "Passed queued-task API",
+        "initial": "TASK_STATE_SUBMITTED",
+        "after_cancel": "TASK_STATE_CANCELED",
+        "GetTask": "TASK_STATE_CANCELED",
+        "limitation": "Does not cover executing-task interruption or phone cancel UI"
+      }
     },
     "https_service": {
       "mode": "isolated LAN deployment on Mac",
@@ -77,13 +98,13 @@
       "unauthenticated_devices_status": 401
     },
     "pairing": {
-      "result": "Not accepted",
-      "failure": "iOS NSURLErrorDomain -1202: untrusted server certificate",
-      "followup": "fullchain deployed; awaiting iPhone trust verification and rerun"
+      "result": "HTTPS pairing and iPhone registration passed on 2026-10-07",
+      "ui_test": "2026-10-08 pairing and relaunch UI rerun passed (1 passed, 0 failed/skipped)",
+      "tls": "iPhone App accepted original test CA after user enabled full trust; no bypass"
     },
     "pending": [
       "iPhone-to-Mac delegation and return UI",
-      "Mac-to-iPhone foreground execution",
+      "Mac-to-iPhone foreground execution: retest after model task-state failure",
       "follow-up and reply UI",
       "network-switch recovery",
       "sleep/login recovery",
@@ -93,6 +114,89 @@
     "test_setup_issues": [
       "Third-party keyboard prevented input; switched to system keyboard and model test passed",
       "Scrolling input focus required field-targeted typing; pre-submit input guard added"
-    ]
+    ],
+    "phone_foreground_execution": {
+      "model": "SmolLM2-135M-Instruct Q4_K_M",
+      "result": "Failed",
+      "failure": "Model returned plain text instead of required task state JSON; task reported TASK_STATE_FAILED"
+    },
+    "model_replacement_2026_10_08": {
+      "device_os": "iOS 27.0.1",
+      "model": "Qwen/Qwen3-0.6B-GGUF",
+      "file": "Qwen3-0.6B-Q8_0.gguf",
+      "bytes": 639446688,
+      "sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+      "official_sha256_verified": true,
+      "download": "mirror; verified against official file SHA256",
+      "signed_build_install": "Passed",
+      "model_file_and_persistent_selection": "Verified in App container",
+      "prompt_adapter_test": "Passed; Qwen3 non-thinking prefix; other architecture unchanged",
+      "app_launch": "Passed",
+      "inference_acceptance": {
+        "result": "Passed generation smoke only",
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "request": "Reply with hi.",
+        "reply": "你好！有什么可以帮助你的吗？",
+        "limitation": "Generated reply but did not follow exact requested wording; no quality certification"
+      },
+      "automation_error": "Timed out while enabling automation mode",
+      "cross_device_execution": {
+        "result": "Failed",
+        "transport": "Real phone paired, foreground claimed task and uploaded result over verified HTTPS",
+        "model_answer": "42",
+        "model_json": {
+          "completed": true,
+          "input_required": false,
+          "text": "42"
+        },
+        "expected": "state string: completed, input_required or failed; text string",
+        "gateway_state": "TASK_STATE_FAILED",
+        "validation": "Strict task state validation unchanged"
+      },
+      "automation_recovery": "User completed Developer UI automation setup; XCTest entered App",
+      "input_blocker": "Resolved by switching to Apple system keyboard; previous failed run had zero trace turns/messages",
+      "local_network_fix": "Passed signed build/install; user enabled local network; actual pairing redeem and registration succeeded",
+      "pairing_relaunch_ui": {
+        "result": "Passed",
+        "passedTests": 1,
+        "failedTests": 0,
+        "skippedTests": 0
+      },
+      "natural_language_phone_to_mac": {
+        "result": "Failed",
+        "request": "请把 17+25 的计算委托给 Acceptance Mac，完成后展示远端结果。不要在手机本地计算。",
+        "actual_tool": "delegate_to_agent",
+        "actual_agent_id": "Acceptance Mac",
+        "error": "未找到已启用的远端 Agent",
+        "remote_tasks_created": 0,
+        "cause": "Model used display name instead of registered Agent ID, skipped discovery and routing",
+        "ui_test": {
+          "passed": 0,
+          "failed": 1,
+          "skipped": 0,
+          "failure": "No delegation confirmation within 120 seconds after unknown Agent ID refusal"
+        }
+      },
+      "explicit_agent_id_delegation": {
+        "result": "Passed controlled delegation, execution, phone result sync and separately verified existing task card",
+        "scope": "Controlled prompt supplies exact registered Agent Card ID; no automatic device routing claim",
+        "real_phone_confirmation": "Accepted through real App UI",
+        "mac_state": "TASK_STATE_COMPLETED",
+        "mac_output": "17 + 25 = 42",
+        "phone_persisted_state": "TASK_STATE_COMPLETED",
+        "phone_persisted_result": "17 + 25 = 42",
+        "first_ui_run": "Failed narrow result assertion expecting 42 only",
+        "repeat_ui_run": "Failed new-delegation guard: model repeated prior task reply without tool call; no new task created",
+        "completed_task_card_ui": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "scope": "Known actual server-completed task; not a new submission"
+        }
+      },
+      "overall": "Not accepted: structured task state, automatic Agent selection and repeated-request handling failed"
+    }
   }
 }
