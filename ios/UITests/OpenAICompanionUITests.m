@@ -21,6 +21,7 @@
     [[field coordinateWithNormalizedOffset:CGVectorMake(0.25, 0.7)] tap];
     if (![app.keyboards.firstMatch waitForExistenceWithTimeout:2]) [field tap];
     XCTAssertTrue([app.keyboards.firstMatch waitForExistenceWithTimeout:5]);
+    [field typeText:[@"" stringByPaddingToLength:100 withString:XCUIKeyboardKeyDelete startingAtIndex:0]];
     [field typeText:text];
 }
 
@@ -34,26 +35,29 @@
     XCTAssertTrue([fixture[@"endpoint"] hasPrefix:@"https://"]);
     XCTAssertTrue([fixture[@"code"] length] > 0);
     XCUIApplication *app = [[XCUIApplication alloc] init];
-    app.launchArguments = @[@"-localGGUFFileName", @"test-smollm2.gguf"];
+    app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
     [app launch];
     [app.buttons[@"设置"] tap];
+    XCUIElement *connected = [[app.staticTexts matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label CONTAINS %@ AND label CONTAINS %@", @"Acceptance iPhone", @"前台可接单"]] firstMatch];
     XCUIElement *endpoint = app.textViews[@"设备服务地址"];
     for (NSInteger i = 0; i < 12 && !endpoint.hittable; i++) [app swipeUp];
-    XCTAssertTrue(endpoint.hittable, @"设备服务地址输入框不可操作：%@", app.debugDescription);
-    [self enterAcceptanceText:fixture[@"endpoint"] field:endpoint app:app];
-    XCUIElement *name = app.textViews[@"本设备名称"];
-    [self enterAcceptanceText:@"Acceptance iPhone" field:name app:app];
-    // Password fields can have a different accessibility element type.
-    XCUIElement *code = [[app descendantsMatchingType:XCUIElementTypeAny]
-        matchingIdentifier:@"一次性配对码"].firstMatch;
-    [self enterAcceptanceText:fixture[@"code"] field:code app:app];
-    XCUIElement *accept = app.buttons[@"前台接单开关"];
-    for (NSInteger i = 0; i < 5 && !accept.hittable; i++) [app swipeUp];
-    [accept tap];
-    XCTAssertTrue(app.buttons[@"使用配对码连接"].enabled, @"配对码输入未生效，尚未发起网络配对请求。");
-    [app.buttons[@"使用配对码连接"] tap];
-    XCUIElement *connected = app.staticTexts[@"已连接 · Acceptance iPhone · 前台可接单"];
-    XCTAssertTrue([connected waitForExistenceWithTimeout:40]);
+    if (![connected waitForExistenceWithTimeout:20]) {
+        XCTAssertTrue(endpoint.hittable, @"设备服务地址输入框不可操作：%@", app.debugDescription);
+        [self enterAcceptanceText:fixture[@"endpoint"] field:endpoint app:app];
+        XCUIElement *name = app.textViews[@"本设备名称"];
+        [self enterAcceptanceText:@"Acceptance iPhone" field:name app:app];
+        // Password fields can have a different accessibility element type.
+        XCUIElement *code = [[app descendantsMatchingType:XCUIElementTypeAny]
+            matchingIdentifier:@"一次性配对码"].firstMatch;
+        [self enterAcceptanceText:fixture[@"code"] field:code app:app];
+        XCUIElement *accept = app.buttons[@"前台接单开关"];
+        for (NSInteger i = 0; i < 5 && !accept.hittable; i++) [app swipeUp];
+        [accept tap];
+        XCTAssertTrue(app.buttons[@"使用配对码连接"].enabled, @"配对码输入未生效，尚未发起网络配对请求。");
+        [app.buttons[@"使用配对码连接"] tap];
+        XCTAssertTrue([connected waitForExistenceWithTimeout:40]);
+    }
     [app terminate];
     [app launch];
     [app.buttons[@"设置"] tap];
@@ -104,8 +108,10 @@
 }
 
 - (void)testLocalModelGeneratesReply {
+    NSData *data = [NSData dataWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"]];
+    NSDictionary *fixture = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     XCUIApplication *app = [[XCUIApplication alloc] init];
-    app.launchArguments = @[@"-localGGUFFileName", @"test-smollm2.gguf"];
+    app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
     [app launch];
 
     [app.buttons[@"设置"] tap];
