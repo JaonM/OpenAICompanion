@@ -39,11 +39,12 @@
       "Mac actual GUI displayed ready with real local model; automation clicks and typing produced no state change, manual assistance requested. UI flow is not certified.",
       "A separate GUI test copy with unique CFBundleIdentifier was tried to rule out multiple-instance targeting. Native UI tool then failed: Sky Computer Use native pipe closed before response. No GUI operation passed; original package remained unchanged.",
       "User also reported the Mac window could not be clicked manually. GUI thread dump showed AWT event thread idle waiting for events, not a Java deadlock. Scope clarification requested; this is an unresolved acceptance failure, not merely an automation limitation.",
-      "User subsequently reported the Mac window recovered. Native screenshot showed active window chrome; automation still did not enter text. Manual send/result check requested; GUI acceptance remains pending."
+      "User subsequently reported the Mac window recovered. Native screenshot showed active window chrome; automation still did not enter text. Manual send/result check requested; GUI acceptance remains pending.",
+      "Later native clicks recovered. Actual send/context 42 then 50, reasoning toggle, settings save, normal relaunch and stop passed. Earlier blockers retained as history; keyboard automation remains unavailable."
     ],
     "pending": [
-      "Actual GUI send, stream, stop, shortcuts, settings and relaunch persistence",
-      "System notification delivery outside App",
+      "GUI incremental streaming, keyboard shortcuts, native production Preferences persistence, outage/reconnect and remaining GUI approval/delegation flows",
+      "System notification failed visual acceptance; App-exit reminder delivery and click routing pending",
       "Actual logout/login, reboot and sleep/wake recovery",
       "Credential continuity across packaged application upgrade",
       "External real MCP/OAuth and real memory-sync provider end-to-end",
@@ -51,7 +52,48 @@
       "Load/soak, network outage recovery and older macOS/Intel compatibility",
       "Developer ID signing/notarization and production service deployment"
     ],
-    "device_tools": "optional extension, disabled by default; real calendar permission/write acceptance excluded"
+    "device_tools": "optional extension, disabled by default; real calendar permission/write acceptance excluded",
+    "gui": {
+      "result": "partially passed; system notification failed; release acceptance remains incomplete",
+      "input": "User entered drafts because native automation typing did not write; automation clicked Send and Stop.",
+      "conversation": {
+        "session_count": 1,
+        "turns": [
+          {
+            "id": 1,
+            "state": "completed",
+            "output": "42"
+          },
+          {
+            "id": 2,
+            "state": "completed",
+            "output": "50"
+          },
+          {
+            "id": 3,
+            "state": "cancelled",
+            "error": "agent loop cancelled by user"
+          }
+        ]
+      },
+      "reasoning_expand_collapse": "passed",
+      "settings_save": "passed",
+      "normal_exit_relaunch": "passed: prior answer 42 and model settings restored",
+      "preferences": "Isolated file-backed acceptance PreferencesFactory; native production Preferences not certified",
+      "stop": "passed: UI displayed 生成已取消 and returned ready; database confirmed cancelled",
+      "shortcut": "Automation Command-comma did not open settings; native keyboard actions remain unavailable, pending manual verification",
+      "evidence": "/tmp/companion-mac-full-acceptance-20261008/gui-final-evidence.json"
+    },
+    "notification": {
+      "result": "failed visible-delivery acceptance",
+      "fixture": "Ready notification inserted into isolated database, not a real model-generated scheduled reminder",
+      "title": "Acceptance Mac notification 20261008",
+      "body": "验收测试：42",
+      "database_state": "delivered",
+      "user_confirmation": "没有看到通知",
+      "finding": "DesktopNotificationSink returns true immediately after TrayIcon.displayMessage; delivered does not prove OS presentation. Permission/native delivery and click routing need implementation verification.",
+      "cleanup": "Global proactive switch disabled through UI; isolated fixture task disabled."
+    }
   },
   "ios": {
     "icon": "added: opaque 1024x1024 blue/white star; compiled AppIcon metadata, signed build and device installation passed",
@@ -84,6 +126,29 @@
       "remote_task": "f3c5fea5d0b545eb86598f33c79eaa5e",
       "state": "TASK_STATE_COMPLETED",
       "output": "42"
+    },
+    "folded_traces": {
+      "ui": "Tool/reasoning rows use gray bodySmall text, one-line ellipsis, collapsed by default; tap toggles full content. Normal messages and consent flows unchanged.",
+      "initial_regression": {
+        "passed": 0,
+        "failed": 2,
+        "reason": "XCTest could not inspect third-party keyboard",
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-fold-regression-1008.xcresult"
+      },
+      "final_regression": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "cases": [
+          "testToolMessagesCollapseAndExpand",
+          "testLocalModelGeneratesReply",
+          "testCrossDeviceDelegatesToMacAndShowsResult"
+        ],
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-fold-final-1008.xcresult"
+      },
+      "keyboard": "Only acceptance Debug builds with explicit launch flag opt out of keyboard extensions; normal launches retain third-party keyboard support.",
+      "screenshots": "Collapsed/expanded real tool history visually inspected.",
+      "reasoning_limit": "Historical reasoning role shares renderer; native backend does not currently display reasoning deltas, so no live thinking-stream acceptance claimed."
     }
   },
   "evidence_root": "/tmp/companion-mac-full-acceptance-20261008",
@@ -91,6 +156,9 @@
     "/tmp/companion-mac-full-jvm-verified.log",
     "/tmp/companion-mac-full-rust.log",
     "/tmp/companion-mac-full-service.log",
-    "/tmp/companion-ios-ui-align-build-final.log"
+    "/tmp/companion-ios-ui-align-build-final.log",
+    "/tmp/companion-ios-fold-final-build.log",
+    "/tmp/companion-ios-fold-jvm.log",
+    "/tmp/companion-ios-fold-final-test.log"
   ]
 }
