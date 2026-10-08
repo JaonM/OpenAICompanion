@@ -137,6 +137,36 @@ fn fresh_delegation_history(history: &[Message], input: &str) -> Vec<Message> {
     result
 }
 
+// A previous delegation does not grant permission to send the next question away.
+fn explicitly_remote(input: &str) -> bool {
+    let text = input.to_lowercase();
+    if ["不要委托", "不委托", "do not delegate", "don't delegate"].iter().any(|word| text.contains(word)) { return false; }
+    ["委托给", "委托到", "交给", "发送到", "远端执行", "远程执行", "在电脑上", "在 mac 上",
+        "delegate to", "delegate this", "run on", "execute on", "send to", "ask the agent"]
+        .iter().any(|word| text.contains(word))
+
+}
+
+fn delegation_target(history: &[Message], explicit: bool) -> Option<String> {
+    let index = history.iter().rposition(|message| matches!(message, Message::Tool { name, .. } if name == "route_task"))?;
+    let Message::Tool { content, is_error: false, call_id, .. } = &history[index] else { return None; };
+    let call = history[..index].iter().rev().find_map(|message| match message {
+        Message::Assistant { tool_calls, .. } => tool_calls.iter().find(|call| call.id == *call_id),
+        _ => None,
+    })?;
+    (|| {
+        let args: serde_json::Value = serde_json::from_str(&call.arguments).ok()?;
+        // Model-only work stays local unless this user request names remote execution.
+        let requires_device = args["required_capabilities"].as_array().is_some_and(|items|
+            items.iter().any(|item| item.as_str().is_some_and(|name| name != "model.complete")))
+            || args["resource_refs"].as_array().is_some_and(|items| !items.is_empty());
+        if !explicit && !requires_device { return None; }
+        let result: serde_json::Value = serde_json::from_str(content).ok()?;
+        if result["decision"] != "REMOTE" && !(explicit && result["decision"] == "WAITING") { return None; }
+        result["agent_id"].as_str().map(str::to_owned)
+    })()
+}
+
 async fn run_with_history_observed_mode<E, O>(
     model: &ModelServeWrapper,
     executor: &mut E,
@@ -207,6 +237,16 @@ where
 
     for step in 0..config.max_step {
         cancelable(&cancellation, executor.sync_if_changed()).await??;
+        let mut offered = executor.list_tools()?;
+        let explicit = explicitly_remote(&user_input);
+        let routed = delegation_target(&history[previous_history.len()..], explicit);
+        let has_router = offered.iter().any(|tool| tool.name == "route_task");
+        let can_delegate = routed.is_some() || (explicit && !has_router);
+        offered.retain(|tool| match tool.name.as_str() {
+            "delegate_to_agent" => can_delegate,
+            "list_remote_agents" => explicit || routed.is_some(),
+            _ => true,
+        });
         let response = cancelable(
             &cancellation,
             model.complete_with_events(
@@ -215,7 +255,7 @@ where
                     system_prompt: system_prompt.clone(),
                     user_input: user_input.clone(),
                     history: model_history.iter().cloned().chain(history[previous_history.len()..].iter().cloned()).collect(),
-                    tools: executor.list_tools()?,
+                    tools: offered.clone(),
                 },
                 emit_events,
             ),
@@ -252,7 +292,19 @@ where
         });
         observe(history.last().expect("assistant message just appended"))?;
         let calls = response.tool_calls;
-        let results = execute_tools(executor, &calls, config, &cancellation).await?;
+        // Enforce delegation even if a model invents a call omitted from its request.
+        let permitted = calls.iter().all(|call| {
+            call.name != "delegate_to_agent" || (can_delegate && routed.as_ref().is_none_or(|agent| {
+                    serde_json::from_str::<serde_json::Value>(&call.arguments).ok()
+                        .is_some_and(|args| args["agent_id"].as_str() == Some(agent.as_str()))
+                }))
+        });
+        let results = if permitted {
+            execute_tools(executor, &calls, config, &cancellation).await?
+        } else {
+            calls.iter().map(|_| Ok(ToolOutput::failure(
+                "Tool not permitted for this turn. Ordinary questions must be answered locally; remote execution requires a current route_task REMOTE decision for the exact agent."))).collect()
+        };
 
         let mut delegated = false;
         let mut tool_error = false;
@@ -576,6 +628,43 @@ mod tests {
                 }
             })
         }
+    }
+
+    #[test]
+    fn ordinary_question_cannot_delegate_even_if_model_ignores_offered_tools() {
+        struct NeverDelegate;
+        impl Tool for NeverDelegate {
+            fn definition(&self) -> ToolDefinition { ToolDefinition::new("delegate_to_agent", "Delegate", "{}") }
+            fn execute(&self, _: ToolCall) -> crate::tool::ToolFuture { panic!("ordinary chat must not execute delegation") }
+        }
+        let model = model(vec![
+            ModelResponse::with_tool_calls("", vec![ToolCall::new("bad", "delegate_to_agent", r#"{"agent_id":"mac"}"#)]),
+            ModelResponse::final_text("42"),
+        ]);
+        let mut executor = crate::ToolRegistry::new(1).unwrap();
+        executor.register(NeverDelegate).unwrap();
+        runtime().block_on(executor.initialize()).unwrap();
+        let result = runtime().block_on(run(&model, &mut executor, &Configuration::default(), "", "17+25是多少")).unwrap();
+        assert_eq!(result.output, "42");
+        assert!(result.history.iter().any(|message| matches!(message, Message::Tool { is_error: true, .. })));
+    }
+
+    #[test]
+    fn route_permission_requires_current_remote_execution_and_exact_target() {
+        fn route(capability: &str, decision: &str) -> Vec<Message> {
+            vec![
+                Message::Assistant { content: "".into(), tool_calls: vec![ToolCall::new("r", "route_task", format!(r#"{{"required_capabilities":["{capability}"]}}"#))] },
+                Message::Tool { call_id: "r".into(), name: "route_task".into(), content: format!(r#"{{"decision":"{decision}","agent_id":"mac"}}"#), is_error: false },
+            ]
+        }
+        assert_eq!(delegation_target(&route("model.complete", "REMOTE"), false), None);
+        assert_eq!(delegation_target(&route("model.complete", "REMOTE"), true), Some("mac".into()));
+        assert_eq!(delegation_target(&route("read_file", "REMOTE"), false), Some("mac".into()));
+        let mut history = route("read_file", "REMOTE"); history.extend(route("model.complete", "LOCAL"));
+        assert_eq!(delegation_target(&history, true), None);
+        assert!(explicitly_remote("请把任务「计算17+25，不要调用工具」委托给 Acceptance Mac"));
+        assert!(!explicitly_remote("Mac 是什么？"));
+        assert!(!explicitly_remote("17+25，不要委托给 Mac"));
     }
 
     #[test]

@@ -130,6 +130,7 @@ impl Session {
         user_input: impl Into<String>,
     ) -> Result<AgentRun, AgentError> {
         let user_input = user_input.into();
+        let foreground = self.model_serve.foreground_turn();
         let previous_history =
             if let (Some(store), Some(session_id)) = (&self.memory, self.trace_session_id) {
                 let store = store.clone();
@@ -231,6 +232,7 @@ impl Session {
             .await
         }
         .await;
+        drop(foreground);
         match result {
             Ok(result) => {
                 if let Some((store, turn_id)) = &trace {

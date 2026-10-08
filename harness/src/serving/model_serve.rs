@@ -1,6 +1,7 @@
 use crate::{AgentError, ModelRequest, ModelResponse, ToolCall};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelServeError {
@@ -58,11 +59,22 @@ pub trait AgentEventSink: Send + Sync {
 #[derive(Clone)]
 pub struct ModelServeWrapper {
     provider: Arc<dyn ModelServeCallback>,
+    foreground_turns: Arc<AtomicUsize>,
+}
+
+pub(crate) struct ForegroundTurn(Arc<AtomicUsize>);
+impl Drop for ForegroundTurn {
+    fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); }
 }
 
 impl ModelServeWrapper {
     pub fn new(provider: Arc<dyn ModelServeCallback>) -> Self {
-        Self { provider }
+        Self { provider, foreground_turns: Arc::new(AtomicUsize::new(0)) }
+    }
+
+    pub(crate) fn foreground_turn(&self) -> ForegroundTurn {
+        self.foreground_turns.fetch_add(1, Ordering::AcqRel);
+        ForegroundTurn(Arc::clone(&self.foreground_turns))
     }
 
     pub fn registered() -> Result<Self, AgentError> {
@@ -83,6 +95,9 @@ impl ModelServeWrapper {
         &self,
         request: ModelRequest,
     ) -> Result<ModelResponse, AgentError> {
+        if self.foreground_turns.load(Ordering::Acquire) != 0 {
+            return Err(AgentError::Model("background memory work deferred during foreground turn".into()));
+        }
         self.complete_internal(request, false).await
     }
 
@@ -290,6 +305,27 @@ fn current_agent_event_sink() -> Result<Option<Arc<dyn AgentEventSink>>, AgentEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn foreground_turn_defers_new_memory_inference_then_releases_it() {
+        struct Provider;
+        #[async_trait::async_trait]
+        impl ModelServeCallback for Provider {
+            async fn complete(&self, _: String, callback: Arc<dyn ModelStreamCallback>) -> Result<(), ModelServeError> {
+                callback.on_chunk(r#"{"choices":[{"delta":{"content":"ok"}}]}"#.into());
+                Ok(())
+            }
+        }
+        let model = ModelServeWrapper::new(Arc::new(Provider));
+        let request = || ModelRequest { system_prompt: "".into(), user_input: "question".into(), history: vec![], tools: vec![], response_format: None };
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let guard = model.foreground_turn();
+        assert!(runtime.block_on(model.clone().complete_silent(request())).is_err());
+        assert_eq!(runtime.block_on(model.complete(request())).unwrap().content, "ok");
+        drop(guard);
+        assert_eq!(runtime.block_on(model.complete_silent(request())).unwrap().content, "ok");
+    }
+
 
     #[test]
     fn accumulates_reasoning_content_and_text_deltas() {

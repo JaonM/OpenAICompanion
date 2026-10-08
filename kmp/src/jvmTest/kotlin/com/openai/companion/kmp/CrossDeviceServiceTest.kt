@@ -76,6 +76,11 @@ class CrossDeviceServiceTest {
             assertEquals("LOCAL", route("calendar"))
             assertEquals("REMOTE", route("build"))
             assertEquals("REMOTE", route("calendar", "mac"))
+            assertEquals("REMOTE", route("calendar", "https://gateway.test/agents/mac/card"))
+            val renamed = peers.map { if (it["id"] == JsonPrimitive("mac")) JsonObject(it + ("name" to JsonPrimitive("Acceptance Mac"))) else it }
+            val named = buildJsonObject { put("required_capabilities", JsonArray(listOf(JsonPrimitive("model.complete")))); put("target_device", "Acceptance Mac") }
+            assertEquals("REMOTE", service.resolve(renamed, named)["decision"]!!.jsonPrimitive.content)
+            assertEquals("UNSUPPORTED", service.resolve(renamed + JsonObject(renamed.last() + ("id" to JsonPrimitive("other"))), named)["decision"]!!.jsonPrimitive.content)
             assertEquals("UNSUPPORTED", route("build", "phone"))
             assertEquals("UNSUPPORTED", route("calendar", resource = "unregistered:calendar"))
             val args = Json.parseToJsonElement("""{"required_capabilities":["build"]}""").jsonObject

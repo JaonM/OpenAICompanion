@@ -280,12 +280,15 @@ class CrossDeviceService(
         val resources = (args["resource_refs"] as? JsonArray).orEmpty().map { it.jsonPrimitive.content }
         require(required.size <= 32 && resources.size <= 32)
         val target = args.string("target_device")
+        val targetId = if (target.isBlank()) null else devices.filter {
+            it.string("id") == target || it.string("name") == target || agentCardUrl(it.string("id")) == target
+        }.singleOrNull()?.string("id")
         fun compatible(device: JsonObject): Boolean {
             val capabilities = device.getValue("tools").jsonArray.map { it.jsonObject.string("name") } + "model.complete"
             val refs = (device["resources"] as? JsonArray).orEmpty().map { it.jsonPrimitive.content }
             return required.all { it in capabilities } && resources.all { it in refs }
         }
-        val candidates = devices.filter { it["delegationEnabled"] != JsonPrimitive(false) && (target.isBlank() || it.string("id") == target) && compatible(it) }
+        val candidates = devices.filter { it["delegationEnabled"] != JsonPrimitive(false) && (target.isBlank() || it.string("id") == targetId) && compatible(it) }
         fun canRun(device: JsonObject): Boolean {
             if (device["foreground"] == JsonPrimitive(true)) return true
             if (device["backgroundExecution"] != JsonPrimitive(true)) return false
