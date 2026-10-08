@@ -7,7 +7,7 @@ OpenAICompanion 是一个面向个人设备、以本地数据为中心的 AI 助
 | 平台 | 实现 | 状态 |
 | --- | --- | --- |
 | macOS | Compose Desktop（KMP/JVM）+ Rust Harness | MVP 已实现，可在 macOS 本机构建运行 |
-| iOS | KMP + Compose Multiplatform + Kotlin/Native Rust 绑定 + llama.cpp | 不使用 Swift；模拟器与真机 App 均已完成无签名构建，模拟器会话、本地推理和本机 MCP 连接 UI 测试已通过 |
+| iOS | KMP + Compose Multiplatform + Kotlin/Native Rust 绑定 + llama.cpp / MLX | KMP 界面，原生模型桥接；验收范围及待验收项见 iOS MVP 指南 |
 | Android | KMP + Compose Multiplatform + Rust UniFFI + llama.cpp JNI | Debug APK 已构建；Android 35 ARM64 模拟器已验证安装、首屏启动与本地存储初始化 |
 
 macOS 与 iOS 现在使用同一条持续对话轨迹，不提供新建会话入口。Rust Harness 每轮读取最多 8 轮原始 trace、紧邻窗口的一条 4 轮对话摘要、按当前问题匹配的一条更早摘要，以及已有的长期画像记录；成功完成的 Turn 会异步提取中长期记忆点。macOS 端支持配置远程 MCP 服务；iOS 的 KMP 共享 MCP 客户端已通过 JVM 协议测试，Compose、OAuth、Rust 桥接与端侧模型已接入 Xcode target，模拟器与真机 App 已完成无签名构建；模拟器上 3 项 UI 测试通过，真机端到端验收仍待完成。
@@ -38,7 +38,7 @@ macOS 与 iOS 现在使用同一条持续对话轨迹，不提供新建会话入
 
 ### iOS
 
-需要完整 Xcode（含 iOS SDK）、JDK 21 和 Rust iOS 目标。当前 Xcode target 使用 Objective-C 启动壳、KMP + Compose Multiplatform 界面，不使用 Swift：
+需要完整 Xcode（含 iOS SDK 与 Metal Toolchain）、JDK 21 和 Rust iOS 目标。当前 Xcode target 使用 Objective-C 启动壳、KMP + Compose Multiplatform 界面，MLX 通过薄 Swift 桥接调用官方库：
 
 ```bash
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
@@ -48,7 +48,7 @@ open ios/OpenAICompanion.xcodeproj
 
 安装完整 Xcode 后，可运行 `./scripts/ios-app-check.sh` 构建 iOS 模拟器 App，检查 KMP、Rust、llama.cpp 与 Xcode 工程的链接。
 
-iOS 使用 llama.cpp 在设备本机运行用户导入的 GGUF；不依赖 Mac 的 Ollama 服务，也不内置桌面端的 27B 模型。构建 llama.cpp 需要 CMake 3.28+。当前 iOS 工程已通过完整 Xcode App 构建和模拟器启动，模型及真机验收状态见 [iOS MVP 指南](docs/ios_mvp.md)。
+iOS 可选择 llama.cpp 运行用户导入的 GGUF，或 MLX 运行下载的 Qwen3.5-4B-MLX-4bit；两者都在设备本机推理。不依赖 Mac 的 Ollama 服务，也不内置桌面端的 27B 模型。构建 llama.cpp 需要 CMake 3.28+。当前 iOS 工程已通过完整 Xcode App 构建和模拟器启动，模型及真机验收状态见 [iOS MVP 指南](docs/ios_mvp.md)。
 
 ### Android
 
@@ -58,7 +58,7 @@ Android App 已完成 Debug APK 构建及 Android 35 ARM64 模拟器启动烟测
 
 - `harness/`：Rust Agent Loop、模型与工具回调接口、SQLite 记忆及会话轨迹。
 - `kmp/`：跨平台数据模型、Compose 界面、共享 MCP/A2A 客户端、Android/macOS UniFFI JVM 绑定，以及 iOS Kotlin/Native Rust 绑定。
-- `ios/`：Objective-C 启动壳与 Objective-C++ llama.cpp 适配；界面和业务逻辑位于 `kmp/`。
+- `ios/`：Objective-C 启动壳、Objective-C++ llama.cpp 适配与 Swift MLX 桥接；界面和业务逻辑位于 `kmp/`。
 - `scripts/`：绑定生成及平台构建脚本。
 
 ![OpenAICompanion 产品愿景架构图](assets/architecture.png)
@@ -88,7 +88,7 @@ iOS 的 KMP 核心代码可在 `kmp/` 下用 `./gradlew -PkmpJvmToolchain=21 :co
 
 ## 数据与安全
 
-会话轨迹和记忆保存在应用本地 SQLite 中，目前**没有数据库加密**。macOS 模型请求会发送到设置的服务地址；iOS 的 GGUF 推理在设备本机进行。两端各自保存本地数据，尚无跨设备会话同步。不要将未认证的 Ollama HTTP 服务直接暴露到公网。处理敏感个人数据前，请先评估存储加密、模型服务权限与网络配置。
+会话轨迹和记忆保存在应用本地 SQLite 中，目前**没有数据库加密**。macOS 模型请求会发送到设置的服务地址；iOS 的 GGUF / MLX 推理在设备本机进行。两端各自保存本地数据，尚无跨设备会话同步。不要将未认证的 Ollama HTTP 服务直接暴露到公网。处理敏感个人数据前，请先评估存储加密、模型服务权限与网络配置。
 
 ## 文档
 

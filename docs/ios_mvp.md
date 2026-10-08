@@ -1,12 +1,12 @@
 # iOS MVP（KMP + Compose Multiplatform）
 
-iOS 的目标架构是 KMP + Compose Multiplatform 界面、Kotlin/Native 的 Rust Harness 绑定及 llama.cpp 端侧推理，不使用 Swift 源码。共享 Compose 界面位于 [`kmp/src/commonMain`](../kmp/src/commonMain)，MCP 客户端位于同一源码集；iOS 的 Compose `UIViewController` 工厂和 MCP 连接管理位于 [`kmp/src/iosMain`](../kmp/src/iosMain)。
+iOS 的目标架构是 KMP + Compose Multiplatform 界面、Kotlin/Native 的 Rust Harness 绑定及可选 llama.cpp / MLX 端侧推理。界面仍由 KMP 实现；MLX 使用薄 Swift 原生桥接调用官方库。共享 Compose 界面位于 [`kmp/src/commonMain`](../kmp/src/commonMain)，MCP 客户端位于同一源码集；iOS 的 Compose `UIViewController` 工厂和 MCP 连接管理位于 [`kmp/src/iosMain`](../kmp/src/iosMain)。
 
-**基础对话与指定 Mac 跨设备委托已通过真机验收，完整生产验收尚未完成。** 最新结果见本文末尾及 [2026-10-08 验收记录](../scripts/acceptance/results-2026-10-08.json)。以下 2026-09 的构建与验证描述保留为历史记录。 [`ios/OpenAICompanion.xcodeproj`](../ios/OpenAICompanion.xcodeproj) 的 App target 只编译 Objective-C 启动壳和 Objective-C++ llama.cpp 适配，Gradle 构建 `kmp/iosApp` 静态框架；旧 Swift 原型和 Swift UniFFI 生成文件已移除。`kmp/iosApp` 已增加 Kotlin/Native Harness 适配、MCP 服务、Compose 状态控制器、GGUF 文件导入和 llama.cpp C 桥接的组装代码。`kmp/iosRustBridge` 已能生成 Kotlin/Native UniFFI 源码。2026-09-26 已在 Xcode 27.0 环境完成 llama.cpp XCFramework、Apple Silicon 模拟器与 iPhone 的无签名 App 构建；iPhone 18 Pro 模拟器已安装并启动 App，首屏、本地 SQLite 初始化、单一持续对话与重启恢复，以及小型 GGUF 的端侧生成回复已在模拟器验证。本机 MCP 连接和 3 个工具的发现已通过模拟器 UI 测试；工具调用、OAuth 与真机端到端验收仍需完成。
+**基础对话与指定 Mac 跨设备委托已通过真机验收，完整生产验收尚未完成。** 最新结果见本文末尾及 [2026-10-08 验收记录](../scripts/acceptance/results-2026-10-08.json)。以下 2026-09 的构建与验证描述保留为历史记录。 [`ios/OpenAICompanion.xcodeproj`](../ios/OpenAICompanion.xcodeproj) 的 App target 编译 Objective-C 启动壳、Objective-C++ llama.cpp 适配和 Swift MLX 适配，Gradle 构建 `kmp/iosApp` 静态框架；旧 Swift 原型和 Swift UniFFI 生成文件已移除。`kmp/iosApp` 已增加 Kotlin/Native Harness 适配、MCP 服务、Compose 状态控制器、GGUF 文件导入和 llama.cpp C 桥接的组装代码。`kmp/iosRustBridge` 已能生成 Kotlin/Native UniFFI 源码。2026-09-26 已在 Xcode 27.0 环境完成 llama.cpp XCFramework、Apple Silicon 模拟器与 iPhone 的无签名 App 构建；iPhone 18 Pro 模拟器已安装并启动 App，首屏、本地 SQLite 初始化、单一持续对话与重启恢复，以及小型 GGUF 的端侧生成回复已在模拟器验证。本机 MCP 连接和 3 个工具的发现已通过模拟器 UI 测试；工具调用、OAuth 与真机端到端验收仍需完成。
 
 ## 构建
 
-需要完整 Xcode（含 iOS SDK）、CMake 3.28+、JDK 21 和 Rust 工具链；仅有 Command Line Tools 不够。先在 Xcode 中接受许可并设置开发团队。从仓库根目录执行：
+需要完整 Xcode（含 iOS SDK 和 Metal Toolchain；缺失时运行 `xcodebuild -downloadComponent MetalToolchain`）、CMake 3.28+、JDK 21 和 Rust 工具链；仅有 Command Line Tools 不够。先在 Xcode 中接受许可并设置开发团队。从仓库根目录执行：
 
 ```bash
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
@@ -26,7 +26,7 @@ Intel Mac 模拟器还需 `x86_64-apple-ios`；UniFFI 绑定生成会按当前 M
 
 App 通过 llama.cpp 在手机本机加载 GGUF，不再连接 Mac 上的 Ollama 或其他 HTTP 模型服务。在“设置”中从“文件”导入指令微调 GGUF；模型复制到 App 的 Application Support，UserDefaults 只记录文件名。App 不内置模型。桌面端 `unsloth/Qwen3.8-27B-GGUF` 通常过大，不适合作为手机默认模型；请按设备可用内存选择较小的量化聊天模型。
 
-当前 Qwen3 / Qwen3.5 思考模式使用 8192 token 上下文，其他模型使用 4096 token 上下文，正文最多生成 512 token，Qwen3 额外预留最多 1024 token、Qwen3.5 预留最多 256 token 的思考预算，并使用 GGUF 内的聊天模板。超长会话、不支持的模板或设备内存不足会明确报错。Rust Harness 继续负责会话、轨迹和流事件；llama.cpp 负责本地推理。KMP 宿主已新增无 Swift 的模型回调与文件选择代码，调用现有 Objective-C++ 引擎的 C 接口；已通过 iOS SDK 编译和模拟器启动验证，小型 GGUF 推理已通过模拟器 UI 测试。模型侧现可在已连接远程 MCP 时输出单个 JSON 工具调用，由 Harness 执行并继续对话；此路径尚未在真机上验收。MVP 仍只支持纯文本，不支持多模态输入。
+当前 Qwen3 / Qwen3.5 思考模式使用 8192 token 上下文，其他模型使用 4096 token 上下文，正文最多生成 512 token，Qwen3 额外预留最多 1024 token、Qwen3.5 预留最多 256 token 的思考预算，并使用 GGUF 内的聊天模板。超长会话、不支持的模板或设备内存不足会明确报错。Rust Harness 继续负责会话、轨迹和流事件；llama.cpp 负责本地推理。KMP 宿主提供模型回调与文件选择代码，调用现有 Objective-C++ 引擎的 C 接口；已通过 iOS SDK 编译和模拟器启动验证，小型 GGUF 推理已通过模拟器 UI 测试。模型侧现可在已连接远程 MCP 时输出单个 JSON 工具调用，由 Harness 执行并继续对话；此路径尚未在真机上验收。MVP 仍只支持纯文本，不支持多模态输入。
 
 端侧模型在下一轮提示词中保留 Harness 的工具调用名称与调用 ID，并将工具返回正文标记为不可信数据；该消息转换已在 macOS Foundation 环境做独立测试，但仍需 iOS 真机检验模型行为。
 
@@ -86,3 +86,31 @@ KMP + Compose 版本已有共享界面、状态控制器、MCP 客户端、Kotli
 当前 Qwen3.5 思考预算 256 token、正文预算 512 token；验收算术轮次等待约 70–90 秒，8 bit 的响应速度仍有限。这些结果验证模型加载、基础回答和多轮上下文，不能替代开放对话质量、长会话、设备内存压力及其他机型专项验收。此前语法 URL 转义错误和更长思考预算导致的测试超时保留在验收记录中。
 
 新模型的指定 Mac 委托也已通过真机回归：`testCrossDeviceDelegatesToMacAndShowsResult` **1 通过、0 失败、0 跳过**（94.987 秒）。手机生成委托、用户批准“发送一次”、创建新任务，再显示 Acceptance Mac 返回的精确 `42`；断言限定新任务编号，不把历史卡片计作成功。验收任务明确要求只输出数字；此前空格差异及 Mac 附带额外解释的两次断言失败仍保留。证据为 `ios-qwen35-cross-device-digits-1008.xcresult`。这不覆盖后台自动接单、App 退出后的推送或完整生产部署验收。
+
+
+## 2026-10-08 流式正文与 MLX 引擎
+
+“设置 → 端侧模型 → 推理引擎”可选择 llama.cpp 或 MLX，选择存入设备本地，普通重启保留。切换时卸载原引擎，两个模型不会同时常驻；下载和切换期间禁止重复操作与发送。llama.cpp 继续使用已有 Qwen3.5 Q8_0 GGUF；增加 MLX 选择不删除它。
+
+MLX 使用固定 `mlx-swift-lm 3.32.3`，依赖版本由 Xcode `Package.resolved` 锁定。模型为 [mlx-community/Qwen3.5-4B-MLX-4bit](https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit)，固定 revision `32f3e8ecf65426fc3306969496342d504bfa13f3`，全部文件约 3.06 GB。`model.safetensors` 大小 3,034,300,695 字节，SHA-256 `5fb9acd0246866381cf8c5c354c6db1019f6498eec4ccb4f5edcc71ffeacb2db`。下载入口逐文件校验大小和 SHA-256，全部完成后才替换模型目录；下载失败保留原目录。模型保存在 App 私有 MLXModels 目录，不加入 App 包或 Git。本次已经从上游下载、校验并复制到验收手机；App 内再次下载的网络流程另列待验收。
+
+两个引擎均接收 Harness 的 `messages` 请求，使用 `role` 和文本 `content`，输出 Chat Completions 风格的增量片段。适配层将 developer 转为 system，将工具返回包为不可信 user 数据，并保留历史工具名和调用 ID；这属于文本兼容层，不是完整 OpenAI HTTP API。llama.cpp 使用 GGUF 内模板的原生适配；MLX Tokenizer 使用模型的 `chat_template.jinja`。当前只接入文本推理：仓库含视觉权重和多模态模板不代表 App 已支持图片、视频或音频输入。
+
+Qwen3.5 保留 256 token 思考预算和最多 512 token 正文。思考内容通过独立 reasoning 增量实时显示为灰色小字，最多保留 1200 个 UTF-16 单元并用省略号截断，界面最多显示三行；历史思考仍折叠显示。随后正文在模型生成期间逐步增长，支持从工具 JSON 包装中解码不完整字符串，并处理转义、中文和 Unicode 代理对。只输出新增片段，结束时补齐剩余片段；工具调用与委托任务的结构化状态仍在完整校验后交付，不能流成正文。停止、完成或失败后移除实时正文与思考气泡。
+
+Foundation 流片段/模板回归通过；共享控制器 13 项、设备路由 8 项回归通过，覆盖思考截断、委托结果关联、引擎操作互斥、失败恢复及目标别名；Rust 67 项单元测试通过。真机结果及失败历史记录在 [验收记录](../scripts/acceptance/results-2026-10-08.json)，不能用构建成功代替模型推理和流式交互验收。
+
+远端任务结果现在关联到本轮 `delegate_to_agent` 工具回执，在对话内随任务状态更新显示。普通问答不提供委托工具；需要远端能力或用户明确要求跨设备时，必须先取得本轮有效路由，再向同一 Agent 委托，历史路由不能作为新请求的授权。前台对话期间延后新的后台记忆推理，避免工具往返之间插入记忆生成。上述变更的最终真机回归仍以验收记录为准。
+
+MLX 的长提示词预填充分为每批 128 token，并同步回收 GPU 中间结果，避免手机上的瞬时内存峰值；结构化输出使用 MLX 官方库的 JSON Schema 约束接口。已通过的 MLX 真机用例覆盖 `42 → 50` 连续对话、重启保留引擎、切回原 GGUF 并回答 `42`。此前长提示词退出、流式语法掩码计算变慢及路由重复发现的失败均保留在验收记录中。
+
+明确委托尚未提交时，Harness 使用标准 `tool_choice: required`，两个本地引擎在输出约束中禁止用普通文本代替工具调用；路由不支持、需要用户处理或执行失败时仍可解释原因。Harness 也拒绝模型绕过此要求返回的口头应答，只有本轮真实任务回执才确认提交。
+
+
+## 2026-10-09 收尾验收
+
+本轮功能验收通过：MLX 普通算术问答返回精确 `42`，没有远端审批或新增任务（50.662 秒）；MLX 与 llama.cpp 均验证了思考增长、正文增长、完整 `1..30` 和停止后恢复输入。布局修复后的完整用例分别耗时 189.428 秒、337.265 秒。MLX 指定 Mac 委托、审批、执行及对话内显示新任务结果 `42` 通过（157.384 秒，`ios-advertised-capabilities-final-1009.xcresult`）；反向委托手机的 MLX 结构化任务也返回 `completed/42`。最终签名 App 与 UI 测试构建通过。失败历史保留于验收 JSON，混合结果的测试组不计为整组通过。
+
+设备发现现在明确包含 `model.complete`，路由参数只采用本轮发布的能力名；未配置设备网关时不发布设备路由工具，保留独立 A2A 的直接委托路径。消息列表使用稳定标识，自动滚动随下一次布局执行，修复测试中出现的文本布局缓存崩溃。
+
+这些是指定手机和测试服务下的功能验收，不能视为完整生产或性能验收：已开始的后台记忆推理仍可能延长下一轮等待；App 内重新下载 3.06 GB 模型、其他机型与长时内存压力、Android 真机、后台推送和正式服务部署仍按原记录待验收。MLX 当前只支持文本输入。

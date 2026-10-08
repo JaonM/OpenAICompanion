@@ -379,6 +379,224 @@
       "validation": "iOS Qwen3.5 replacement case passed; Foundation prompt/grammar regression passed; signed iOS build passed",
       "android": "shared UI updated; model engine unchanged; SDK/native acceptance pending",
       "hardware_shift_enter": "implemented; not separately verified on a physical hardware keyboard"
+    },
+    "streaming": {
+      "status": "passed scoped physical-device acceptance",
+      "implementation": "Independent incremental reasoning (1200 UTF-16-unit UI cap, 3 visual lines) followed by incremental body; task and tool envelopes remain atomic. Both engines passed growth, exact final text and stop checks.",
+      "foundation_regression": "passed",
+      "earlier_attempts": [
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-streaming-1008.xcresult",
+          "result": "cross-device passed (65.312 s); local growing text and exact 1..30 completed, but stop assertion failed; whole local case not passed"
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-streaming-final-1008.xcresult",
+          "result": "failed while phone foreground was another app; stream not observable"
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-streaming-foreground-1008.xcresult",
+          "result": "first growing answer and exact 1..30 completed; stop wait failed with blank AX labels/identifiers, not counted as passed"
+        }
+      ],
+      "llama_body_and_stop": {
+        "status": "passed",
+        "seconds": 189.661,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-llama-stream-stop-1008.xcresult",
+        "note": "Earlier body-streaming and stop regression; newest reasoning-streaming changes require separate final rerun."
+      },
+      "llama_reasoning_body_and_stop": {
+        "status": "passed",
+        "seconds": 195.427,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-json-schema-final-1008.xcresult",
+        "scope": [
+          "live reasoning grows and remains bounded",
+          "body grows before completion",
+          "exact sequence 1..30",
+          "stop 1..1000 restores composer"
+        ],
+        "layout_rerun": {
+          "status": "passed",
+          "seconds": 337.265,
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-layout-routing-final-1008.xcresult"
+        }
+      }
+    },
+    "mlx": {
+      "status": "passed scoped physical-device acceptance; pending items listed separately",
+      "engine_options": [
+        "llama.cpp",
+        "MLX"
+      ],
+      "model": "mlx-community/Qwen3.5-4B-MLX-4bit",
+      "revision": "32f3e8ecf65426fc3306969496342d504bfa13f3",
+      "weights_bytes": 3034300695,
+      "weights_sha256": "5fb9acd0246866381cf8c5c354c6db1019f6498eec4ccb4f5edcc71ffeacb2db",
+      "download": "all 10 upstream files downloaded, size/SHA-256 verified, copied into iPhone private MLXModels directory",
+      "manifest": "/tmp/companion-physical-acceptance-20261007/mlx-qwen35-download-manifest.json",
+      "gguf": "existing Qwen3.5 Q8_0 retained",
+      "dependencies": "official mlx-swift-lm 3.32.3; Package.resolved checked in",
+      "build": "signed physical iOS build passed after installing official Metal Toolchain",
+      "shared_controller_tests": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "log": "/tmp/companion-mobile-capabilities-final-1009.log"
+      },
+      "scope": "text inference only; image/video/audio not connected",
+      "pending": [
+        "in-App HTTPS redownload path",
+        "other devices, memory pressure and long-session quality",
+        "Foreground latency while an earlier background memory inference is already running; functional tests do not establish a latency SLA."
+      ],
+      "earlier_attempts": [
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-selection-1008.xcresult",
+          "result": "interrupted after infinite empty detokenizer read located; changed to one read per sampled token"
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-selection-fixed-1008.xcresult",
+          "result": "interrupted after App process no longer existed; full UI case not passed; independent structured task reproduced a grammar terminal/lookahead error; user subsequently confirmed manual App exit"
+        },
+        {
+          "log": "/tmp/companion-ios-mlx-runtime-console-1008.log",
+          "result": "structured task failed because TokenIterator lookahead committed after grammar termination; terminal guard and stop-before-error handling added"
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-model-final-1008.xcresult",
+          "result": "interrupted after UI App process exited; user confirmed manual App exit, not evidence of a product crash"
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-foreground-1008.xcresult",
+          "result": "App exited at about 22:25; user explicitly confirmed no manual exit. Product failure, not an environment exclusion."
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-conversation-1008.xcresult",
+          "result": "App exited during 3393-token prefill. Bounded prefill to 128 tokens with GPU synchronization; later multi-turn selection case passed with observed MLX peak memory 3034562212 bytes."
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-bounded-prefill-1008.xcresult",
+          "result": "Cross-device case failed after connection lost registering device; selection/dialogue case passed; reasoning and body growth assertions passed but body stalled mid-sequence, streaming case interrupted for diagnosis. Full suite not passed."
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-foreground-routing-stream-1008.xcresult",
+          "result": "Cross-device case failed after repeated list_remote_agents calls. Streaming case interrupted after persistent partial output. Added progressive tool selection and native stage diagnostics."
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-stream-stage-probe-1008.xcresult",
+          "result": "Stage diagnostics localized slowdown to grammar mask computation (seconds per token, increasing with text length). Replaced custom GBNF with native JSON Schema compiler; test interrupted to install fix."
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-json-schema-final-1008.xcresult",
+          "case": "testCrossDeviceDelegatesToMacAndShowsResult",
+          "result": "Failed after Compose TextStringSimpleNode no-paragraph layout-cache crash. Added stable message keys/content types and scheduled automatic scroll for next remeasure. Requires rerun."
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-layout-routing-final-1008.xcresult",
+          "case": "testMlxCrossDeviceDelegatesToMacAndShowsResult",
+          "result": "No layout crash, but model acknowledged delegation in plain text without a tool call. Added standard tool_choice=required for unsubmitted explicit remote execution, enforced in both local engines and Harness."
+        },
+        {
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-required-delegation-final-1008.xcresult",
+          "result": "Failed after model invented calculation capability because device discovery omitted model.complete. Published complete capability lists and constrained route schema to current advertised capabilities; subsequent real-device rerun passed."
+        }
+      ],
+      "structured_execution": {
+        "status": "passed",
+        "task": "222d16265c3a4811b9171e78a0975761",
+        "result": "42",
+        "engine": "MLX",
+        "evidence": "/tmp/companion-physical-acceptance-20261007/phone-mlx-terminal-result-1008.json",
+        "log": "/tmp/companion-mlx-terminal-probe-1008.log",
+        "json_schema_rerun": {
+          "status": "passed",
+          "task": "dc965570838f43f5a67dd96d09d4b5c4",
+          "result": "42",
+          "state": "TASK_STATE_COMPLETED",
+          "evidence": "/tmp/companion-physical-acceptance-20261007/phone-mlx-schema-final-result-1008.json",
+          "log": "/tmp/companion-probe-mlx-schema-final-1009.log"
+        }
+      },
+      "selection_and_dialogue": {
+        "status": "passed",
+        "case": "testMlxEngineSelectionAndDialogue",
+        "seconds": 536.154,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-bounded-prefill-1008.xcresult",
+        "scope": [
+          "MLX 42 then contextual 50",
+          "engine selection persists after relaunch",
+          "original GGUF retained and answers 42 after switching back"
+        ],
+        "note": "Individual case passed; suite interrupted while diagnosing subsequent streaming stall."
+      },
+      "streaming_and_stop": {
+        "status": "passed",
+        "case": "testMlxStreamsReplyAndCanStop",
+        "seconds": 193.236,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-json-schema-final-1008.xcresult",
+        "scope": [
+          "live reasoning grows and is bounded",
+          "body grows before completion",
+          "exact final sequence 1..30",
+          "stop 1..1000 restores composer"
+        ],
+        "layout_rerun": {
+          "status": "passed",
+          "seconds": 189.428,
+          "bundle": "/tmp/companion-physical-acceptance-20261007/ios-layout-routing-final-1008.xcresult"
+        }
+      },
+      "ordinary_question": {
+        "status": "passed",
+        "seconds": 50.662,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-layout-routing-final-1008.xcresult",
+        "scope": "Plain 17+25 without anti-tool coaching returned exactly 42; no remote approval and no new remote task."
+      },
+      "final_build": {
+        "status": "passed",
+        "log": "/tmp/companion-ios-release-review-build-1009.log"
+      },
+      "cross_device_foreground_result": {
+        "status": "passed",
+        "case": "testMlxCrossDeviceDelegatesToMacAndShowsResult",
+        "seconds": 157.384,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-advertised-capabilities-final-1009.xcresult",
+        "local_task_id": 23,
+        "result": "42",
+        "screenshot": "/tmp/companion-physical-acceptance-20261007/mlx-remote-result-final-1009.png",
+        "scope": "Fresh task approved once, executed by Acceptance Mac, completed result visible inline in the originating iOS conversation."
+      }
+    },
+    "routing_reasoning_regression": {
+      "status": "passed scoped acceptance",
+      "rust_tests": {
+        "passed": 67,
+        "failed": 0,
+        "log": "/tmp/companion-harness-capabilities-final-1008.log"
+      },
+      "shared_tests": {
+        "controller_passed": 13,
+        "routing_passed": 8,
+        "failed": 0,
+        "log": "/tmp/companion-mobile-capabilities-final-1009.log"
+      },
+      "changes": [
+        "Current-turn delegation gate",
+        "Named device/card URL resolution",
+        "Live reasoning bounded at 1200 UTF-16 units",
+        "Remote result inline with originating tool receipt",
+        "Defer new background memory inference during foreground turns",
+        "Offer only one discovery entry point and stop offering discovery after success",
+        "Constrain delegation grammar to latest routed target",
+        "Publish model.complete alongside real device tools",
+        "Constrain route capability names to current discovery",
+        "Require actual tool execution for explicit unsubmitted delegation",
+        "Do not publish device router when gateway is unconfigured; standalone A2A stays available"
+      ],
+      "physical_bundle": "/tmp/companion-physical-acceptance-20261007/ios-advertised-capabilities-final-1009.xcresult",
+      "completed_date": "2026-10-09",
+      "final_build_log": "/tmp/companion-ios-release-review-build-1009.log",
+      "final_app_installed": true,
+      "final_app_launched": true
     }
   },
   "evidence_root": "/tmp/companion-mac-full-acceptance-20261008",
