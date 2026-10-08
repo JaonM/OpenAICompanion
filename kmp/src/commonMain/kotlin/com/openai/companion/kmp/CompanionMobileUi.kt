@@ -293,7 +293,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                     tokenDraft = ""
                                 }) { Text("保存访问令牌") }
                             }
-                            TextButton(onClick = { if (agent.enabled) actions.disableA2aAgent(agent.id) else actions.addA2aAgent(agent.cardUrl) }) { Text(if (agent.enabled) "停用" else "启用") }
+                            TextButton(onClick = { if (agent.enabled) actions.disableA2aAgent(agent.id) else actions.addA2aAgent(agent.cardUrl) }, modifier = Modifier.semantics { contentDescription = "${if (agent.enabled) "停用" else "启用"} Agent ${agent.name}" }) { Text(if (agent.enabled) "停用" else "启用") }
                         }
                     } }
                     state.activeSessionId == null -> {

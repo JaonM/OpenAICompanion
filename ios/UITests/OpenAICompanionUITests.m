@@ -71,6 +71,46 @@
     XCTAssertTrue(connected.exists);
 }
 
+// Requires the real phone to be paired and the acceptance Mac worker online.
+- (void)testCrossDeviceDelegatesToMacAndShowsResult {
+    NSData *data = [NSData dataWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"]];
+    if (!data) XCTSkip(@"需要独立真机跨设备验收 fixture。");
+    NSDictionary *fixture = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    XCUIApplication *app = [[XCUIApplication alloc] init];
+    app.launchArguments = @[@"-localGGUFFileName", fixture[@"modelFileName"] ?: @"test-smollm2.gguf"];
+    [app launch];
+    [app.buttons[@"设置"] tap];
+    XCUIElement *enable = app.buttons[@"启用 Agent Acceptance Mac"];
+    XCUIElement *disable = app.buttons[@"停用 Agent Acceptance Mac"];
+    for (NSInteger i = 0; i < 15 && !enable.hittable && !disable.hittable; i++) [app swipeUp];
+    XCTAssertTrue(enable.hittable || disable.hittable, @"尚未发现验收 Mac Agent。");
+    if (enable.hittable) [enable tap];
+    XCTAssertTrue([disable waitForExistenceWithTimeout:20]);
+    [app.buttons[@"完成"] tap];
+    XCUIElementQuery *results = [app.staticTexts matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label == %@ OR label == %@", @"远端结果：42", @"远端结果：17 + 25 = 42"]];
+    if (app.buttons[@"查看"].exists) {
+        [app.buttons[@"查看"] tap];
+        [results.firstMatch waitForExistenceWithTimeout:5];
+    }
+    NSUInteger priorResults = results.count;
+    XCUIElement *message = app.textViews.firstMatch;
+    XCTAssertTrue([message waitForExistenceWithTimeout:10]);
+    [self enterAcceptanceText:fixture[@"routingPrompt"] ?: @"请把 17+25 的计算委托给 Acceptance Mac，完成后展示远端结果。不要在手机本地计算。" field:message app:app];
+    XCTAssertTrue(app.buttons[@"发送"].enabled);
+    [app.buttons[@"发送"] tap];
+    XCTAssertTrue([app.buttons[@"发送一次"] waitForExistenceWithTimeout:120], @"未产生远端委托确认，不能计作跨设备路由成功。");
+    XCTAssertTrue(app.staticTexts[@"Acceptance Mac"].exists);
+    [app.buttons[@"发送一次"] tap];
+    XCTAssertTrue([app.buttons[@"查看"] waitForExistenceWithTimeout:20]);
+    [app.buttons[@"查看"] tap];
+    NSPredicate *newResult = [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
+        return results.count > priorResults;
+    }];
+    XCTNSPredicateExpectation *completed = [[XCTNSPredicateExpectation alloc] initWithPredicate:newResult object:app];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[completed] timeout:180], XCTWaiterResultCompleted);
+}
+
 - (void)testScheduledReminderSurvivesAppTermination {
     XCUIApplication *app = [[XCUIApplication alloc] init];
     [app launch];
