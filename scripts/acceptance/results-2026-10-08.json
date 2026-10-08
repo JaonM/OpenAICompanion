@@ -274,5 +274,29 @@
     "/tmp/companion-ios-interaction-compact-final-test.log",
     "/tmp/companion-ios-interaction-plane-final-test.log",
     "/tmp/companion-ios-interaction-plane-jvm.log"
-  ]
+  ],
+  "android_ui_sync": {
+    "date": "2026-10-08",
+    "implementation": "Android MainActivity already renders the same commonMain CompanionMobileScreen as iOS; no duplicate platform UI patch is required.",
+    "features": [
+      "Compact composer and paper-plane send icon",
+      "Collapsed gray tool/reasoning records",
+      "Grouped settings and draft preservation",
+      "Dedicated task page without persistent chat task toolbar",
+      "History scroll position and latest-message navigation"
+    ],
+    "shared_jvm_compile": {
+      "status": "passed",
+      "evidence": "/tmp/companion-android-ui-shared-1008.log"
+    },
+    "apk_build": {
+      "status": "blocked",
+      "reason": "SDK location not found during androidApp configuration.",
+      "evidence": "/tmp/companion-android-ui-build-1008.log"
+    },
+    "device_acceptance": {
+      "status": "pending",
+      "scope": "Android keyboard/insets, UI interactions and cross-device execution; iOS device results do not establish Android acceptance."
+    }
+  }
 }

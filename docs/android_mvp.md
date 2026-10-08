@@ -22,3 +22,17 @@ Android App 位于 [`kmp/androidApp`](../kmp/androidApp)。界面、状态控制
 - 现有日历数据源会检查 `READ_CALENDAR`，但移动 App 尚未提供完整的日历授权入口与端到端验收。
 
 已使用 Android SDK 35、NDK 27.2.12479018、CMake 3.22.1 成功执行 `:androidApp:assembleDebug`，APK 包含 arm64-v8a 与 x86_64 的 Rust Harness、llama.cpp 和 JNA 原生库。Android 35 ARM64 模拟器上已完成安装、首屏启动及 Rust Harness 创建 `companion.sqlite` 的烟测，未发现启动崩溃。设备模型生成、MCP/OAuth、通知和重启恢复仍需端到端验收。
+
+## 与 iOS 同步的移动界面
+
+2026-10-08 核对：Android `MainActivity` 直接调用 `commonMain` 的 `CompanionMobileScreen`，以下 iOS 界面修改已同时适用于 Android，无需维护第二份界面。
+
+| 功能 | Android 当前实现 |
+| --- | --- |
+| 对话输入 | 默认一行、最多四行的紧凑输入框，纸飞机发送按钮；生成期间提供停止按钮。共享界面使用安全区域及键盘边距。 |
+| 执行记录 | 工具和思考过程以灰色小字单行省略，点击展开全文。 |
+| 远端任务 | 顶栏“任务”进入独立任务页；对话顶部无常驻任务状态/刷新栏，任务页保留刷新、回复及取消。 |
+| 设置 | 七个功能分组，支持返回“所有设置”及“完成”。 |
+| 导航与阅读 | 页面切换保留草稿；阅读历史时保持位置，提供“最新消息”入口。 |
+
+本次共享 JVM 编译通过（`/tmp/companion-android-ui-shared-1008.log`）。Android APK 构建尝试因当前环境缺少 SDK 而未执行（`/tmp/companion-android-ui-build-1008.log`）；上文的历史 APK/模拟器烟测不代表本次版本验收通过。当前版本的 Android 构建、键盘适配、上述交互及跨设备真机验收仍待完成。
