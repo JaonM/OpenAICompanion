@@ -111,6 +111,23 @@
     XCTAssertEqual([XCTWaiter waitForExpectations:@[completed] timeout:180], XCTWaiterResultCompleted);
 }
 
+// Verify the card for a host-verified real task; this does not submit a new task.
+- (void)testCompletedCrossDeviceTaskIsVisible {
+    NSData *data = [NSData dataWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"]];
+    NSDictionary *fixture = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    if (![fixture[@"completedTaskText"] length] || ![fixture[@"completedTaskResult"] length])
+        XCTSkip(@"需要先完成并由服务端核验真实远端任务。");
+    XCUIApplication *app = [[XCUIApplication alloc] init];
+    [app launch];
+    XCTAssertTrue([app.buttons[@"查看"] waitForExistenceWithTimeout:20]);
+    [app.buttons[@"查看"] tap];
+    XCTAssertTrue([app.staticTexts[@"远端任务 · Acceptance Mac"] waitForExistenceWithTimeout:10]);
+    XCTAssertTrue(app.staticTexts[fixture[@"completedTaskText"]].exists);
+    XCTAssertTrue(app.staticTexts[@"已完成"].exists);
+    NSString *result = [@"远端结果：" stringByAppendingString:fixture[@"completedTaskResult"]];
+    XCTAssertTrue(app.staticTexts[result].exists);
+}
+
 - (void)testScheduledReminderSurvivesAppTermination {
     XCUIApplication *app = [[XCUIApplication alloc] init];
     [app launch];
