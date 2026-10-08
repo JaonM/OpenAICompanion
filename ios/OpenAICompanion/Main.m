@@ -20,6 +20,11 @@
 
 - (BOOL)application:(UIApplication *)application
     didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions {
+#if defined(COMPANION_UI_ACCEPTANCE)
+    // An opt-in acceptance launch activates an already staged, verified GGUF only after inference succeeds.
+    if ([NSProcessInfo.processInfo.environment[@"COMPANION_ACCEPTANCE_ACTIVATE_MODEL"] isEqualToString:@"1"])
+        [NSUserDefaults.standardUserDefaults registerDefaults:@{@"acceptanceActivateImportedModel": @YES}];
+#endif
     [UNUserNotificationCenter currentNotificationCenter].delegate = self;
     return YES;
 }

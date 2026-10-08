@@ -5,8 +5,15 @@ int main(void) {
     @autoreleasepool {
         NSString *prefix = @"<|im_start|>assistant\n";
         NSCAssert([OCLlamaGenerationPrompt(prefix, @"qwen3") isEqualToString:
-            [prefix stringByAppendingString:@"<think>\n\n</think>\n\n"]], @"Qwen3 must disable thinking before generation");
+            [prefix stringByAppendingString:@"<think>\n"]], @"Qwen3 must open thinking before generation");
         NSCAssert([OCLlamaGenerationPrompt(prefix, @"qwen2") isEqualToString:prefix], @"Other model prompts must remain unchanged");
+        NSCAssert([OCLlamaGenerationPrompt(prefix, @"qwen35") hasSuffix:@"<think>\n"], @"Qwen3.5 must enable thinking");
+        NSCAssert(OCLlamaUsesThinking(@"qwen35"), @"Qwen3.5 architecture is supported");
+        NSDictionary *thinking = OCLlamaSplitThinkingResponse(@"先分析。\n</think>\n{\"text\":\"42\"}");
+        NSCAssert([thinking[@"reasoning"] containsString:@"先分析"], @"Reasoning must remain separate");
+        NSCAssert([thinking[@"text"] isEqualToString:@"{\"text\":\"42\"}"], @"Only answer may enter JSON parser");
+        NSCAssert(OCLlamaSplitThinkingResponse(@"未结束的思考") == nil, @"Incomplete thinking is not an answer");
+        NSCAssert([OCLlamaSplitThinkingResponse(@"</think>你好")[@"text"] isEqualToString:@"你好"], @"Empty thinking must work");
         NSDictionary *task = @{@"response_format": @{@"type": @"json_schema", @"json_schema": @{@"name": @"device_task_result"}}};
         NSCAssert(OCLlamaResponseGrammar(@{}, @[]) == nil, @"Ordinary chat must remain unconstrained");
         NSString *chatTools = OCLlamaResponseGrammar(@{}, @[@"delegate_to_agent"]);
@@ -17,6 +24,16 @@ int main(void) {
         NSString *withTools = OCLlamaResponseGrammar(task, @[@"calendar.find"]);
         NSCAssert([withTools containsString:@"tool-call"], @"Tool use must remain available");
         NSCAssert([withTools containsString:@"calendar.find"], @"Offered tool name missing");
+        NSDictionary *discovery = @{@"messages": @[
+            @{@"role": @"tool", @"name": @"list_remote_agents", @"content": @"[{\"agent_id\":\"https://example.com/mac\"}]"},
+        ]};
+        NSString *agentsGrammar = OCLlamaResponseGrammar(discovery, @[@"delegate_to_agent", @"list_remote_agents"]);
+        NSCAssert([agentsGrammar containsString:@"agent-id ::="], @"Discovered IDs must constrain delegation arguments");
+        NSCAssert([agentsGrammar containsString:@"generic-call | delegate-call"], @"Other tools must stay available");
+        NSCAssert([agentsGrammar containsString:@"https://example.com/mac"], @"URL literals must not contain unsupported GBNF slash escapes");
+        NSString *delegateOnly = OCLlamaResponseGrammar(discovery, @[@"delegate_to_agent"]);
+        NSCAssert([delegateOnly containsString:@"tool-call ::= delegate-call"], @"Delegation must not escape through generic arguments");
+        NSCAssert(![delegateOnly containsString:@"generic-call ::="], @"No generic delegation bypass");
         NSArray *history = @[
             @{ @"role": @"user", @"content": @"Find my meeting" },
             @{ @"role": @"assistant", @"content": @"", @"tool_calls": @[

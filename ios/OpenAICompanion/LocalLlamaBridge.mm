@@ -12,8 +12,8 @@
 #include <string>
 #include <vector>
 
-static NSString *OCChunkJSON(NSString *text) {
-    NSDictionary *object = @{ @"choices": @[ @{ @"delta": @{ @"content": text } } ] };
+static NSString *OCChunkJSON(NSString *text, NSString *field = @"content") {
+    NSDictionary *object = @{ @"choices": @[ @{ @"delta": @{ field: text } } ] };
     NSData *data = [NSJSONSerialization dataWithJSONObject:object options:0 error:NULL];
     return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
 }
@@ -95,7 +95,7 @@ static NSString *OCChunkJSON(NSString *text) {
     }
     const bool toolMode = offeredNames.count > 0;
     NSString *grammar = OCLlamaResponseGrammar(request, [[offeredNames allObjects] sortedArrayUsingSelector:@selector(compare:)]);
-    const bool buffered = toolMode || grammar != nil;
+    bool buffered = toolMode || grammar != nil;
     if (toolMode) {
         NSData *toolData = [NSJSONSerialization dataWithJSONObject:rawTools options:0 error:NULL];
         if (toolData == nil) return @"MCP 工具定义无法编码。";
@@ -146,6 +146,8 @@ static NSString *OCChunkJSON(NSString *text) {
     NSString *renderedPrompt = [[NSString alloc] initWithBytes:prompt.data()
         length:prompt.size() encoding:NSUTF8StringEncoding];
     if (renderedPrompt == nil) return @"聊天模板不是有效 UTF-8。";
+    const bool thinking = OCLlamaUsesThinking(@(architecture));
+    buffered = buffered || thinking;
     prompt = OCLlamaGenerationPrompt(renderedPrompt, @(architecture)).UTF8String;
     if (prompt.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max() - 16)) {
         return @"对话上下文过长。";
@@ -166,7 +168,7 @@ static NSString *OCChunkJSON(NSString *text) {
     if (tokenCount <= 0) return @"聊天内容无法分词。";
 
     llama_context_params contextParams = llama_context_default_params();
-    contextParams.n_ctx = 4096;
+    contextParams.n_ctx = thinking ? 8192 : 4096;
     contextParams.n_batch = 512;
     contextParams.n_threads = std::max(1, std::min(4, (int)[NSProcessInfo processInfo].activeProcessorCount));
     contextParams.n_threads_batch = contextParams.n_threads;
@@ -174,8 +176,11 @@ static NSString *OCChunkJSON(NSString *text) {
         llama_init_from_model(_model, contextParams), llama_free);
     if (!context) return @"llama.cpp 无法创建推理上下文，可能是设备内存不足。";
 
-    const int32_t outputLimit = static_cast<int32_t>(std::max<NSInteger>(1, std::min<NSInteger>(maxTokens, 512)));
-    if (tokenCount + outputLimit > static_cast<int32_t>(llama_n_ctx(context.get()))) {
+    const int32_t answerLimit = static_cast<int32_t>(std::max<NSInteger>(1, std::min<NSInteger>(maxTokens, 512)));
+    // Keep larger phone models responsive; answer tokens have a separate budget.
+    const int32_t thinkingLimit = thinking ? ([@(architecture) isEqualToString:@"qwen3"] ? 1024 : 256) : 0;
+    const int32_t outputLimit = answerLimit + thinkingLimit;
+    if (tokenCount + outputLimit + (thinking ? 32 : 0) > static_cast<int32_t>(llama_n_ctx(context.get()))) {
         return @"LOCAL_MODEL_CONTEXT_EXCEEDED";
     }
     const int32_t batchSize = static_cast<int32_t>(llama_n_batch(context.get()));
@@ -186,18 +191,27 @@ static NSString *OCChunkJSON(NSString *text) {
         if (llama_decode(context.get(), batch) != 0) return @"llama.cpp 处理提示词失败。";
     }
 
-    std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
-        llama_sampler_chain_init(llama_sampler_chain_default_params()), llama_sampler_free);
-    if (!sampler) return @"llama.cpp 无法创建采样器。";
-    if (grammar != nil) {
-        llama_sampler *constraint = llama_sampler_init_grammar(vocab, grammar.UTF8String, "root");
-        if (constraint == nullptr) return @"无法创建任务结果语法约束。";
-        llama_sampler_chain_add(sampler.get(), constraint);
-    }
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_k(40));
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_p(0.9f, 1));
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(toolMode ? 0.2f : 0.7f));
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    auto makeSampler = [&](bool constrain) {
+        std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> result(
+            llama_sampler_chain_init(llama_sampler_chain_default_params()), llama_sampler_free);
+        if (!result) return result;
+        if (constrain && grammar != nil) {
+            llama_sampler *constraint = llama_sampler_init_grammar(vocab, grammar.UTF8String, "root");
+            if (constraint == nullptr) { result.reset(); return result; }
+            llama_sampler_chain_add(result.get(), constraint);
+        }
+        llama_sampler_chain_add(result.get(), llama_sampler_init_top_k(thinking ? 20 : 40));
+        if (thinking) llama_sampler_chain_add(result.get(),
+            llama_sampler_init_penalties(llama_vocab_n_tokens(vocab), 1024, 1.0f, 0.0f, 1.5f));
+        llama_sampler_chain_add(result.get(), llama_sampler_init_top_p(thinking ? 0.95f : 0.9f, 1));
+        llama_sampler_chain_add(result.get(), llama_sampler_init_temp(thinking ? 0.6f : (toolMode ? 0.2f : 0.7f)));
+        llama_sampler_chain_add(result.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+        return result;
+    };
+    auto sampler = makeSampler(!thinking);
+    if (!sampler) return @"llama.cpp 无法创建采样器或输出语法约束。";
+    bool thinkingFinished = !thinking;
+    int32_t answerTokens = 0;
 
     std::string pendingUTF8;
     NSMutableString *bufferedOutput = buffered ? [NSMutableString string] : nil;
@@ -208,11 +222,11 @@ static NSString *OCChunkJSON(NSString *text) {
 
         std::vector<char> piece(256);
         int32_t pieceLength = llama_token_to_piece(vocab, token, piece.data(),
-                                                   static_cast<int32_t>(piece.size()), 0, false);
+                                                   static_cast<int32_t>(piece.size()), 0, thinking);
         if (pieceLength < 0) {
             piece.resize(static_cast<size_t>(-pieceLength));
             pieceLength = llama_token_to_piece(vocab, token, piece.data(),
-                                               static_cast<int32_t>(piece.size()), 0, false);
+                                               static_cast<int32_t>(piece.size()), 0, thinking);
         }
         if (pieceLength > 0) {
             pendingUTF8.append(piece.data(), static_cast<size_t>(pieceLength));
@@ -225,11 +239,42 @@ static NSString *OCChunkJSON(NSString *text) {
                 pendingUTF8.clear();
             }
         }
+        if (!thinkingFinished) {
+            if ([bufferedOutput rangeOfString:@"</think>"].location != NSNotFound) {
+                thinkingFinished = true;
+                // JSON restrictions apply only to the answer, never to reasoning.
+                sampler = makeSampler(true);
+                if (!sampler) return @"无法创建回答语法约束。";
+            } else if (i + 1 >= thinkingLimit) {
+                // End bounded reasoning in the same KV context, then reserve the answer budget.
+                llama_batch lastThinking = llama_batch_get_one(&token, 1);
+                if (llama_decode(context.get(), lastThinking) != 0) return @"无法结束思考阶段。";
+                const char *suffix = "\n\n</think>\n\n";
+                std::vector<llama_token> closing(32);
+                int32_t closingCount = llama_tokenize(vocab, suffix, static_cast<int32_t>(strlen(suffix)),
+                    closing.data(), static_cast<int32_t>(closing.size()), false, true);
+                if (closingCount <= 0) return @"无法编码思考结束标记。";
+                llama_batch closeThinking = llama_batch_get_one(closing.data(), closingCount);
+                if (llama_decode(context.get(), closeThinking) != 0) return @"无法完成思考阶段。";
+                [bufferedOutput appendString:@"\n\n</think>\n\n"];
+                pendingUTF8.clear();
+                thinkingFinished = true;
+                sampler = makeSampler(true);
+                if (!sampler) return @"无法创建回答语法约束。";
+                continue;
+            }
+        } else if (++answerTokens >= answerLimit) break;
         if (i + 1 == outputLimit) break;
         llama_batch batch = llama_batch_get_one(&token, 1);
         if (llama_decode(context.get(), batch) != 0) return @"llama.cpp 生成下一 token 失败。";
     }
     if (buffered) {
+        if (thinking) {
+            NSDictionary *parts = OCLlamaSplitThinkingResponse(bufferedOutput);
+            if (parts == nil) return @"模型思考未完成，请重试。";
+            if ([parts[@"reasoning"] length]) onChunk(OCChunkJSON(parts[@"reasoning"], @"reasoning_content"));
+            bufferedOutput = [parts[@"text"] mutableCopy];
+        }
         NSString *output = [bufferedOutput stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         if ([output hasPrefix:@"<tool_call>"] && [output hasSuffix:@"</tool_call>"]) {
             output = [[output substringWithRange:NSMakeRange(11, output.length - 23)]

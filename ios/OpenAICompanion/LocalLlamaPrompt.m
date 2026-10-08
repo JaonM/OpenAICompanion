@@ -1,8 +1,22 @@
 #import "LocalLlamaPrompt.h"
 
+BOOL OCLlamaUsesThinking(NSString *architecture) {
+    return [@[@"qwen3", @"qwen35", @"qwen35moe"] containsObject:architecture];
+}
+
 NSString *OCLlamaGenerationPrompt(NSString *prompt, NSString *architecture) {
-    return [architecture isEqualToString:@"qwen3"]
-        ? [prompt stringByAppendingString:@"<think>\n\n</think>\n\n"] : prompt;
+    return OCLlamaUsesThinking(architecture)
+        ? [prompt stringByAppendingString:@"<think>\n"] : prompt;
+}
+
+NSDictionary<NSString *, NSString *> *OCLlamaSplitThinkingResponse(NSString *output) {
+    NSRange end = [output rangeOfString:@"</think>"];
+    if (end.location == NSNotFound) return nil;
+    return @{
+        @"reasoning": [output substringToIndex:end.location],
+        @"text": [[output substringFromIndex:NSMaxRange(end)] stringByTrimmingCharactersInSet:
+            NSCharacterSet.whitespaceAndNewlineCharacterSet],
+    };
 }
 
 NSString *OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *toolNames) {
@@ -26,18 +40,53 @@ NSString *OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *too
         @"number ::= \"-\"? (\"0\" | [1-9] [0-9]*) (\".\" [0-9]+)? ([eE] [+-]? [0-9]+)?\n"
         @"ws ::= [ \\t\\n\\r]{0,20}\n"];
     if (toolNames.count) {
+        NSArray *agentIDs = @[];
+        for (NSDictionary *message in request[@"messages"]) {
+            if (![message isKindOfClass:NSDictionary.class] || ![message[@"role"] isEqual:@"tool"] ||
+                ![message[@"name"] isEqual:@"list_remote_agents"] ||
+                ![message[@"content"] isKindOfClass:NSString.class]) continue;
+            id agents = [NSJSONSerialization JSONObjectWithData:
+                [message[@"content"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+            NSMutableArray *ids = [NSMutableArray array];
+            if ([agents isKindOfClass:NSArray.class]) for (id agent in agents) {
+                if ([agent isKindOfClass:NSDictionary.class] && [agent[@"agent_id"] isKindOfClass:NSString.class] &&
+                    [agent[@"agent_id"] length]) [ids addObject:agent[@"agent_id"]];
+            }
+            agentIDs = ids;
+        }
+        BOOL constrainAgent = agentIDs.count && [toolNames containsObject:@"delegate_to_agent"];
         NSMutableArray *literals = [NSMutableArray array];
         for (NSString *name in toolNames) {
-            NSData *json = [NSJSONSerialization dataWithJSONObject:@[name] options:0 error:nil];
+            if (constrainAgent && [name isEqual:@"delegate_to_agent"]) continue;
+            NSData *json = [NSJSONSerialization dataWithJSONObject:@[name] options:NSJSONWritingWithoutEscapingSlashes error:nil];
             NSString *encoded = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
             NSString *quoted = [encoded substringWithRange:NSMakeRange(1, encoded.length - 2)];
-            json = [NSJSONSerialization dataWithJSONObject:@[quoted] options:0 error:nil];
+            json = [NSJSONSerialization dataWithJSONObject:@[quoted] options:NSJSONWritingWithoutEscapingSlashes error:nil];
             encoded = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
             [literals addObject:[encoded substringWithRange:NSMakeRange(1, encoded.length - 2)]];
         }
-        [grammar appendFormat:@"tool-name ::= %@\n", [literals componentsJoinedByString:@" | "]];
-        [grammar appendString:
-            @"tool-call ::= \"{\" ws \"\\\"tool_call\\\"\" ws \":\" ws \"{\" ws \"\\\"name\\\"\" ws \":\" ws tool-name ws \",\" ws \"\\\"arguments\\\"\" ws \":\" ws object ws \"}\" ws \"}\"\n"];
+        if (literals.count) {
+            [grammar appendFormat:@"tool-name ::= %@\n", [literals componentsJoinedByString:@" | "]];
+            [grammar appendString:
+                @"generic-call ::= \"{\" ws \"\\\"tool_call\\\"\" ws \":\" ws \"{\" ws \"\\\"name\\\"\" ws \":\" ws tool-name ws \",\" ws \"\\\"arguments\\\"\" ws \":\" ws object ws \"}\" ws \"}\"\n"];
+        }
+        if (constrainAgent) {
+            NSMutableArray *ids = [NSMutableArray array];
+            for (NSString *agentID in agentIDs) {
+                NSData *json = [NSJSONSerialization dataWithJSONObject:@[agentID] options:NSJSONWritingWithoutEscapingSlashes error:nil];
+                NSString *encoded = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+                NSString *quoted = [encoded substringWithRange:NSMakeRange(1, encoded.length - 2)];
+                json = [NSJSONSerialization dataWithJSONObject:@[quoted] options:NSJSONWritingWithoutEscapingSlashes error:nil];
+                encoded = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+                [ids addObject:[encoded substringWithRange:NSMakeRange(1, encoded.length - 2)]];
+            }
+            [grammar appendFormat:@"agent-id ::= %@\n", [ids componentsJoinedByString:@" | "]];
+            [grammar appendString:
+                @"delegate-call ::= \"{\" ws \"\\\"tool_call\\\"\" ws \":\" ws \"{\" ws \"\\\"name\\\"\" ws \":\" ws \"\\\"delegate_to_agent\\\"\" ws \",\" ws \"\\\"arguments\\\"\" ws \":\" ws \"{\" ws \"\\\"agent_id\\\"\" ws \":\" ws agent-id ws \",\" ws \"\\\"task_text\\\"\" ws \":\" ws string ws \"}\" ws \"}\" ws \"}\"\n"];
+        }
+        [grammar appendFormat:@"tool-call ::= %@\n", constrainAgent
+            ? (literals.count ? @"generic-call | delegate-call" : @"delegate-call") : @"generic-call"];
+
     }
     return grammar;
 }

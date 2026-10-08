@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import platform.Foundation.NSBundle
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSUserDefaults
@@ -76,6 +77,19 @@ class IosLocalLlamaModel : AppModelServe {
                             ))
                         }
                         sink.get().failure?.let { throw it }
+                        if (defaults.boolForKey("acceptanceActivateImportedModel")) {
+                            val domain = NSBundle.mainBundle.bundleIdentifier?.let(defaults::persistentDomainForName)
+                            val previous = domain?.get(MODEL_FILE_KEY) as? String
+                            val name = path.substringAfterLast('/')
+                            defaults.setObject(name, forKey = MODEL_FILE_KEY)
+                            defaults.setObject(name.removeSuffix(".gguf"), forKey = MODEL_DISPLAY_KEY)
+                            if (previous != null && previous != name && previous.endsWith(".gguf", ignoreCase = true) &&
+                                previous == previous.substringAfterLast('/') && previous == previous.substringAfterLast('\\')) {
+                                check(NSFileManager.defaultManager.removeItemAtPath(modelDirectory() + previous, error = null)) {
+                                    "新模型已启用，但旧模型删除失败，请重试清理。"
+                                }
+                            }
+                        }
                     } finally {
                         sink.dispose()
                     }
@@ -88,7 +102,7 @@ class IosLocalLlamaModel : AppModelServe {
 
     fun status(): String {
         val path = modelPath() ?: return "请导入 GGUF 模型"
-        return if (NSFileManager.defaultManager.fileExistsAtPath(path)) "端侧模型已导入"
+        return if (NSFileManager.defaultManager.fileExistsAtPath(path)) "端侧模型已导入 · ${path.substringAfterLast('/').removeSuffix(".gguf")}"
             else "模型文件丢失，请重新导入"
     }
 
