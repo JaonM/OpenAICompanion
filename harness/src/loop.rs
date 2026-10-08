@@ -254,6 +254,8 @@ where
         let calls = response.tool_calls;
         let results = execute_tools(executor, &calls, config, &cancellation).await?;
 
+        let mut delegated = false;
+        let mut tool_error = false;
         for (call, result) in calls.into_iter().zip(results) {
             let output = match result {
                 Ok(output) => output,
@@ -262,6 +264,10 @@ where
                 }
                 Err(error) => return Err(error),
             };
+            tool_error |= output.is_error;
+            delegated |= emit_events && call.name == "delegate_to_agent" && !output.is_error &&
+                serde_json::from_str::<serde_json::Value>(&output.content).ok()
+                    .and_then(|v| v["remote_task_id"].as_str().map(|id| !id.is_empty())).unwrap_or(false);
             history.push(Message::Tool {
                 call_id: call.id,
                 name: call.name,
@@ -269,6 +275,18 @@ where
                 is_error: output.is_error,
             });
             observe(history.last().expect("tool message just appended"))?;
+        }
+        if delegated {
+            let output = if tool_error {
+                "远端任务已提交，但部分工具调用失败；请查看任务卡和记录。"
+            } else {
+                "远端任务已提交，请在任务卡查看进度和结果。"
+            }.to_owned();
+            history.push(Message::Assistant { content: output.clone(), tool_calls: vec![] });
+            observe(history.last().expect("submission acknowledgement just appended"))?;
+            crate::serving::notify_agent_completed(output.clone());
+            return Ok(AgentRun { reasoning, output, history, steps: step + 1,
+                termination: TerminationReason::Completed });
         }
     }
 
@@ -578,6 +596,32 @@ mod tests {
         ));
         let result = result.unwrap();
         assert_eq!(result.output, "done");
+    }
+
+    #[test]
+    fn confirmed_delegation_finishes_without_model_replay_but_errors_can_be_corrected() {
+        struct Receipt(bool);
+        impl Tool for Receipt {
+            fn definition(&self) -> ToolDefinition { ToolDefinition::new("delegate_to_agent", "Delegate", "{}") }
+            fn execute(&self, _: ToolCall) -> crate::tool::ToolFuture {
+                let output = if self.0 { ToolOutput::failure("Unknown agent") }
+                    else { ToolOutput::success(r#"{"local_task_id":1,"remote_task_id":"remote1","state":"TASK_STATE_SUBMITTED"}"#) };
+                Box::pin(async move { Ok(output) })
+            }
+        }
+        for failed in [false, true] {
+            let mut responses = vec![ModelResponse::with_tool_calls("", vec![ToolCall::new("d1", "delegate_to_agent", "{}")])];
+            if failed { responses.push(ModelResponse::final_text("Please choose an enabled agent")); }
+            let model = model(responses);
+            let mut executor = crate::ToolRegistry::new(1).unwrap();
+            executor.register(Receipt(failed)).unwrap();
+            runtime().block_on(executor.initialize()).unwrap();
+            let result = runtime().block_on(run(&model, &mut executor, &Configuration::default(), "", "Delegate to Mac")).unwrap();
+            assert_eq!(result.steps, if failed { 2 } else { 1 });
+            assert_eq!(result.termination, TerminationReason::Completed);
+            assert_eq!(result.output, if failed { "Please choose an enabled agent" } else { "远端任务已提交，请在任务卡查看进度和结果。" });
+            assert!(matches!(result.history.last(), Some(Message::Assistant { tool_calls, .. }) if tool_calls.is_empty()));
+        }
     }
 
     #[test]

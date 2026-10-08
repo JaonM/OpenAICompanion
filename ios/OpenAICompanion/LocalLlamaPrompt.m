@@ -13,17 +13,7 @@ NSString *OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *too
     if (!deviceTask && !toolNames.count) return nil;
     NSMutableString *grammar = [NSMutableString stringWithString:
         deviceTask ? @"root ::= ws (task-result" : @"root ::= ws (chat-result"];
-    NSDictionary *last = [request[@"messages"] isKindOfClass:NSArray.class] ? [request[@"messages"] lastObject] : nil;
-    BOOL accepted = NO;
-    if ([last isKindOfClass:NSDictionary.class] && [last[@"role"] isEqual:@"tool"] &&
-        [last[@"name"] isEqual:@"delegate_to_agent"] && [last[@"content"] isKindOfClass:NSString.class]) {
-        id receipt = [NSJSONSerialization JSONObjectWithData:[last[@"content"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-        accepted = [receipt isKindOfClass:NSDictionary.class] &&
-            [receipt[@"remote_task_id"] isKindOfClass:NSString.class] && [receipt[@"remote_task_id"] length] > 0 &&
-            [receipt[@"local_task_id"] isKindOfClass:NSNumber.class];
-    }
-    // A submission receipt ends local planning; the task card tracks remote progress.
-    if (toolNames.count && !accepted) [grammar appendString:@" | tool-call"];
+    if (toolNames.count) [grammar appendString:@" | tool-call"];
     [grammar appendString:@") ws\n"
         @"task-result ::= \"{\" ws \"\\\"state\\\"\" ws \":\" ws state ws \",\" ws \"\\\"text\\\"\" ws \":\" ws string ws \"}\"\n"
         @"chat-result ::= \"{\" ws \"\\\"text\\\"\" ws \":\" ws string ws \"}\"\n"

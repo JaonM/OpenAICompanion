@@ -11,11 +11,6 @@ int main(void) {
         NSCAssert(OCLlamaResponseGrammar(@{}, @[]) == nil, @"Ordinary chat must remain unconstrained");
         NSString *chatTools = OCLlamaResponseGrammar(@{}, @[@"delegate_to_agent"]);
         NSCAssert([chatTools containsString:@"root ::= ws (chat-result | tool-call)"], @"Routing calls and normal replies require valid JSON");
-        NSDictionary *submitted = @{@"messages": @[@{@"role": @"tool", @"name": @"delegate_to_agent",
-            @"content": @"{\"local_task_id\":1,\"remote_task_id\":\"remote1\"}"}]};
-        NSCAssert([OCLlamaResponseGrammar(submitted, @[@"delegate_to_agent"]) hasPrefix:@"root ::= ws (chat-result)"], @"Accepted delegation must not be resubmitted");
-        NSDictionary *rejected = @{@"messages": @[@{@"role": @"tool", @"name": @"delegate_to_agent", @"content": @"{\"error\":\"unknown agent\"}"}]};
-        NSCAssert([OCLlamaResponseGrammar(rejected, @[@"delegate_to_agent"]) hasPrefix:@"root ::= ws (chat-result | tool-call)"], @"Failed delegation may be corrected");
         NSString *noTools = OCLlamaResponseGrammar(task, @[]);
         NSCAssert([noTools containsString:@"input_required"], @"Task status grammar missing");
         NSCAssert(![noTools containsString:@"tool-call"], @"No unoffered tool branch");
