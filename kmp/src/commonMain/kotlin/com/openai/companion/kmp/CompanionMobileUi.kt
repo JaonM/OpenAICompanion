@@ -1,5 +1,17 @@
 package com.openai.companion.kmp
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -135,19 +147,31 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     val approval = state.approval
     val inputPrompt = state.inputPrompt
 
-    MaterialTheme {
+    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) companionDarkColors else companionLightColors) {
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("OpenAICompanion", style = MaterialTheme.typography.titleLarge)
+            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(34.dp).background(MaterialTheme.colorScheme.primary,
+                        RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+                        Text("✦", color = MaterialTheme.colorScheme.onPrimary)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (showSettings) "设置与模型" else "OpenAICompanion",
+                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(if (showSettings) "个人助理偏好" else "持续对话 · ${if (state.sending) "正在处理" else "就绪"}",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     TextButton(onClick = { showSettings = !showSettings }) {
                         Text(if (showSettings) "完成" else "设置")
                     }
                 }
-                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 when {
-                    showSettings -> { Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                        Text("端侧模型", style = MaterialTheme.typography.titleMedium)
+                    showSettings -> { Column(Modifier.weight(1f).background(MaterialTheme.colorScheme.surfaceVariant)
+                        .verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MobileSectionTitle("端侧模型")
                         Text(state.modelStatus)
                         OutlinedButton(onClick = actions::importModel) { Text("导入 GGUF") }
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -157,7 +181,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         }
                         Text("扩展默认关闭；启用后，日历访问仍需逐次确认和系统权限。")
                         Spacer(Modifier.height(20.dp))
-                        Text("主动任务", style = MaterialTheme.typography.titleMedium)
+                        MobileSectionTitle("主动任务")
                         Row {
                             Checkbox(state.proactiveSettings.enabled, { enabled ->
                                 actions.saveProactiveConfig(state.proactiveSettings.copy(enabled = enabled))
@@ -191,7 +215,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             }
                         }
                         Spacer(Modifier.height(20.dp))
-                        Text("记忆点跨端同步", style = MaterialTheme.typography.titleMedium)
+                        MobileSectionTitle("记忆点跨端同步")
                         OutlinedTextField(
                             value = memorySyncEndpointDraft,
                             onValueChange = { memorySyncEndpointDraft = it },
@@ -214,7 +238,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             OutlinedButton(onClick = actions::syncMemories) { Text("立即同步") }
                         }
                         Spacer(Modifier.height(20.dp))
-                        Text("远程 MCP", style = MaterialTheme.typography.titleMedium)
+                        MobileSectionTitle("远程 MCP")
                         OutlinedTextField(
                             value = endpointDraft,
                             onValueChange = { endpointDraft = it },
@@ -243,8 +267,8 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         }
                         Text("远程地址需使用 HTTPS；本机允许 HTTP。")
                         Spacer(Modifier.height(20.dp))
-                        Text("远端 Agent（A2A）", style = MaterialTheme.typography.titleMedium)
-                        Text("跨设备执行", style = MaterialTheme.typography.titleMedium)
+                        MobileSectionTitle("远端 Agent（A2A）")
+                        MobileSectionTitle("跨设备执行")
                         OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "设备服务地址" })
                         OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "本设备名称" })
                         OutlinedTextField(deviceTokenDraft, { deviceTokenDraft = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
@@ -303,8 +327,10 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                     }
                     else -> {
                         if (state.a2aTasks.isNotEmpty()) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("远端任务 ${state.a2aTasks.count { !it.terminal }} 个进行中")
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("远端任务 ${state.a2aTasks.count { !it.terminal }} 个进行中",
+                                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Row {
                                     TextButton(onClick = {
                                         uiScope.launch {
@@ -317,38 +343,58 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                 }
                             }
                         }
-                        LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
+                        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                            if (state.messages.isEmpty() && state.streamedText.isEmpty() && state.a2aTasks.isEmpty()) {
+                                item {
+                                    Column(Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("✦", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.displaySmall)
+                                        Spacer(Modifier.height(20.dp))
+                                        Text("今天想一起完成什么？", style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.SemiBold)
+                                        Text("从一个问题开始，保留这段会话的上下文。",
+                                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 10.dp))
+                                    }
+                                }
+                            }
                             itemsIndexed(state.messages) { index, message ->
-                                Text(
-                                    text = "${message.role}：${message.content}",
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                                        .testTag("conversation-message-$index-${message.role}"),
-                                )
+                                MobileMessageRow(message, Modifier.testTag("conversation-message-$index-${message.role}"))
                             }
                             if (state.streamedText.isNotEmpty()) {
-                                item { Text(state.streamedText) }
+                                item { MobileMessageRow(MobileMessage("assistant", state.streamedText)) }
                             }
                             items(state.a2aTasks) { task ->
                                 val agentName = state.a2aAgents.firstOrNull { it.id == task.agentId }?.name ?: task.agentId
                                 A2aTaskCard(task, agentName, actions)
                             }
                         }
-                        OutlinedTextField(
-                            value = draft,
-                            onValueChange = { draft = it },
-                            label = { Text("输入消息") },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Row {
-                            Button(
-                                enabled = !state.sending && draft.isNotBlank(),
-                                onClick = { actions.send(draft.trim()); draft = "" },
-                            ) { Text("发送") }
-                            if (state.sending) TextButton(onClick = actions::cancel) { Text("停止") }
+                        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shadowElevation = 3.dp,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                OutlinedTextField(value = draft, onValueChange = { draft = it },
+                                    placeholder = { Text("给 Companion 发送消息…") },
+                                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "输入消息" },
+                                    minLines = 2, maxLines = 5,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent))
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(state.modelStatus, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f))
+                                    if (state.sending) TextButton(onClick = actions::cancel) { Text("停止") }
+                                    Button(enabled = !state.sending && draft.isNotBlank(), shape = RoundedCornerShape(10.dp),
+                                        onClick = { actions.send(draft.trim()); draft = "" }) { Text("发送") }
+                                }
+                            }
                         }
                     }
                 }
-                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
             }
         }
         if (approval != null) {
@@ -503,6 +549,35 @@ private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions
             }
             if (!task.terminal && task.remoteTaskId != null) {
                 TextButton(onClick = { actions.cancelA2aTask(task.id) }) { Text("取消任务") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileSectionTitle(title: String) {
+    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+}
+
+@Composable
+private fun MobileMessageRow(message: MobileMessage, modifier: Modifier = Modifier) {
+    val user = message.role == "user"
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
+        if (!user) {
+            Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(9.dp)),
+                contentAlignment = Alignment.Center) { Text("✦", color = MaterialTheme.colorScheme.primary) }
+            Spacer(Modifier.width(10.dp))
+        }
+        Surface(shape = RoundedCornerShape(14.dp),
+            color = if (user) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+            modifier = Modifier.fillMaxWidth(if (user) 0.86f else 0.90f)) {
+            Column(Modifier.padding(if (user) 14.dp else 0.dp)) {
+                if (!user) Text(if (message.role == "tool") "工具" else "Companion",
+                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 6.dp))
+                Text(message.content, style = MaterialTheme.typography.bodyMedium,
+                    modifier = modifier.semantics { contentDescription = "${message.role}：${message.content}" })
             }
         }
     }
