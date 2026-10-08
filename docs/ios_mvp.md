@@ -26,7 +26,7 @@ Intel Mac 模拟器还需 `x86_64-apple-ios`；UniFFI 绑定生成会按当前 M
 
 App 通过 llama.cpp 在手机本机加载 GGUF，不再连接 Mac 上的 Ollama 或其他 HTTP 模型服务。在“设置”中从“文件”导入指令微调 GGUF；模型复制到 App 的 Application Support，UserDefaults 只记录文件名。App 不内置模型。桌面端 `unsloth/Qwen3.8-27B-GGUF` 通常过大，不适合作为手机默认模型；请按设备可用内存选择较小的量化聊天模型。
 
-当前每次请求使用 4096 token 上下文，最多生成 512 token，并使用 GGUF 内的聊天模板。超长会话、不支持的模板或设备内存不足会明确报错。Rust Harness 继续负责会话、轨迹和流事件；llama.cpp 负责本地推理。KMP 宿主已新增无 Swift 的模型回调与文件选择代码，调用现有 Objective-C++ 引擎的 C 接口；已通过 iOS SDK 编译和模拟器启动验证，小型 GGUF 推理已通过模拟器 UI 测试。模型侧现可在已连接远程 MCP 时输出单个 JSON 工具调用，由 Harness 执行并继续对话；此路径尚未在真机上验收。MVP 仍只支持纯文本，不支持多模态输入。
+当前 Qwen3 / Qwen3.5 思考模式使用 8192 token 上下文，其他模型使用 4096 token 上下文，正文最多生成 512 token，Qwen3 额外预留最多 1024 token、Qwen3.5 预留最多 256 token 的思考预算，并使用 GGUF 内的聊天模板。超长会话、不支持的模板或设备内存不足会明确报错。Rust Harness 继续负责会话、轨迹和流事件；llama.cpp 负责本地推理。KMP 宿主已新增无 Swift 的模型回调与文件选择代码，调用现有 Objective-C++ 引擎的 C 接口；已通过 iOS SDK 编译和模拟器启动验证，小型 GGUF 推理已通过模拟器 UI 测试。模型侧现可在已连接远程 MCP 时输出单个 JSON 工具调用，由 Harness 执行并继续对话；此路径尚未在真机上验收。MVP 仍只支持纯文本，不支持多模态输入。
 
 端侧模型在下一轮提示词中保留 Harness 的工具调用名称与调用 ID，并将工具返回正文标记为不可信数据；该消息转换已在 macOS Foundation 环境做独立测试，但仍需 iOS 真机检验模型行为。
 
@@ -71,3 +71,18 @@ KMP + Compose 版本已有共享界面、状态控制器、MCP 客户端、Kotli
 纸飞机为代码内的矢量图标，保留“发送”的无障碍名称；最小输入点击高度 44 dp，图标按钮使用标准交互尺寸。最终版本再次完成相同五项真机回归 **5/0/0**，共享 JVM 编译通过；尺寸和图标已从真实截图核对。
 
 2026-10-08 补充：移除对话顶部常驻远端任务状态与刷新栏，保留顶栏“任务”入口及任务页刷新。真机导航/草稿用例通过，跨设备用例在排除前台 App 干扰和 Runner 连接中断后复测通过，手机发起任务并显示 Mac 返回的 42；初次失败及未执行的重试均保留在验收记录中。证据：`ios-task-toolbar-1008.xcresult`、`ios-task-toolbar-reconnect-1008.xcresult`。
+
+2026-10-08 思考与输入交互更新：iOS 的 Qwen3 提示词改为打开 `<think>`，先自由生成思考，再对回答应用现有任务/工具 JSON 约束。思考通过 `reasoning_content` 与正文分离，完成后按既有灰色小字折叠展示；达到思考预算后补齐结束标记并继续生成答案，思考内容不会作为正文返回。采样采用 [Qwen 官方量化模型建议](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF#best-practices)的温度 0.6、TopP 0.95、TopK 20 与存在惩罚 1.5；预算分阶段处理参考 [Qwen 思考预算说明](https://github.com/QwenLM/Qwen3/blob/main/docs/source/getting_started/thinking_budget.md)。生成期间显示三点呼吸气泡，完成、取消或失败后移除。输入框支持软键盘发送键及硬件回车发送，硬件 Shift+Enter 保留换行；空草稿和生成期间不会重复提交。共享 Compose 输入和气泡修改也适用于 Android，Android 推理引擎配置未随此项改变。开启思考增加等待时间，不代表模型交流质量已验收。
+
+
+## 2026-10-08 Qwen3.5-4B Q8_0 真机替换
+
+当前验收 iPhone 已切换为 [unsloth/Qwen3.5-4B-GGUF](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF) 的 `Qwen3.5-4B-Q8_0.gguf`（8 bit）。下载使用上游仓库，固定 revision `e87f176479d0855a907a41277aca2f8ee7a09523`；文件大小 4,482,403,488 字节，SHA-256 `10cc391b403021dd11c614679d2fd92f611c3681d29e29651b717316965d61e1` 已校验。现有 llama.cpp `v0.4.1` 支持 `qwen35` 架构，无需升级原生依赖；本次只接入文本推理，没有接入视觉投影模型。
+
+模型保存在 App 私有 Models 目录，不提交到 Git，也不打包进 App。先暂存新文件并通过两轮真实推理，再通过仅 Debug 验收包支持的 `COMPANION_ACCEPTANCE_ACTIVATE_MODEL=1` 启动，在成功推理后持久化模型选择、删除此前选择的旧 GGUF；普通启动及 Release 不执行此验收动作。手机目录最终只剩新模型，旧 `Qwen3-0.6B-Q8_0.gguf` 已删除，普通重启后的默认选择仍为 Qwen3.5。
+
+在 iPhone 17 Pro Max / iOS 27.0.1 上，`testQwen35ReplacementAndDialogue` **1 通过、0 失败、0 跳过**：新独立问题 `17+25` 精确返回 `42`，后续“上一条答案加 8”精确返回 `50`；激活后再次返回 `42`，普通重启验证模型选择。三轮均通过键盘回车发送，检查思考气泡出现、回复完成后消失，以及新答案进入可视区；截图核对思考内容保持灰色小字折叠。证据为 `ios-qwen35-mobile-budget-1008.xcresult`。
+
+当前 Qwen3.5 思考预算 256 token、正文预算 512 token；验收算术轮次等待约 70–90 秒，8 bit 的响应速度仍有限。这些结果验证模型加载、基础回答和多轮上下文，不能替代开放对话质量、长会话、设备内存压力及其他机型专项验收。此前语法 URL 转义错误和更长思考预算导致的测试超时保留在验收记录中。
+
+新模型的指定 Mac 委托也已通过真机回归：`testCrossDeviceDelegatesToMacAndShowsResult` **1 通过、0 失败、0 跳过**（94.987 秒）。手机生成委托、用户批准“发送一次”、创建新任务，再显示 Acceptance Mac 返回的精确 `42`；断言限定新任务编号，不把历史卡片计作成功。验收任务明确要求只输出数字；此前空格差异及 Mac 附带额外解释的两次断言失败仍保留。证据为 `ios-qwen35-cross-device-digits-1008.xcresult`。这不覆盖后台自动接单、App 退出后的推送或完整生产部署验收。

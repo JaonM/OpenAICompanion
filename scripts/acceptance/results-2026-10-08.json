@@ -254,6 +254,131 @@
         "Phone delegates a new task to Mac and displays its completed result through Tasks."
       ],
       "navigation_screenshot": "/tmp/companion-physical-acceptance-20261007/ios-task-toolbar-attachments/C7DDC583-CF3A-4078-A25B-BBE98C5B0996.png"
+    },
+    "qwen35_replacement": {
+      "result": "passed: model replacement, basic two-turn arithmetic, keyboard sending and thinking indicator; general dialogue quality remains pending",
+      "device": "iPhone 17 Pro Max / iOS 27.0.1",
+      "physical_memory_bytes": 12263424000,
+      "model": {
+        "repository": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF",
+        "revision": "e87f176479d0855a907a41277aca2f8ee7a09523",
+        "file": "Qwen3.5-4B-Q8_0.gguf",
+        "quantization": "8 bit Q8_0",
+        "bytes": 4482403488,
+        "sha256": "10cc391b403021dd11c614679d2fd92f611c3681d29e29651b717316965d61e1",
+        "text_only": true,
+        "bundled_or_committed": false
+      },
+      "runtime": {
+        "llama_cpp": "v0.4.1; existing qwen35 support",
+        "context_tokens": 8192,
+        "thinking_tokens_max": 256,
+        "answer_tokens_max": 512,
+        "thinking_enabled": true,
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "presence_penalty": 1.5,
+        "answer_grammar": "applied after thinking; discovered remote agent IDs constrain delegation arguments"
+      },
+      "regression": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "case": "testQwen35ReplacementAndDialogue",
+        "duration_seconds": 278.528,
+        "new_question_exact": "42",
+        "followup_exact": "50",
+        "activation_question_exact": "42",
+        "normal_restart_selection": "Qwen3.5-4B-Q8_0",
+        "keyboard_return_send": "passed on all three turns",
+        "thinking_bubble_appears_and_disappears": "passed on all three turns",
+        "answer_enters_viewport": "passed on all three turns",
+        "reasoning_folded": "verified in screenshots"
+      },
+      "cleanup": {
+        "previous_model": "Qwen3-0.6B-Q8_0.gguf",
+        "old_model_deleted": true,
+        "phone_models_directory_contains_only_new_file": true,
+        "persistent_model_selection": true,
+        "activation": "opt-in Debug acceptance launch only; executed after successful new-model inference",
+        "old_model_host_staging_and_diagnostic_copies_deleted": 5,
+        "old_model_host_bytes_removed": 3197233440
+      },
+      "latency": "approximately 70–90 seconds per arithmetic turn in the tested configuration",
+      "pending": [
+        "Open-ended dialogue and long-context quality",
+        "Memory-pressure and sustained-use testing",
+        "Other iPhone models",
+        "Android model replacement and native UI acceptance"
+      ],
+      "evidence": {
+        "xcresult": "/tmp/companion-physical-acceptance-20261007/ios-qwen35-mobile-budget-1008.xcresult",
+        "log": "/tmp/companion-ios-qwen35-mobile-budget-1008.log",
+        "metadata": "/tmp/companion-physical-acceptance-20261007/qwen35-model-metadata.json",
+        "model_directory": "/tmp/companion-physical-acceptance-20261007/qwen35-model-files-final.json",
+        "persistent_preferences": "/tmp/companion-physical-acceptance-20261007/qwen35-preferences-final.plist",
+        "screenshots": "/tmp/companion-physical-acceptance-20261007/ios-qwen35-mobile-budget-attachments/manifest.json"
+      },
+      "earlier_attempts": [
+        {
+          "bundle": "ios-thinking-keyboard-1008.xcresult",
+          "result": "failed: keyboard Send and paper-plane Send shared an accessibility name; fixed test selector with send-message tag"
+        },
+        {
+          "bundle": "ios-thinking-keyboard-final-1008.xcresult",
+          "result": "cross-device context capacity failure; local reply generated but extra tool rows invalidated old reply-index assumption; interrupted"
+        },
+        {
+          "bundle": "ios-thinking-keyboard-context-1008.xcresult",
+          "result": "cross-device approval wait timed out during repeated tool selection; local run interrupted"
+        },
+        {
+          "bundle": "ios-thinking-budget-final-1008.xcresult",
+          "result": "one local generation/UI test passed with old 0.6B model; off-topic reply was not accepted as dialogue-quality evidence"
+        },
+        {
+          "bundle": "ios-thinking-budget-cross-1008.xcresult",
+          "result": "interrupted after trace showed invented agent IDs; no approval or task submission; fixed discovered-ID constraints"
+        },
+        {
+          "bundle": "ios-qwen35-replacement-1008.xcresult",
+          "result": "failed: URL slash escaping in GBNF; fixed encoding; old model retained"
+        },
+        {
+          "bundle": "ios-qwen35-replacement-final-1008.xcresult",
+          "result": "failed: first answer exact 42; second turn exceeded 180-second wait with 1024 thinking tokens; reduced Qwen3.5 thinking budget; old model retained"
+        },
+        {
+          "bundle": "ios-qwen35-cross-device-1008.xcresult",
+          "result": "failed test assertion: actual new task completed with 17+25=42, assertion accepted only 42 or spaced equation; new-task-scoped predicate now allows optional spaces only"
+        },
+        {
+          "bundle": "ios-qwen35-cross-device-final-1008.xcresult",
+          "result": "new task completed on Acceptance Mac; remote response contained correct 42 plus unsolicited explanation, so the strict result assertion did not pass; next test uses an explicit digits-only delegated task",
+          "screenshot": "/tmp/companion-physical-acceptance-20261007/qwen35-cross-final-live.png"
+        }
+      ],
+      "cross_device": {
+        "result": "passed: new Qwen3.5 turn delegated a new task to Acceptance Mac after explicit approval; newly created task completed and displayed exact remote result 42",
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds": 94.987,
+        "case": "testCrossDeviceDelegatesToMacAndShowsResult",
+        "prompt": "请把任务「计算17+25，只输出数字，不要解释，不要调用工具」委托给 Acceptance Mac。不要在手机本地计算。",
+        "old_task_false_positive_prevented": true,
+        "result_assertion": "exact 42 or exact 17+25=42 with optional spaces; scoped to newly created local task number",
+        "xcresult": "/tmp/companion-physical-acceptance-20261007/ios-qwen35-cross-device-digits-1008.xcresult",
+        "log": "/tmp/companion-ios-qwen35-cross-device-digits-1008.log",
+        "screenshots": "/tmp/companion-physical-acceptance-20261007/ios-qwen35-cross-device-digits-attachments/manifest.json"
+      }
+    },
+    "thinking_keyboard": {
+      "implementation": "shared Compose keyboard send and three animated dots; Qwen3/Qwen3.5 native reasoning separated from answer",
+      "validation": "iOS Qwen3.5 replacement case passed; Foundation prompt/grammar regression passed; signed iOS build passed",
+      "android": "shared UI updated; model engine unchanged; SDK/native acceptance pending",
+      "hardware_shift_enter": "implemented; not separately verified on a physical hardware keyboard"
     }
   },
   "evidence_root": "/tmp/companion-mac-full-acceptance-20261008",
