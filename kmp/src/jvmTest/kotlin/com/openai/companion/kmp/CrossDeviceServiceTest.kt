@@ -73,6 +73,8 @@ class CrossDeviceServiceTest {
                 }
                 return Json.parseToJsonElement(service.callTool("route_task", args.toString()).contentJson).jsonObject["decision"]!!.jsonPrimitive.content
             }
+            val discovered = Json.parseToJsonElement(service.callTool("list_execution_devices", "{}").contentJson).jsonObject["devices"]!!.jsonArray
+            assertEquals(setOf("model.complete", "calendar", "build"), discovered.last().jsonObject["capabilities"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet())
             assertEquals("LOCAL", route("calendar"))
             assertEquals("REMOTE", route("build"))
             assertEquals("REMOTE", route("calendar", "mac"))

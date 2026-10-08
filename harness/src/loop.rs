@@ -167,6 +167,28 @@ fn delegation_target(history: &[Message], explicit: bool) -> Option<String> {
     })()
 }
 
+// Bind route parameters to this turn's advertised capabilities, not model-invented skill names.
+fn constrain_route_tools(tools: &mut [crate::ToolDefinition], history: &[Message]) {
+    let Some(content) = history.iter().rev().find_map(|message| match message {
+        Message::Tool { name, content, is_error: false, .. } if name == "list_execution_devices" => Some(content),
+        _ => None,
+    }) else { return; };
+    let Ok(discovery) = serde_json::from_str::<serde_json::Value>(content) else { return; };
+    let Some(devices) = discovery["devices"].as_array().filter(|devices| !devices.is_empty()) else { return; };
+    let mut names = std::collections::BTreeSet::from(["model.complete".to_owned()]);
+    for device in devices {
+        for tool in device["tools"].as_array().into_iter().flatten() {
+            if let Some(name) = tool["name"].as_str() { names.insert(name.to_owned()); }
+        }
+    }
+    for tool in tools.iter_mut().filter(|tool| tool.name == "route_task") {
+        if let Ok(mut schema) = serde_json::from_str::<serde_json::Value>(&tool.parameters_schema) {
+            schema["properties"]["required_capabilities"]["items"]["enum"] = serde_json::json!(names);
+            tool.parameters_schema = schema.to_string();
+        }
+    }
+}
+
 async fn run_with_history_observed_mode<E, O>(
     model: &ModelServeWrapper,
     executor: &mut E,
@@ -240,14 +262,17 @@ where
         let mut offered = executor.list_tools()?;
         let explicit = explicitly_remote(&user_input);
         let current_turn = &history[previous_history.len()..];
+        constrain_route_tools(&mut offered, current_turn);
         let routed = delegation_target(current_turn, explicit);
         let has_router = offered.iter().any(|tool| tool.name == "route_task");
+        let has_discovery = offered.iter().any(|tool| tool.name == "list_execution_devices");
+        let discovered = current_turn.iter().any(|message| matches!(message, Message::Tool { name, is_error: false, .. } if name == "list_execution_devices"));
         let can_delegate = routed.is_some() || (explicit && !has_router);
         offered.retain(|tool| match tool.name.as_str() {
             "delegate_to_agent" => can_delegate,
             "list_remote_agents" => explicit && !has_router,
-            "list_execution_devices" => !current_turn.iter().any(|message| matches!(message, Message::Tool { name, is_error: false, .. } if name == "list_execution_devices")),
-            "route_task" => routed.is_none(),
+            "list_execution_devices" => !discovered,
+            "route_task" => routed.is_none() && (!explicit || !has_discovery || discovered),
             _ => true,
         });
         let blocked_execution = current_turn.iter().rev().find_map(|message| match message {
@@ -669,7 +694,7 @@ mod tests {
         });
         let model = ModelServeWrapper::new(provider.clone());
         let mut executor = crate::ToolRegistry::new(16).unwrap();
-        for (name, output) in [("list_execution_devices", "{}"), ("list_remote_agents", "[]"),
+        for (name, output) in [("list_execution_devices", r#"{"devices":[{"tools":[{"name":"build"}]}]}"#), ("list_remote_agents", "[]"),
             ("route_task", r#"{"decision":"REMOTE","agent_id":"mac"}"#), ("delegate_to_agent", "{}")] {
             executor.register(RoutingTool(name, output)).unwrap();
         }
@@ -680,10 +705,11 @@ mod tests {
         assert!(requests.iter().all(|request| request["tool_choice"] == "required"));
         let names = |index: usize| requests[index]["tools"].as_array().unwrap().iter()
             .map(|tool| tool["function"]["name"].as_str().unwrap()).collect::<Vec<_>>();
-        assert!(names(0).contains(&"list_execution_devices"));
+        assert_eq!(names(0), vec!["list_execution_devices"]);
         assert!(!names(0).contains(&"list_remote_agents"));
         assert!(!names(0).contains(&"delegate_to_agent"));
         assert_eq!(names(1), vec!["route_task"]);
+        assert_eq!(requests[1]["tools"][0]["function"]["parameters"]["properties"]["required_capabilities"]["items"]["enum"], serde_json::json!(["build", "model.complete"]));
         assert_eq!(names(2), vec!["delegate_to_agent"]);
     }
 

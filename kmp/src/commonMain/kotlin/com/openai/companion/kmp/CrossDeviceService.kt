@@ -252,13 +252,14 @@ class CrossDeviceService(
         return devices.map { device ->
             val own = device.string("id") == deviceId
             val peerEnabled = a2a.agents.value.any { it.id == agentCardUrl(device.string("id")) && it.enabled }
-            JsonObject(device + ("delegationEnabled" to JsonPrimitive(own || peerEnabled)))
+            JsonObject(device + mapOf("delegationEnabled" to JsonPrimitive(own || peerEnabled),
+                "capabilities" to JsonArray(capabilityNames(device).map(::JsonPrimitive))))
         }
     }
 
     override suspend fun listTools() = listOf(
         McpToolDescriptor("list_execution_devices", "List paired devices, exact capability names, resource references and availability. Use only when a task needs device execution.", "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}", routingPolicy),
-        McpToolDescriptor("route_task", "Resolve execution for a task. Ordinary chat stays local. Specify exact capability names from list_execution_devices; never invent resources. This tool selects a device but does not execute. For REMOTE use delegate_to_agent with the returned agent_id. NEEDS_USER_ACTION means ask the user; do not silently switch data sources.",
+        McpToolDescriptor("route_task", "Resolve execution for a task. Ordinary chat stays local. Use model.complete for reasoning, arithmetic and text generation. Specify exact capability names from list_execution_devices; never invent capabilities or resources. This tool selects a device but does not execute. For REMOTE use delegate_to_agent with the returned agent_id. NEEDS_USER_ACTION means ask the user; do not silently switch data sources.",
             """{"type":"object","properties":{"required_capabilities":{"type":"array","items":{"type":"string"}},"resource_refs":{"type":"array","items":{"type":"string"}},"target_device":{"type":"string"}},"required":["required_capabilities"],"additionalProperties":false}""", routingPolicy),
     )
 
@@ -274,6 +275,9 @@ class CrossDeviceService(
         McpCallResult(result.toString(), false)
     }
 
+    private fun capabilityNames(device: JsonObject): List<String> =
+        (listOf("model.complete") + device.getValue("tools").jsonArray.map { it.jsonObject.string("name") }).distinct()
+
     internal fun resolve(devices: List<JsonObject>, args: JsonObject): JsonObject {
         require(args.keys.all { it in setOf("required_capabilities", "resource_refs", "target_device") })
         val required = args.getValue("required_capabilities").jsonArray.map { it.jsonPrimitive.content }
@@ -284,7 +288,7 @@ class CrossDeviceService(
             it.string("id") == target || it.string("name") == target || agentCardUrl(it.string("id")) == target
         }.singleOrNull()?.string("id")
         fun compatible(device: JsonObject): Boolean {
-            val capabilities = device.getValue("tools").jsonArray.map { it.jsonObject.string("name") } + "model.complete"
+            val capabilities = capabilityNames(device)
             val refs = (device["resources"] as? JsonArray).orEmpty().map { it.jsonPrimitive.content }
             return required.all { it in capabilities } && resources.all { it in refs }
         }
