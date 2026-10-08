@@ -1,5 +1,19 @@
 package com.openai.companion.kmp
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -150,6 +164,15 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var followSentMessage by remember { mutableStateOf(false) }
     var followLatest by remember { mutableStateOf(true) }
     var draft by remember { mutableStateOf("") }
+    val sendDraft = {
+        if (!state.sending && state.activeSessionId != null && draft.isNotBlank()) {
+            followSentMessage = true
+            followLatest = true
+            actions.send(draft.trim())
+            draft = ""
+            keyboard?.hide()
+        }
+    }
     var endpointDraft by remember(state.mcpEndpoint) { mutableStateOf(state.mcpEndpoint) }
     var oauthClientId by remember { mutableStateOf("") }
     var deviceEndpointDraft by remember(state.deviceEndpoint) { mutableStateOf(state.deviceEndpoint) }
@@ -182,9 +205,10 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
             if (!scrolling && nearLatest) followLatest = true
         }
     }
-    LaunchedEffect(state.messages.size, state.streamedText.length) {
+    LaunchedEffect(state.messages.size, state.streamedText.length, state.sending) {
         if (!showSettings && !showTasks && (followLatest || followSentMessage)) {
-            val last = state.messages.size + if (state.streamedText.isNotEmpty()) 1 else 0
+            val last = state.messages.size + (if (state.streamedText.isNotEmpty()) 1 else 0) +
+                (if (state.sending) 1 else 0)
             if (last >= 0) listState.scrollToItem(last)
             followSentMessage = false
         }
@@ -451,6 +475,9 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             if (state.streamedText.isNotEmpty()) {
                                 item { MobileMessageRow(MobileMessage("assistant", state.streamedText)) }
                             }
+                            if (state.sending) {
+                                item(key = "assistant-thinking") { MobileThinkingBubble(state.streamedText.isEmpty()) }
+                            }
                             // A trailing anchor reaches the end even when a single reply is taller than the viewport.
                             item(key = "conversation-end") { Spacer(Modifier.height(1.dp)) }
                         }
@@ -467,7 +494,15 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                 verticalAlignment = Alignment.CenterVertically) {
                                 BasicTextField(value = draft, onValueChange = { draft = it },
                                     modifier = Modifier.weight(1f).heightIn(min = 44.dp)
-                                        .semantics { contentDescription = "输入消息" },
+                                        .semantics { contentDescription = "输入消息" }
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.key == Key.Enter && !event.isShiftPressed) {
+                                                if (event.type == KeyEventType.KeyDown) sendDraft()
+                                                true
+                                            } else false
+                                        },
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                    keyboardActions = KeyboardActions(onSend = { sendDraft() }),
                                     minLines = 1, maxLines = 4,
                                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -481,14 +516,8 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                     })
                                 if (state.sending) TextButton(onClick = actions::cancel) { Text("停止") }
                                 else FilledIconButton(enabled = draft.isNotBlank(),
-                                    modifier = Modifier.semantics { contentDescription = "发送" },
-                                    onClick = {
-                                        followSentMessage = true
-                                        followLatest = true
-                                        actions.send(draft.trim())
-                                        draft = ""
-                                        keyboard?.hide()
-                                    }) {
+                                    modifier = Modifier.testTag("send-message").semantics { contentDescription = "发送" },
+                                    onClick = sendDraft) {
                                     Icon(sendPaperPlane, contentDescription = null, modifier = Modifier.size(20.dp))
                                 }
                             }
@@ -666,6 +695,26 @@ private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions
             }
             if (!task.terminal && task.remoteTaskId != null) {
                 TextButton(onClick = { actions.cancelA2aTask(task.id) }) { Text("取消任务") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileThinkingBubble(thinking: Boolean) {
+    val transition = rememberInfiniteTransition(label = "thinking")
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.testTag("assistant-thinking")) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (thinking) "正在思考" else "正在生成", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            repeat(3) { index ->
+                val alpha by transition.animateFloat(initialValue = 0.25f, targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(500, delayMillis = index * 150), RepeatMode.Reverse),
+                    label = "thinking-dot-$index")
+                Box(Modifier.size(5.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                    RoundedCornerShape(50)))
             }
         }
     }

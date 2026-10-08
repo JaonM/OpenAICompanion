@@ -133,15 +133,15 @@
     XCTAssertFalse(app.buttons[@"刷新"].exists, @"对话页不应常驻远端任务刷新栏。");
     NSString *draft = @"Draft retained across navigation";
     [self enterAcceptanceText:draft field:app.textViews[@"输入消息"] app:app];
-    XCTAssertTrue(app.buttons[@"发送"].enabled, @"草稿输入未写入。");
+    XCTAssertTrue(app.buttons[@"send-message"].enabled, @"草稿输入未写入。");
     [self retainScreenshot:app name:@"Draft before navigation"];
     [app.buttons[@"任务"] tap];
     XCTAssertTrue(app.buttons[@"刷新"].exists);
-    XCTAssertFalse(app.buttons[@"发送"].exists);
+    XCTAssertFalse(app.buttons[@"send-message"].exists);
     [app.buttons[@"对话"] tap];
     XCTAssertFalse(app.buttons[@"刷新"].exists);
     [self retainScreenshot:app name:@"Draft after navigation"];
-    XCTAssertTrue(app.buttons[@"发送"].enabled, @"导航后草稿应仍可发送。");
+    XCTAssertTrue(app.buttons[@"send-message"].enabled, @"导航后草稿应仍可发送。");
     [self openSettingsSection:@"跨设备执行" app:app];
     XCTAssertTrue(app.textViews[@"设备服务地址"].exists);
     [app.buttons[@"‹ 所有设置"] tap];
@@ -153,15 +153,15 @@
     [self retainScreenshot:app name:@"Settings overview"];
     [app.buttons[@"完成"] tap];
     [self retainScreenshot:app name:@"Draft after navigation"];
-    XCTAssertTrue(app.buttons[@"发送"].enabled, @"导航后草稿应仍可发送。");
+    XCTAssertTrue(app.buttons[@"send-message"].enabled, @"导航后草稿应仍可发送。");
     // Compose TextView exposes no AX value on iOS. Verify the actual submitted
     // text instead of inferring draft preservation from that empty property.
-    [app.buttons[@"发送"] tap];
+    [app.buttons[@"send-message"] tap];
     XCUIElement *submitted = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:
         [NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND label == %@",
             @"conversation-message-", [@"user：" stringByAppendingString:draft]]].firstMatch;
     XCTAssertTrue([submitted waitForExistenceWithTimeout:20]);
-    XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:120]);
+    XCTAssertTrue([app.buttons[@"send-message"] waitForExistenceWithTimeout:120]);
 }
 
 // Requires the real phone to be paired and the acceptance Mac worker online.
@@ -185,10 +185,10 @@
     if (app.buttons[@"对话"].exists) [app.buttons[@"对话"] tap];
     XCUIElement *message = app.textViews.firstMatch;
     XCTAssertTrue([message waitForExistenceWithTimeout:10]);
-    [self enterAcceptanceText:fixture[@"routingPrompt"] ?: @"请把 17+25 的计算委托给 Acceptance Mac，完成后展示远端结果。不要在手机本地计算。" field:message app:app];
-    XCTAssertTrue(app.buttons[@"发送"].enabled);
-    [app.buttons[@"发送"] tap];
-    XCTAssertTrue([app.buttons[@"发送一次"] waitForExistenceWithTimeout:120], @"未产生远端委托确认，不能计作跨设备路由成功。");
+    [self enterAcceptanceText:fixture[@"routingPrompt"] ?: @"请把任务「计算17+25，只输出数字，不要解释，不要调用工具」委托给 Acceptance Mac。不要在手机本地计算。" field:message app:app];
+    XCTAssertTrue(app.buttons[@"send-message"].enabled);
+    [app.buttons[@"send-message"] tap];
+    XCTAssertTrue([app.buttons[@"发送一次"] waitForExistenceWithTimeout:300], @"未产生远端委托确认，不能计作跨设备路由成功。");
     XCTAssertTrue(app.staticTexts[@"Acceptance Mac"].exists);
     [app.buttons[@"发送一次"] tap];
     XCTAssertTrue([app.buttons[@"任务"] waitForExistenceWithTimeout:20]);
@@ -200,9 +200,8 @@
     }];
     XCTNSPredicateExpectation *created = [[XCTNSPredicateExpectation alloc] initWithPredicate:newTask object:app];
     XCTAssertEqual([XCTWaiter waitForExpectations:@[created] timeout:20], XCTWaiterResultCompleted);
-    NSPredicate *newResult = [NSPredicate predicateWithFormat:@"label == %@ OR label == %@",
-        [NSString stringWithFormat:@"任务 %lu 远端结果：42", (unsigned long)createdTask],
-        [NSString stringWithFormat:@"任务 %lu 远端结果：17 + 25 = 42", (unsigned long)createdTask]];
+    NSString *resultPattern = [NSString stringWithFormat:@"任务 %lu 远端结果： *(42|17 *\\+ *25 *= *42) *", (unsigned long)createdTask];
+    NSPredicate *newResult = [NSPredicate predicateWithFormat:@"label MATCHES %@", resultPattern];
     XCTAssertTrue([[app.staticTexts matchingPredicate:newResult].firstMatch waitForExistenceWithTimeout:180]);
     [self retainScreenshot:app name:@"Companion remote task"];
 }
@@ -250,7 +249,7 @@
     XCUIApplication *app = [self acceptanceApp];
     [app launch];
 
-    XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:10]);
+    XCTAssertTrue([app.buttons[@"send-message"] waitForExistenceWithTimeout:10]);
     XCTAssertFalse([app.buttons[@"新建会话"] exists]);
 
     [self openSettingsSection:@"端侧模型" app:app];
@@ -260,8 +259,54 @@
 
     [app terminate];
     [app launch];
-    XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:20]);
+    XCTAssertTrue([app.buttons[@"send-message"] waitForExistenceWithTimeout:20]);
     XCTAssertFalse([app.buttons[@"新建会话"] exists]);
+}
+
+- (XCUIElement *)sendKeyboardPrompt:(NSString *)prompt app:(XCUIApplication *)app {
+    XCUIElement *message = app.textViews.firstMatch;
+    XCTAssertTrue([message waitForExistenceWithTimeout:10]);
+    [self enterAcceptanceText:prompt field:message app:app];
+    XCTAssertTrue(app.buttons[@"send-message"].enabled, @"自动化输入未生效，不能计作模型请求。");
+    [message typeText:@"\n"];
+    XCUIElement *thinking = [[app descendantsMatchingType:XCUIElementTypeAny]
+        matchingIdentifier:@"assistant-thinking"].firstMatch;
+    XCTAssertTrue([thinking waitForExistenceWithTimeout:10], @"回车应提交请求并显示思考气泡。");
+    [self retainScreenshot:app name:@"Thinking bubble after keyboard send"];
+    // LazyColumn recycles older rows: visible reply counts cannot identify a new reply.
+    XCUIElement *request = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:
+        [NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND label == %@", @"conversation-message-", [@"user：" stringByAppendingString:prompt]]].firstMatch;
+    for (NSInteger i = 0; i < 10 && !request.exists; i++) [app swipeDown];
+    XCTAssertTrue([request waitForExistenceWithTimeout:10]);
+    NSScanner *scanner = [NSScanner scannerWithString:[request.identifier substringFromIndex:[@"conversation-message-" length]]];
+    NSInteger index = -1;
+    XCTAssertTrue([scanner scanInteger:&index] && index >= 0);
+    // A thinking record can be inserted before the answer; identify a new assistant row by index.
+    NSMutableArray *replyIds = [NSMutableArray array];
+    // Reasoning and tool rows can precede the answer; never match an older turn.
+    for (NSInteger offset = 1; offset <= 32; offset++) {
+        [replyIds addObject:[NSString stringWithFormat:@"conversation-message-%ld-assistant", (long)(index + offset)]];
+    }
+    XCUIElement *reply = [[app descendantsMatchingType:XCUIElementTypeAny]
+        matchingPredicate:[NSPredicate predicateWithFormat:@"identifier IN %@", replyIds]].firstMatch;
+    XCUIElement *modelError = [app.staticTexts matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"model error:"]].firstMatch;
+    NSPredicate *finished = [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
+        return reply.exists || modelError.exists;
+    }];
+    XCTNSPredicateExpectation *finishedReply = [[XCTNSPredicateExpectation alloc] initWithPredicate:finished object:app];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[finishedReply] timeout:300], XCTWaiterResultCompleted);
+    XCTAssertTrue(reply.exists, @"新模型没有返回正文：%@", modelError.exists ? modelError.label : @"等待超时");
+    XCTAssertTrue([reply.label hasPrefix:@"assistant："] && reply.label.length > [@"assistant：" length]);
+    XCTAssertFalse([reply.label containsString:@"</think>"]);
+    XCTAssertFalse(thinking.exists, @"回复完成后应移除思考气泡。");
+    XCTAssertFalse([reply.label hasPrefix:@"assistant：{\"text\":"]);
+    XCTNSPredicateExpectation *visibleReply = [[XCTNSPredicateExpectation alloc]
+        initWithPredicate:[NSPredicate predicateWithFormat:@"hittable == YES"] object:reply];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[visibleReply] timeout:10], XCTWaiterResultCompleted,
+        @"新回复应自动进入可视区，不能只检查其存在。");
+    [self retainScreenshot:app name:@"Companion conversation"];
+    return reply;
 }
 
 - (void)testLocalModelGeneratesReply {
@@ -272,36 +317,14 @@
     [app launch];
 
     [self openSettingsSection:@"端侧模型" app:app];
-    if (![app.staticTexts[@"端侧模型已导入"] waitForExistenceWithTimeout:5]) {
+    if (![[[app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"端侧模型已导入"]] firstMatch] waitForExistenceWithTimeout:5]) {
         XCTSkip(@"需要先把测试 GGUF 放入模拟器 App 的 Models 目录；运行 scripts/test-ios-model.sh。");
     }
     [app.buttons[@"完成"] tap];
-    XCTAssertTrue([app.buttons[@"发送"] waitForExistenceWithTimeout:10]);
+    XCTAssertTrue([app.buttons[@"send-message"] waitForExistenceWithTimeout:10]);
 
     NSString *prompt = [@"Reply with hi. Acceptance request " stringByAppendingString:NSUUID.UUID.UUIDString];
-    XCUIElement *message = app.textViews.firstMatch;
-    XCTAssertTrue([message waitForExistenceWithTimeout:10]);
-    [self enterAcceptanceText:prompt field:message app:app];
-    XCTAssertTrue(app.buttons[@"发送"].enabled, @"自动化输入未生效，不能计作模型请求。");
-    [app.buttons[@"发送"] tap];
-    // LazyColumn recycles older rows: visible reply counts cannot identify a new reply.
-    XCUIElement *request = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:
-        [NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND label == %@", @"conversation-message-", [@"user：" stringByAppendingString:prompt]]].firstMatch;
-    for (NSInteger i = 0; i < 10 && !request.exists; i++) [app swipeDown];
-    XCTAssertTrue([request waitForExistenceWithTimeout:10]);
-    NSScanner *scanner = [NSScanner scannerWithString:[request.identifier substringFromIndex:[@"conversation-message-" length]]];
-    NSInteger index = -1;
-    XCTAssertTrue([scanner scanInteger:&index] && index >= 0);
-    NSString *replyId = [NSString stringWithFormat:@"conversation-message-%ld-assistant", (long)(index + 1)];
-    XCUIElement *reply = [[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:replyId].firstMatch;
-    XCTAssertTrue([reply waitForExistenceWithTimeout:120]);
-    XCTAssertTrue([reply.label hasPrefix:@"assistant："] && reply.label.length > [@"assistant：" length]);
-    XCTAssertFalse([reply.label hasPrefix:@"assistant：{\"text\":"]);
-    XCTNSPredicateExpectation *visibleReply = [[XCTNSPredicateExpectation alloc]
-        initWithPredicate:[NSPredicate predicateWithFormat:@"hittable == YES"] object:reply];
-    XCTAssertEqual([XCTWaiter waitForExpectations:@[visibleReply] timeout:10], XCTWaiterResultCompleted,
-        @"新回复应自动进入可视区，不能只检查其存在。");
-    [self retainScreenshot:app name:@"Companion conversation"];
+    XCUIElement *reply = [self sendKeyboardPrompt:prompt app:app];
     if (fixture) {
         [app swipeDown];
         [app swipeDown];
@@ -310,6 +333,39 @@
         XCTAssertTrue(reply.hittable, @"返回最新消息后应显示刚生成的答案。");
     }
 
+}
+
+- (void)testQwen35ReplacementAndDialogue {
+    NSData *data = [NSData dataWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/device-acceptance.json"]];
+    NSDictionary *fixture = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    NSString *file = fixture[@"modelFileName"];
+    if (![file isEqualToString:@"Qwen3.5-4B-Q8_0.gguf"]) XCTSkip(@"需要已校验并复制到 App 的 Qwen3.5-4B Q8_0。");
+    NSLog(@"Acceptance physical memory bytes: %llu", NSProcessInfo.processInfo.physicalMemory);
+    XCUIApplication *app = [self acceptanceApp];
+    app.launchArguments = @[@"-localGGUFFileName", file];
+    [app launch];
+    NSString *first = [@"这是一条新的独立问题，忽略以前的委托。17+25等于多少？只输出数字，不要调用工具。验收编号 " stringByAppendingString:NSUUID.UUID.UUIDString];
+    XCUIElement *reply = [self sendKeyboardPrompt:first app:app];
+    XCTAssertEqualObjects(reply.label, @"assistant：42", @"新模型必须正确回答当前问题。");
+    NSString *followup = [@"上一条答案加8，只输出数字，不要调用工具。验收编号 " stringByAppendingString:NSUUID.UUID.UUIDString];
+    reply = [self sendKeyboardPrompt:followup app:app];
+    XCTAssertEqualObjects(reply.label, @"assistant：50", @"新模型必须保留多轮上下文。");
+    // Activate and remove the old model only after two real inference checks pass.
+    [app terminate];
+    app.launchEnvironment = @{@"COMPANION_ACCEPTANCE_SYSTEM_KEYBOARD": @"1", @"COMPANION_ACCEPTANCE_ACTIVATE_MODEL": @"1"};
+    [app launch];
+    reply = [self sendKeyboardPrompt:[@"17+25等于多少？只输出数字，不要调用工具。验收编号 " stringByAppendingString:NSUUID.UUID.UUIDString] app:app];
+    XCTAssertEqualObjects(reply.label, @"assistant：42");
+    [app terminate];
+    app.launchArguments = @[];
+    app.launchEnvironment = @{@"COMPANION_ACCEPTANCE_SYSTEM_KEYBOARD": @"1"};
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    XCUIElement *selected = [app.staticTexts matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@ AND label CONTAINS %@", @"端侧模型已导入", @"Qwen3.5-4B-Q8_0"]].firstMatch;
+    XCTAssertTrue([selected waitForExistenceWithTimeout:10], @"普通重启必须保留新模型选择。");
+    [self retainScreenshot:app name:@"Qwen3.5 Q8 persistent model selection"];
+    [app.buttons[@"完成"] tap];
 }
 
 - (void)testConnectLocalMcpFixture {
