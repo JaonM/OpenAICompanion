@@ -224,6 +224,36 @@
         "evidence": "/tmp/companion-physical-acceptance-20261007/ios-interaction-compact-final-1008.xcresult"
       },
       "final_shared_jvm_compile": "passed: /tmp/companion-ios-interaction-plane-jvm.log"
+    },
+    "task_toolbar": {
+      "change": "Removed permanent remote-task count/View/Refresh row from chat; top Tasks navigation and refresh in dedicated task page remain.",
+      "initial_regression": {
+        "passed": 1,
+        "failed": 1,
+        "passed_case": "testSettingsNavigationAndDraftPreservation",
+        "failed_case": "testCrossDeviceDelegatesToMacAndShowsResult",
+        "failure": "Another foreground app interrupted keyboard focus before a delegation request was sent.",
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-task-toolbar-1008.xcresult"
+      },
+      "transport_retry": {
+        "executed": 0,
+        "status": "aborted",
+        "failure": "Test Runner transport closed with Unexpected EOF before any test executed.",
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-task-toolbar-rerun-1008.xcresult"
+      },
+      "cross_device_reconnect": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "case": "testCrossDeviceDelegatesToMacAndShowsResult",
+        "result": "Real phone delegation to Acceptance Mac completed with result 42 through the dedicated task page.",
+        "evidence": "/tmp/companion-physical-acceptance-20261007/ios-task-toolbar-reconnect-1008.xcresult"
+      },
+      "verified_cases": [
+        "Chat has no permanent refresh toolbar; task page retains refresh and navigation preserves draft.",
+        "Phone delegates a new task to Mac and displays its completed result through Tasks."
+      ],
+      "navigation_screenshot": "/tmp/companion-physical-acceptance-20261007/ios-task-toolbar-attachments/C7DDC583-CF3A-4078-A25B-BBE98C5B0996.png"
     }
   },
   "evidence_root": "/tmp/companion-mac-full-acceptance-20261008",
