@@ -36,7 +36,8 @@
     },
     "observations": [
       "New package path reading a previously created Keychain item blocked in SecItemCopyMatching; fresh isolated item worked. Upgrade credential access remains pending.",
-      "Mac actual GUI displayed ready with real local model; automation clicks and typing produced no state change, manual assistance requested. UI flow is not certified."
+      "Mac actual GUI displayed ready with real local model; automation clicks and typing produced no state change, manual assistance requested. UI flow is not certified.",
+      "A separate GUI test copy with unique CFBundleIdentifier was tried to rule out multiple-instance targeting. Native UI tool then failed: Sky Computer Use native pipe closed before response. No GUI operation passed; original package remained unchanged."
     ],
     "pending": [
       "Actual GUI send, stream, stop, shortcuts, settings and relaunch persistence",
