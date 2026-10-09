@@ -43,6 +43,10 @@ int main(void) {
         NSCAssert([previousText isEqualToString:@"你好\n\"quoted\"\\path 😀"], @"Final streamed answer must exactly preserve escapes and Unicode");
         NSDictionary *task = @{@"response_format": @{@"type": @"json_schema", @"json_schema": @{@"name": @"device_task_result"}}};
         NSCAssert(OCLlamaResponseGrammar(@{}, @[]) == nil, @"Ordinary chat must remain unconstrained");
+        NSDictionary *plan = @{@"response_format": @{@"type": @"json_schema", @"json_schema": @{
+            @"name": @"proactive_plan", @"schema": @{@"type": @"object", @"properties": @{@"action": @{@"type": @"string"}}}
+        }}};
+        NSCAssert([OCLlamaResponseGrammar(plan, @[]) hasPrefix:@"root ::= ws (object) ws"], @"Custom JSON schemas must activate the native response constraint");
         NSString *requiredTool = OCLlamaResponseGrammar(@{@"tool_choice": @"required"}, @[@"route_task"]);
         NSCAssert([requiredTool hasPrefix:@"root ::= ws (tool-call) ws"], @"Required execution cannot be replaced by a chat acknowledgement");
         NSString *chatTools = OCLlamaResponseGrammar(@{}, @[@"delegate_to_agent"]);

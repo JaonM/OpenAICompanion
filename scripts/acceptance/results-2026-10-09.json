@@ -255,5 +255,96 @@
       "Verify cancellation, weekly repeating reminders, permission revocation and focus mode separately.",
       "App-exit real-time model execution and APNs delivery remain unimplemented."
     ]
+  },
+  "ios_proactive_fix": {
+    "status": "passed",
+    "device": "iPhone 17 Pro Max / iOS 27.0.1",
+    "model": "Qwen3.5-4B-MLX-4bit",
+    "bundle": "/tmp/companion-physical-acceptance-20261007/ios-proactive-fixed11-1009.xcresult",
+    "log": "/tmp/companion-proactive-fixed11-1009.log",
+    "test_token": "验收提醒70DC0528",
+    "requested_local_time": "2026-10-09 20:53:07",
+    "fixes": [
+      "Enable custom JSON schema grammar; constrain literal evidence, explicit date and requested title; disable thinking only for structured MLX background requests.",
+      "Validate and convert local date in Rust; allow zero lead only for unconditional fixed reminders.",
+      "Share provider foreground ownership, bound batches to five, persist per-turn retry and continue after a failure; iOS wakes retries while runnable.",
+      "Preserve default task fields required by Rust when saving enabled/disabled tasks on all three clients.",
+      "Read actual pending iOS notification IDs before reporting schedule count."
+    ],
+    "checks": [
+      {
+        "name": "Rust regression",
+        "status": "passed",
+        "tests": 73,
+        "log": "/tmp/companion-proactive-fix-rust-final-1009.log"
+      },
+      {
+        "name": "Scheduled reminders, full task wire payload and mobile controller",
+        "status": "passed",
+        "tests": 17,
+        "log": "/tmp/companion-proactive-fix-kmp-final2-1009.log"
+      },
+      {
+        "name": "Foundation structured prompt grammar",
+        "status": "passed",
+        "log": "/tmp/companion-proactive-fix-prompt-final-1009.log"
+      },
+      {
+        "name": "Final Mac package",
+        "status": "passed",
+        "log": "/tmp/companion-proactive-fix-mac-final3-1009.log"
+      },
+      {
+        "name": "Physical real dialogue creates exact reminder",
+        "status": "passed",
+        "evidence": "Turn 121 upsert passes all evidence/time checks; system pending count is one."
+      },
+      {
+        "name": "Physical disable cancels schedule and enable restores it",
+        "status": "passed",
+        "evidence": "System pending count changes from one to zero and back to one."
+      },
+      {
+        "name": "System displays notification while application terminated",
+        "status": "passed",
+        "evidence": "SpringBoard displays this new task banner at 20:53 after app termination; screenshot visually inspected."
+      },
+      {
+        "name": "Notification click launches app and test task cleanup",
+        "status": "passed",
+        "evidence": "Tap on actual banner brings app to foreground; UI deletes the generated task and preserves originally enabled global preference."
+      }
+    ],
+    "remaining": [
+      "Weekly reminders, DST/time-zone changes, permission revocation, focus mode and deleting a future pending reminder need separate physical scenarios.",
+      "Android native build and physical acceptance remain pending SDK/device availability.",
+      "App-exit real-time inference and APNs server push remain unimplemented."
+    ],
+    "duration_seconds": 445.223,
+    "implementation_commit": "157a769",
+    "screenshots": {
+      "app_terminated_notification": "/tmp/companion-proactive-fixed11-attachments/E99C1BAE-E47F-4548-892F-AF84DCAF60D2.png",
+      "notification_click": "/tmp/companion-proactive-fixed11-attachments/6F3A5C1A-32D8-4E86-B9C9-4ABF6BA2E9C1.png",
+      "scheduled": "/tmp/companion-proactive-fixed11-attachments/5956070D-4D3F-40F5-B829-8C9BFD98DFB4.png",
+      "disabled": "/tmp/companion-proactive-fixed11-attachments/13A8A4C7-7919-4B9D-87E0-BBE8D33FA137.png"
+    },
+    "failed_or_diagnostic_runs": [
+      {
+        "bundle_suffix": "ios-proactive-fixed7-1009.xcresult",
+        "finding": "Real task and OS schedule created, but full-token locator failed when model inserted a space in title; no notification delivery verdict."
+      },
+      {
+        "bundle_suffix": "ios-proactive-fixed8-1009.xcresult",
+        "finding": "Model returned none for explicit reminder; run stopped before dependent steps; explicit action constrained afterward."
+      },
+      {
+        "bundle_suffix": "ios-proactive-fixed9-1009.xcresult",
+        "finding": "Test compile failed due assertion macro comma; corrected before physical rerun."
+      },
+      {
+        "bundle_suffix": "ios-proactive-fixed10-1009.xcresult",
+        "finding": "Task creation passed but task toggle failed; missing default wire fields identified and repaired."
+      }
+    ]
   }
 }

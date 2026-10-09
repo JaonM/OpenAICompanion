@@ -1,8 +1,24 @@
 package com.openai.companion.kmp
 
 import kotlin.test.*
+import kotlinx.serialization.json.*
 
 class ScheduledRemindersTest {
+    @Test fun taskWireFormatIncludesDefaultsRequiredByRustForBothToggleStates() {
+        val task = ProactiveTask("once", "Reminder", "Open app", "", localMinute = 0,
+            weekdayMask = 0, leadMinutes = 0, deadlineLeadMinutes = 0, oneShotAt = 7200)
+        for (enabled in listOf(true, false)) {
+            val json = Json.parseToJsonElement(task.copy(enabled = enabled).toWireJson()).jsonObject
+            assertEquals(enabled, json.getValue("enabled").jsonPrimitive.boolean)
+            assertEquals(JsonArray(emptyList()), json.getValue("allowed_tools"))
+            assertEquals(JsonArray(emptyList()), json.getValue("required_tools"))
+            assertEquals(0, json.getValue("timezone_offset_minutes").jsonPrimitive.int)
+            assertEquals(JsonNull, json.getValue("next_run_at"))
+            assertEquals(JsonNull, json.getValue("next_event_at"))
+            assertTrue(json.keys.containsAll(setOf("scenario", "title", "instruction", "memory_query",
+                "local_minute", "weekday_mask", "lead_minutes", "deadline_lead_minutes", "one_shot_at")))
+        }
+    }
     private val task = ProactiveTask("review", "Review", "Review", "", localMinute = 30,
         weekdayMask = 1, deadlineLeadMinutes = 60)
 
