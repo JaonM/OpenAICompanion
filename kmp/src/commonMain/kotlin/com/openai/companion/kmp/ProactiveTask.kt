@@ -2,6 +2,13 @@ package com.openai.companion.kmp
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+private val taskWireJson = Json { encodeDefaults = true }
+
+/** Rust requires default fields, including empty tool lists and enabled=true. */
+fun ProactiveTask.toWireJson(): String = taskWireJson.encodeToString(this)
 
 @Serializable
 data class ProactiveSettings(

@@ -1,5 +1,6 @@
 package com.openai.companion.desktop
 
+import com.openai.companion.kmp.toWireJson
 import com.openai.companion.kmp.*
 import uniffi.harness.A2aProvider
 import uniffi.harness.registerA2aProvider
@@ -272,10 +273,10 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe(), pr
     }
 
     suspend fun saveProactiveTask(task: ProactiveTask) = withContext(Dispatchers.IO) {
-        appPutProactiveTask(Json.encodeToString(task.copy(
+        appPutProactiveTask(task.copy(
             timezoneOffsetMinutes = timezoneOffsetMinutes(),
             nextRunAt = null, nextEventAt = null,
-        ))).value()
+        ).toWireJson()).value()
         loadProactiveRules()
         proactiveWake.trySend(Unit)
     }
@@ -376,13 +377,17 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe(), pr
     private fun processPendingProactivePlans() {
         if (!modelServe.isLocalEndpoint()) return
         try {
-            val result = Json.parseToJsonElement(
-                appProcessPendingProactivePlans(timezoneOffsetMinutes()).value()
-            ).jsonObject
-            if (result.getValue("changed").jsonPrimitive.content.toInt() > 0) {
-                proactiveTasks = Json.decodeFromString(appListProactiveRules().value())
-                proactiveWake.trySend(Unit)
-            }
+            var pending: Boolean
+            do {
+                val result = Json.parseToJsonElement(
+                    appProcessPendingProactivePlans(timezoneOffsetMinutes()).value()
+                ).jsonObject
+                if (result.getValue("changed").jsonPrimitive.content.toInt() > 0) {
+                    proactiveTasks = Json.decodeFromString(appListProactiveRules().value())
+                    proactiveWake.trySend(Unit)
+                }
+                pending = result.getValue("pending").jsonPrimitive.content.toBooleanStrict()
+            } while (pending)
         } catch (error: Exception) {
             System.err.println("主动任务提取暂缓：${error.message}")
         }

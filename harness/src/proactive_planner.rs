@@ -17,6 +17,9 @@ static WORKER: Mutex<()> = Mutex::new(());
 pub(crate) struct PlanOutcome {
     pub changed: usize,
     pub enabled: usize,
+    pub failed: usize,
+    pub pending: bool,
+    pub retry_at: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +47,8 @@ struct Proposal {
     #[serde(default)]
     event_at: Option<i64>,
     #[serde(default)]
+    local_datetime: String,
+    #[serde(default)]
     local_minute: Option<i64>,
     #[serde(default)]
     weekday_mask: Option<i64>,
@@ -55,6 +60,193 @@ struct Proposal {
     allowed_tools: Vec<String>,
     #[serde(default)]
     required_tools: Vec<String>,
+}
+
+fn quoted_fragments(source: &str) -> Vec<String> {
+    source
+        .split_inclusive(['。', '，', '！', '？', '\n'])
+        .flat_map(|part| {
+            let chars: Vec<_> = part.chars().collect();
+            chars
+                .chunks(120)
+                .map(|chunk| chunk.iter().collect::<String>())
+                .collect::<Vec<_>>()
+        })
+        .filter(|part| !part.trim().is_empty())
+        .collect()
+}
+
+fn requested_task_title(query: &str) -> Option<String> {
+    for marker in [
+        "任务名称必须是",
+        "任务名称为",
+        "任务名称是",
+        "任务名为",
+        "标题为",
+    ] {
+        if let Some((_, rest)) = query.split_once(marker) {
+            let rest = rest.trim_start_matches([' ', '：', ':']);
+            let title = match rest.chars().next() {
+                Some('“') => rest[3..].split('”').next()?,
+                Some('"') => rest[1..].split('"').next()?,
+                _ => rest.split(['，', '。', '\n', ',', ';', '；']).next()?,
+            }
+            .trim();
+            if !title.is_empty() && title.chars().count() <= 80 {
+                return Some(title.into());
+            }
+        }
+    }
+    None
+}
+
+fn literal_local_datetimes(source: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let bytes = source.as_bytes();
+    for start in 0..bytes.len() {
+        for size in [19, 16] {
+            let Some(value) = bytes.get(start..start + size) else {
+                continue;
+            };
+            if value.iter().enumerate().all(|(i, c)| match i {
+                4 | 7 => *c == b'-',
+                10 => *c == b' ',
+                13 | 16 => *c == b':',
+                _ => c.is_ascii_digit(),
+            }) {
+                values.push(String::from_utf8(value.to_vec()).unwrap());
+                break;
+            }
+        }
+    }
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn explicit_dated_reminder(query: &str) -> bool {
+    let query = query.trim();
+    (query.starts_with("请在") || query.starts_with("在") || query.starts_with("提醒我在"))
+        && query.contains("提醒我")
+        && !literal_local_datetimes(query).is_empty()
+        && !["不要提醒", "不需要提醒", "取消", "撤销"]
+            .iter()
+            .any(|text| query.contains(text))
+}
+
+fn response_format(query: Option<&str>, memories: &[serde_json::Value]) -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    properties.insert(
+        "action".into(),
+        serde_json::json!({"type":"string","const":"upsert"}),
+    );
+    for name in [
+        "evidence",
+        "time_evidence",
+        "schedule_evidence",
+        "condition_evidence",
+        "task_id",
+        "title",
+        "instruction",
+        "memory_query",
+        "recurrence",
+        "local_datetime",
+    ] {
+        properties.insert(name.into(), serde_json::json!({"type":"string"}));
+    }
+    for name in [
+        "event_at",
+        "local_minute",
+        "weekday_mask",
+        "lead_minutes",
+        "deadline_lead_minutes",
+    ] {
+        properties.insert(name.into(), serde_json::json!({"type":["integer","null"]}));
+    }
+    for name in ["allowed_tools", "required_tools"] {
+        properties.insert(
+            name.into(),
+            serde_json::json!({"type":"array","items":{"type":"string"}}),
+        );
+    }
+    let query_quotes = query.map(quoted_fragments).unwrap_or_default();
+    let mut quotes = query_quotes.clone();
+    for memory in memories {
+        if let Some(content) = memory["content"].as_str() {
+            quotes.extend(quoted_fragments(content));
+        }
+    }
+    let dates = query.map(literal_local_datetimes).unwrap_or_default();
+    for date in &dates {
+        quotes.extend([date.clone(), date[..10].into(), date[11..].into()]);
+    }
+    quotes.sort();
+    quotes.dedup();
+    let evidence = if query.is_some() {
+        query_quotes
+    } else {
+        quotes.clone()
+    };
+    if !evidence.is_empty() {
+        properties.insert(
+            "evidence".into(),
+            serde_json::json!({"type":"string","enum":evidence}),
+        );
+    }
+    if !quotes.is_empty() {
+        properties.insert(
+            "schedule_evidence".into(),
+            serde_json::json!({"type":"string","enum":quotes}),
+        );
+    }
+    let times: Vec<_> = quotes
+        .iter()
+        .filter(|part| has_clock_evidence(part))
+        .collect();
+    if !times.is_empty() {
+        properties.insert(
+            "time_evidence".into(),
+            serde_json::json!({"type":"string","enum":times}),
+        );
+    }
+    let mut required = vec![
+        "action",
+        "evidence",
+        "time_evidence",
+        "schedule_evidence",
+        "title",
+        "instruction",
+        "recurrence",
+        "lead_minutes",
+        "deadline_lead_minutes",
+    ];
+    if !dates.is_empty() {
+        properties.insert(
+            "local_datetime".into(),
+            serde_json::json!({"type":"string","enum":dates}),
+        );
+        required.push("local_datetime");
+    }
+    if let Some(title) = query.and_then(requested_task_title) {
+        properties.insert(
+            "title".into(),
+            serde_json::json!({"type":"string","const":title}),
+        );
+    }
+    let cancel_evidence = properties.get("evidence").unwrap().clone();
+    let upsert = serde_json::json!({"type":"object","properties":properties,"required":required,"additionalProperties":false});
+    let schema = if query.is_some_and(explicit_dated_reminder) {
+        upsert
+    } else {
+        serde_json::json!({"anyOf":[
+            {"type":"object","properties":{"action":{"const":"none"}},"required":["action"],"additionalProperties":false},
+            upsert,
+            {"type":"object","properties":{"action":{"const":"cancel"},"evidence":cancel_evidence,"task_id":{"type":"string"}},"required":["action","evidence","task_id"],"additionalProperties":false}
+        ]})
+    };
+    serde_json::json!({"type":"json_schema","json_schema":{
+        "name":"proactive_plan","strict":true,"schema":schema
+    }})
 }
 
 pub(crate) fn process_pending(
@@ -74,12 +266,29 @@ pub(crate) fn process_pending(
         .enable_all()
         .build()
         .map_err(|error| AgentError::Memory(error.to_string()))?;
+    let _priority = model.planning_priority()?;
     let mut outcome = PlanOutcome::default();
     for turn_id in store.pending_proactive_turns().map_err(memory_error)? {
-        let change = process_turn(store, model, &runtime, turn_id, timezone_offset_minutes)?;
-        outcome.changed += change.changed;
-        outcome.enabled += change.enabled;
+        match process_turn(store, model, &runtime, turn_id, timezone_offset_minutes) {
+            Ok(change) => {
+                outcome.changed += change.changed;
+                outcome.enabled += change.enabled;
+                store.clear_proactive_retry(turn_id).map_err(memory_error)?;
+            }
+            Err(AgentError::Model(error)) => {
+                // Keep failed turns retryable without blocking newer reminders or hiding prior changes.
+                eprintln!("proactive turn {turn_id} deferred: {error}");
+                store.defer_proactive_turn(turn_id).map_err(memory_error)?;
+                outcome.failed += 1;
+            }
+            Err(error) => return Err(error),
+        }
     }
+    outcome.pending = !store
+        .pending_proactive_turns()
+        .map_err(memory_error)?
+        .is_empty();
+    outcome.retry_at = store.next_proactive_retry().map_err(memory_error)?;
     Ok(outcome)
 }
 
@@ -121,8 +330,8 @@ pub(crate) fn discover_from_memories(
         .block_on(async {
             tokio::time::timeout(
                 std::time::Duration::from_secs(120),
-                model.complete_silent(ModelRequest {
-                    response_format: None,
+                model.complete_priority_silent(ModelRequest {
+                    response_format: Some(response_format(None, &memories)),
                     system_prompt: prompt.into(),
                     user_input: String::new(),
                     history: vec![Message::User {
@@ -193,7 +402,11 @@ fn available_query_tools() -> Vec<serde_json::Value> {
     crate::uniffi::current_mcp_tool_snapshot()
         .1
         .into_iter()
-        .filter(|tool| tool.policy.as_ref().is_some_and(|policy| policy.allows_background_read()))
+        .filter(|tool| {
+            tool.policy
+                .as_ref()
+                .is_some_and(|policy| policy.allows_background_read())
+        })
         .take(30)
         .map(|tool| {
             let schema = if tool.input_schema_json.len() <= 4096 {
@@ -236,31 +449,80 @@ fn process_turn(
     let existing = store.proactive_rules().map_err(memory_error)?;
     let available_tools = available_query_tools();
     let tasks = task_summaries(&existing);
+    let now = now_unix_seconds();
+    let now_local: String = store
+        .connection
+        .lock()
+        .map_err(|_| memory_error(MemoryError::LockPoisoned))?
+        .query_row(
+            "SELECT datetime(?1, 'unixepoch')",
+            [now + offset * 60],
+            |row| row.get(0),
+        )
+        .map_err(|e| memory_error(e.into()))?;
     let input = serde_json::json!({
         "turn_id":turn_id,"user_query":turn.user_input.chars().take(4000).collect::<String>(),
         "known_memories":memories,"existing_tasks":tasks,"available_query_tools":available_tools,
-        "now_unix_seconds":now_unix_seconds(),"timezone_offset_minutes":offset,
+        "now_unix_seconds":now,"now_local_datetime":now_local,"timezone_offset_minutes":offset,
     });
-    let prompt = "仅根据本轮用户 query 与已确认记忆，判断是否应建立一个主动定时任务。此轮只创建未来的检查计划，不判断未来是否下雨等动态条件。普通问答、没有可核实时间的计划、助手或工具内容都输出 none；不猜测住址、时间和日期。用户明确要求提醒或主动帮助时可创建；对于稳定重复日程，只有存在清楚的主动帮助价值时才创建。若用户提出'下雨时帮我考虑打车'之类条件，且已知稳定的相关时间，可创建按该时间重复运行的条件检查任务；instruction 必须写明仅在实时条件成立时推送，condition_evidence 引用条件原文。动态条件必须配置对应查询工具到 allowed_tools 与 required_tools；工具名只能取自 available_query_tools，缺少可查询的数据源则输出 none，不创建无条件提醒。一次最多一个任务。已有同义任务应使用它的 task_id 更新，不重复创建；用户明确取消时使用 cancel。输出严格 JSON 对象，字段：action(none|upsert|cancel)、evidence(用户 query 中连续原文)、time_evidence(用户 query 或已确认记忆中的时间原文)、schedule_evidence(日期或重复规则原文)、condition_evidence(动态条件原文，无条件时为空)、task_id(已有任务 ID 或空)、title、instruction、memory_query、recurrence(once|weekly)、event_at(一次性事件 Unix 秒或 null)、local_minute(重复事件当地时分换算的分钟或 null)、weekday_mask(周一 bit0，周日 bit6)、lead_minutes、deadline_lead_minutes、allowed_tools(仅查询工具名数组)、required_tools(推送前至少一个必须成功调用的查询工具名数组)。没有足够依据输出 {\"action\":\"none\"}。不要调用工具，也不要添加额外字段。";
+    let prompt = "仅根据本轮用户 query 与已确认记忆，判断是否应建立一个主动定时任务。此轮只创建未来的检查计划，不判断未来是否下雨等动态条件。普通问答、没有可核实时间的计划、助手或工具内容都输出 none；不猜测住址、时间和日期。用户明确要求提醒或主动帮助时可创建；对于稳定重复日程，只有存在清楚的主动帮助价值时才创建。若用户提出'下雨时帮我考虑打车'之类条件，且已知稳定的相关时间，可创建按该时间重复运行的条件检查任务；instruction 必须写明仅在实时条件成立时推送，condition_evidence 引用条件原文。动态条件必须配置对应查询工具到 allowed_tools 与 required_tools；工具名只能取自 available_query_tools，缺少可查询的数据源则输出 none，不创建无条件提醒。一次最多一个任务。已有同义任务应使用它的 task_id 更新，不重复创建；用户明确取消时使用 cancel。输出严格 JSON 对象，字段：action(none|upsert|cancel)、evidence(用户 query 中连续原文)、time_evidence(用户 query 或已确认记忆中的时间原文)、schedule_evidence(日期或重复规则原文)、condition_evidence(动态条件原文，无条件时为空)、task_id(已有任务 ID 或空)、title、instruction、memory_query、recurrence(once|weekly)、event_at(一次性事件 Unix 秒或 null)、local_minute(重复事件当地时分换算的分钟或 null)、weekday_mask(周一 bit0，周日 bit6)、lead_minutes、deadline_lead_minutes、allowed_tools(仅查询工具名数组)、required_tools(推送前至少一个必须成功调用的查询工具名数组)。没有足够依据输出 {\"action\":\"none\"}。一次性提醒优先输出 local_datetime（YYYY-MM-DD HH:mm:ss，当地时间），event_at 可省略，由系统换算 Unix 秒。用户要求不提前提醒时 lead_minutes=0 且 deadline_lead_minutes=0；没有实时工具条件的普通定时提醒无需查询工具。不要调用工具，也不要添加额外字段。";
     let response = runtime
         .block_on(async {
             tokio::time::timeout(
                 std::time::Duration::from_secs(120),
-                model.complete_silent(ModelRequest {
-                    response_format: None,
-                    system_prompt: prompt.into(),
-                    user_input: String::new(),
-                    history: vec![Message::User {
-                        content: input.to_string(),
-                    }],
-                    tools: Vec::new(),
-                }),
+                model.complete_with_events(
+                    ModelRequest {
+                        response_format: Some(response_format(Some(&turn.user_input), &memories)),
+                        system_prompt: prompt.into(),
+                        user_input: String::new(),
+                        history: vec![Message::User {
+                            content: input.to_string(),
+                        }],
+                        tools: Vec::new(),
+                    },
+                    false,
+                    false,
+                ),
             )
             .await
         })
         .map_err(|_| AgentError::Model("proactive planning timed out".into()))??;
     let proposal: Proposal = serde_json::from_str(response.content.trim())
         .map_err(|error| AgentError::Model(format!("invalid proactive plan: {error}")))?;
+    if proposal.action == "none" && explicit_dated_reminder(&turn.user_input) {
+        return Err(AgentError::Model(
+            "explicit reminder was not planned".into(),
+        ));
+    }
+    if std::env::var("COMPANION_ACCEPTANCE_MODEL_DIAGNOSTICS").as_deref() == Ok("1") {
+        eprintln!("proactive turn {turn_id}: action={}", proposal.action);
+    }
+    if std::env::var("COMPANION_ACCEPTANCE_MODEL_DIAGNOSTICS").as_deref() == Ok("1")
+        && proposal.action == "upsert"
+    {
+        let grounded = |value: &str| {
+            !value.is_empty()
+                && (turn.user_input.contains(value)
+                    || memories.iter().any(|m| {
+                        m["content"]
+                            .as_str()
+                            .is_some_and(|content| content.contains(value))
+                    }))
+        };
+        eprintln!(
+            "proactive turn {turn_id} validation: evidence={} time={} schedule={} clock={} window={} local_datetime={}",
+            grounded(&proposal.evidence),
+            grounded(&proposal.time_evidence),
+            grounded(&proposal.schedule_evidence),
+            has_clock_evidence(&proposal.time_evidence),
+            crate::proactive::valid_planning_window(
+                proposal.lead_minutes.unwrap_or(60),
+                proposal.deadline_lead_minutes.unwrap_or(30),
+                proposal.required_tools.is_empty()
+            ),
+            !proposal.local_datetime.is_empty()
+        );
+    }
     let changed = apply_proposal(
         store,
         Some(turn_id),
@@ -272,6 +534,12 @@ fn process_turn(
         proposal,
     )
     .map_err(memory_error)?;
+    if std::env::var("COMPANION_ACCEPTANCE_MODEL_DIAGNOSTICS").as_deref() == Ok("1") {
+        eprintln!(
+            "proactive turn {turn_id} applied: changed={}, enabled={}",
+            changed.changed, changed.enabled
+        );
+    }
     store
         .mark_proactive_turn_planned(turn_id)
         .map_err(memory_error)?;
@@ -326,6 +594,7 @@ fn apply_proposal(
                 return Ok(PlanOutcome {
                     changed: 1,
                     enabled: 0,
+                    ..PlanOutcome::default()
                 });
             }
             return Ok(PlanOutcome::default());
@@ -349,7 +618,12 @@ fn apply_proposal(
     let now = now_unix_seconds();
     let (one_shot_at, local_minute, weekday_mask) = match proposal.recurrence.as_str() {
         "once" => {
-            let Some(at) = proposal.event_at else {
+            let at = if proposal.local_datetime.is_empty() {
+                proposal.event_at
+            } else {
+                store.parse_proactive_local_datetime(&proposal.local_datetime, offset)?
+            };
+            let Some(at) = at else {
                 return Ok(PlanOutcome::default());
             };
             if at <= now || at > now + 366 * DAY {
@@ -398,8 +672,8 @@ fn apply_proposal(
     };
     if proposal.allowed_tools.iter().any(|name| {
         !available_tools
-                .iter()
-                .any(|tool| tool["name"].as_str() == Some(name))
+            .iter()
+            .any(|tool| tool["name"].as_str() == Some(name))
     }) || proposal
         .required_tools
         .iter()
@@ -411,8 +685,11 @@ fn apply_proposal(
     let deadline_lead_minutes = proposal.deadline_lead_minutes.unwrap_or(30);
     if !(0..1440).contains(&local_minute)
         || (one_shot_at.is_none() && !(1..=127).contains(&weekday_mask))
-        || !(5..=180).contains(&lead_minutes)
-        || !(0..lead_minutes).contains(&deadline_lead_minutes)
+        || (!crate::proactive::valid_planning_window(
+            lead_minutes,
+            deadline_lead_minutes,
+            proposal.required_tools.is_empty(),
+        ))
         || proposal.title.chars().count() > 80
         || proposal.instruction.chars().count() > 1000
         || proposal.memory_query.chars().count() > 300
@@ -478,6 +755,7 @@ fn apply_proposal(
     Ok(PlanOutcome {
         changed: 1,
         enabled: usize::from(enabled),
+        ..PlanOutcome::default()
     })
 }
 
@@ -545,14 +823,77 @@ impl MemoryStore {
             .map_err(|_| MemoryError::LockPoisoned)?;
         let mut statement = connection.prepare(
             "SELECT t.id FROM trace_turns t LEFT JOIN proactive_planned_turns p ON p.turn_id=t.id
-             WHERE t.status IN ('completed','max_steps') AND p.turn_id IS NULL ORDER BY t.id LIMIT 20"
+             LEFT JOIN proactive_planner_retries r ON r.turn_id=t.id
+             WHERE t.status IN ('completed','max_steps') AND p.turn_id IS NULL
+             AND (r.retry_at IS NULL OR r.retry_at<=?1) ORDER BY t.id LIMIT 5",
         )?;
         statement
-            .query_map([], |row| row.get(0))?
+            .query_map([now_unix_seconds()], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
 
+    fn parse_proactive_local_datetime(
+        &self,
+        value: &str,
+        offset: i64,
+    ) -> Result<Option<i64>, MemoryError> {
+        if !value.is_ascii() || !matches!(value.len(), 16 | 19) {
+            return Ok(None);
+        }
+        let value = if value.len() == 16 {
+            format!("{value}:00")
+        } else {
+            value.to_owned()
+        };
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        let (canonical, unix): (Option<String>, Option<i64>) = connection.query_row(
+            "SELECT datetime(?1, '+0 days'), CAST(strftime('%s', ?1) AS INTEGER)",
+            [&value],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(if canonical.as_deref() == Some(value.as_str()) {
+            unix.map(|at| at - offset * 60)
+        } else {
+            None
+        })
+    }
+    fn defer_proactive_turn(&self, turn_id: i64) -> Result<(), MemoryError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        connection.execute(
+            "INSERT OR REPLACE INTO proactive_planner_retries (turn_id,retry_at) VALUES (?1,?2)",
+            params![turn_id, now_unix_seconds() + 300],
+        )?;
+        Ok(())
+    }
+    fn clear_proactive_retry(&self, turn_id: i64) -> Result<(), MemoryError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        connection.execute(
+            "DELETE FROM proactive_planner_retries WHERE turn_id=?1",
+            [turn_id],
+        )?;
+        Ok(())
+    }
+    fn next_proactive_retry(&self) -> Result<Option<i64>, MemoryError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| MemoryError::LockPoisoned)?;
+        Ok(connection.query_row(
+            "SELECT MIN(retry_at) FROM proactive_planner_retries",
+            [],
+            |row| row.get(0),
+        )?)
+    }
     fn mark_proactive_turn_planned(&self, turn_id: i64) -> Result<(), MemoryError> {
         let connection = self
             .connection
@@ -615,6 +956,185 @@ mod tests {
                 None,
             )
             .unwrap();
+    }
+
+    struct FailsFirstModel {
+        answer: String,
+        calls: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl ModelServeCallback for FailsFirstModel {
+        async fn complete(
+            &self,
+            request: String,
+            callback: Arc<dyn ModelStreamCallback>,
+        ) -> Result<(), ModelServeError> {
+            let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+            assert_eq!(request["response_format"]["type"], "json_schema");
+            let content = if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                "not JSON"
+            } else {
+                &self.answer
+            };
+            callback.on_chunk(
+                serde_json::json!({"choices":[{"message":{"content":content}}]}).to_string(),
+            );
+            Ok(())
+        }
+    }
+    #[test]
+    fn failed_old_turn_does_not_block_new_reminder_and_is_retried_without_duplicates() {
+        let store = MemoryStore::in_memory().unwrap();
+        completed_turn(&store, "旧的普通问答");
+        completed_turn(&store, "每天晚上六点提醒我吃晚饭");
+        let answer = serde_json::json!({"action":"upsert","evidence":"每天晚上六点提醒我吃晚饭",
+            "time_evidence":"晚上六点","schedule_evidence":"每天","title":"晚饭提醒","instruction":"提醒晚饭",
+            "recurrence":"weekly","local_minute":1080,"weekday_mask":127,"lead_minutes":0,"deadline_lead_minutes":0}).to_string();
+        let model = ModelServeWrapper::new(Arc::new(FailsFirstModel {
+            answer,
+            calls: AtomicUsize::new(0),
+        }));
+        let outcome = process_pending(&store, &model, 0).unwrap();
+        assert_eq!(
+            (outcome.changed, outcome.enabled, outcome.failed),
+            (1, 1, 1)
+        );
+        assert!(!outcome.pending);
+        assert!(outcome.retry_at.unwrap() > now_unix_seconds());
+        assert_eq!(store.proactive_rules().unwrap().len(), 1);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let retry = ModelServeWrapper::new(Arc::new(FixedModel {
+            answer: "{\"action\":\"none\"}".into(),
+            calls: calls.clone(),
+        }));
+        process_pending(&store, &retry, 0).unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "failed turn respects persisted backoff"
+        );
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute("UPDATE proactive_planner_retries SET retry_at=0", [])
+            .unwrap();
+        let outcome = process_pending(&store, &retry, 0).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(outcome.retry_at.is_none());
+        assert_eq!(store.proactive_rules().unwrap().len(), 1);
+    }
+    #[test]
+    fn explicit_reminder_none_is_retryable_not_marked_as_completed() {
+        let store = MemoryStore::in_memory().unwrap();
+        completed_turn(&store, "请在2026-10-10 12:00:00提醒我打开 App");
+        let model = ModelServeWrapper::new(Arc::new(FixedModel {
+            answer: r#"{"action":"none"}"#.into(),
+            calls: Arc::new(AtomicUsize::new(0)),
+        }));
+        let outcome = process_pending(&store, &model, 0).unwrap();
+        assert_eq!(outcome.failed, 1);
+        assert!(outcome.retry_at.is_some());
+        let completed: i64 = store
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM proactive_planned_turns", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(completed, 0);
+    }
+
+    #[test]
+    fn schema_only_offers_literal_evidence_and_explicit_local_times() {
+        let query = "请在2026-10-09 20:30:15提醒我打开 App。任务名称是测试，不提前提醒。";
+        let format = response_format(Some(query), &[]);
+        let schema = &format["json_schema"]["schema"];
+        assert_eq!(schema["properties"]["action"]["const"], "upsert");
+        for query in [
+            "柿子能和螃蟹一起吃吗",
+            "请在2026-10-09 20:30:15不要提醒我",
+            "取消2026-10-09 20:30:15的提醒",
+        ] {
+            assert!(!explicit_dated_reminder(query));
+            assert!(response_format(Some(query), &[])["json_schema"]["schema"]["anyOf"].is_array());
+        }
+        for field in [
+            "evidence",
+            "time_evidence",
+            "schedule_evidence",
+            "local_datetime",
+        ] {
+            for value in schema["properties"][field]["enum"].as_array().unwrap() {
+                assert!(
+                    query.contains(value.as_str().unwrap()),
+                    "evidence must be literal user text"
+                );
+            }
+        }
+        assert_eq!(schema["properties"]["title"]["const"], "测试");
+        assert_eq!(
+            schema["properties"]["local_datetime"]["enum"],
+            serde_json::json!(["2026-10-09 20:30:15"])
+        );
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("local_datetime"))
+        );
+    }
+
+    #[test]
+    fn explicit_local_time_creates_zero_lead_reminder_at_exact_unix_second() {
+        let store = MemoryStore::in_memory().unwrap();
+        let at = now_unix_seconds() + 600;
+        let local: String = store
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT datetime(?1, 'unixepoch')", [at + 480 * 60], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        completed_turn(&store, &format!("请在{local}提醒我出门，不提前提醒"));
+        let answer = serde_json::json!({"action":"upsert","evidence":"提醒我出门",
+            "time_evidence":&local[11..],"schedule_evidence":&local[..10],"title":"出门提醒","instruction":"提醒出门",
+            "recurrence":"once","local_datetime":local,"lead_minutes":0,"deadline_lead_minutes":0}).to_string();
+        let model = ModelServeWrapper::new(Arc::new(FixedModel {
+            answer,
+            calls: Arc::new(AtomicUsize::new(0)),
+        }));
+        assert_eq!(process_pending(&store, &model, 480).unwrap().enabled, 1);
+        let task = store.proactive_rules().unwrap().pop().unwrap();
+        assert_eq!(task.one_shot_at, Some(at));
+        assert_eq!((task.lead_minutes, task.deadline_lead_minutes), (0, 0));
+        assert_eq!(task.next_run_at, Some(at));
+        assert!(
+            store
+                .parse_proactive_local_datetime("2026-02-30 12:00:00", 480)
+                .unwrap()
+                .is_none()
+        );
+        assert!(!crate::proactive::valid_planning_window(0, 0, false));
+    }
+
+    #[test]
+    fn bounded_batches_report_remaining_work_in_chronological_order() {
+        let store = MemoryStore::in_memory().unwrap();
+        for _ in 0..6 {
+            completed_turn(&store, "普通问答");
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let model = ModelServeWrapper::new(Arc::new(FixedModel {
+            answer: "{\"action\":\"none\"}".into(),
+            calls: calls.clone(),
+        }));
+        assert!(process_pending(&store, &model, 0).unwrap().pending);
+        assert_eq!(calls.load(Ordering::SeqCst), 5);
+        assert!(!process_pending(&store, &model, 0).unwrap().pending);
+        assert_eq!(calls.load(Ordering::SeqCst), 6);
     }
 
     #[test]

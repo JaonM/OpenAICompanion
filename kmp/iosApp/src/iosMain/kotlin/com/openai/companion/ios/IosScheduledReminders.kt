@@ -52,5 +52,13 @@ internal class IosScheduledReminders {
         val current = reminders.map { it.id }.toSet()
         center.removePendingNotificationRequestsWithIdentifiers(old.map { it.identifier }
             .filter { it.startsWith("scheduled:") && it !in current })
+        val installed: Set<String> = suspendCoroutine { continuation ->
+            center.getPendingNotificationRequestsWithCompletionHandler { requests ->
+                continuation.resume(requests.orEmpty().filterIsInstance<UNNotificationRequest>()
+                    .map { it.identifier }.filter { it.startsWith("scheduled:") }.toSet())
+            }
+        }
+        check(installed == current) { "系统提醒排程未同步，请重试" }
+        installed.size
     }
 }

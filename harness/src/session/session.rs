@@ -745,6 +745,13 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
+        // Separate bridge lookups must share foreground ownership for the registered provider.
+        let planning = crate::ModelServeWrapper::registered().unwrap();
+        let guard = planning.foreground_turn();
+        assert!(runtime.block_on(crate::ModelServeWrapper::registered().unwrap().complete_silent(crate::ModelRequest {
+            system_prompt: "".into(), user_input: "background".into(), history: vec![], tools: vec![], response_format: None,
+        })).is_err());
+        drop(guard);
         let mut first = runtime
             .block_on(Session::initialize_with_memory(
                 Configuration::default(),

@@ -71,6 +71,12 @@ struct ClaimedRun {
     rule: ProactiveRule,
 }
 
+// Pure system reminders may fire at the event time; real-time Agent checks retain a lead window.
+pub(crate) fn valid_planning_window(lead: i64, deadline: i64, no_required_tools: bool) -> bool {
+    (no_required_tools && lead == 0 && deadline == 0)
+        || ((5..=180).contains(&lead) && (0..lead).contains(&deadline))
+}
+
 pub(crate) fn create_schema(connection: &rusqlite::Connection) -> Result<(), MemoryError> {
     let planner_table_exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='proactive_planned_turns')",
@@ -113,6 +119,10 @@ pub(crate) fn create_schema(connection: &rusqlite::Connection) -> Result<(), Mem
         CREATE TABLE IF NOT EXISTS proactive_planned_turns (
             turn_id INTEGER PRIMARY KEY REFERENCES trace_turns(id) ON DELETE CASCADE,
             processed_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS proactive_planner_retries (
+            turn_id INTEGER PRIMARY KEY REFERENCES trace_turns(id) ON DELETE CASCADE,
+            retry_at INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS proactive_discovery_state (
             id INTEGER PRIMARY KEY CHECK (id=1),
@@ -354,8 +364,7 @@ impl MemoryStore {
             || !(0..1440).contains(&rule.local_minute)
             || (rule.one_shot_at.is_none() && !(1..=127).contains(&rule.weekday_mask))
             || (rule.one_shot_at.is_some() && rule.weekday_mask != 0)
-            || !(5..=180).contains(&rule.lead_minutes)
-            || !(0..rule.lead_minutes).contains(&rule.deadline_lead_minutes)
+            || !valid_planning_window(rule.lead_minutes, rule.deadline_lead_minutes, rule.required_tools.is_empty())
             || !(-840..=840).contains(&rule.timezone_offset_minutes)
             || rule
                 .one_shot_at

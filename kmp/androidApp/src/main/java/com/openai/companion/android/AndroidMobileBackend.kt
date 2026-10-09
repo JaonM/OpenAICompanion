@@ -1,5 +1,6 @@
 package com.openai.companion.android
 
+import com.openai.companion.kmp.toWireJson
 import android.content.Context
 import com.openai.companion.kmp.*
 import io.ktor.client.HttpClient
@@ -313,8 +314,8 @@ class AndroidMobileBackend(
         scheduledReminders(proactiveTasks.filter { it.scenario != task.scenario } + task, proactiveSettings.enabled, Instant.now().epochSecond)
         if (proactiveSettings.enabled && task.enabled && !notifications.requestPermission()) error("请先允许 App 发送通知")
         withContext(Dispatchers.IO) {
-            appPutProactiveTask(Json.encodeToString(task.copy(timezoneOffsetMinutes = timezoneOffset(),
-                nextRunAt = null, nextEventAt = null))).value()
+            appPutProactiveTask(task.copy(timezoneOffsetMinutes = timezoneOffset(),
+                nextRunAt = null, nextEventAt = null).toWireJson()).value()
         }
         loadRules(); wake.trySend(Unit)
     }
@@ -365,14 +366,19 @@ class AndroidMobileBackend(
     }
     private suspend fun processPendingTurns() {
         try {
-            val result = gate.withLock { Json.parseToJsonElement(
-                appProcessPendingProactivePlans(timezoneOffset()).value()).jsonObject }
-            if (result.getValue("changed").jsonPrimitive.content.toInt() > 0) {
-                loadRules(); wake.trySend(Unit)
-            }
-            if (result.getValue("enabled").jsonPrimitive.content.toInt() > 0) notifications.requestPermission()
+            var pending: Boolean
+            do {
+                val result = gate.withLock { Json.parseToJsonElement(
+                    appProcessPendingProactivePlans(timezoneOffset()).value()).jsonObject }
+                if (result.getValue("changed").jsonPrimitive.content.toInt() > 0) {
+                    loadRules(); wake.trySend(Unit)
+                }
+                if (result.getValue("enabled").jsonPrimitive.content.toInt() > 0) notifications.requestPermission()
+                pending = result.getValue("pending").jsonPrimitive.content.toBooleanStrict()
+            } while (pending)
         } catch (error: Exception) { android.util.Log.w("Companion", "Turn planning deferred", error) }
     }
+
     private suspend fun discover() {
         try {
             val result = gate.withLock { Json.parseToJsonElement(

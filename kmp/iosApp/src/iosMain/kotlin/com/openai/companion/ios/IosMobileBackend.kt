@@ -1,5 +1,6 @@
 package com.openai.companion.ios
 
+import com.openai.companion.kmp.toWireJson
 import com.openai.companion.kmp.AppAgentEventSink
 import com.openai.companion.kmp.AgentExecutionGate
 import com.openai.companion.kmp.CrossDeviceService
@@ -109,6 +110,7 @@ class IosMobileBackend(
     private val proactiveScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val proactiveWake = Channel<Unit>(Channel.CONFLATED)
     private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
+    private val planningWake = Channel<Unit>(Channel.CONFLATED)
     private val agentGate = AgentExecutionGate()
     private val syncGate = Mutex()
     private val memorySyncWorker = MemorySyncWorker(
@@ -141,11 +143,11 @@ class IosMobileBackend(
     override val backgroundReminderStatus = mutableReminderStatus
     private suspend fun refreshScheduledReminders() {
         val plans = com.openai.companion.kmp.scheduledReminders(proactiveTasks, proactiveSettings.enabled, Clock.System.now().epochSeconds)
-        scheduled.replace(plans)
+        val installed = scheduled.replace(plans)
         mutableReminderStatus.value = when {
             !proactiveSettings.enabled -> "后台提醒未启用"
             !scheduled.permitted() -> "请在系统设置中允许通知，后台提醒暂无法显示"
-            else -> "系统已安排 ${plans.size} 个计划提醒"
+            else -> "系统已安排 $installed 个计划提醒"
         }
     }
     private var initialized = false
@@ -220,7 +222,16 @@ class IosMobileBackend(
                 }
             }
         }
-        proactiveScope.launch { processPendingProactivePlans() }
+        proactiveScope.launch {
+            while (isActive) {
+                val retryAt = processPendingProactivePlans()
+                if (retryAt == null) planningWake.receive()
+                else withTimeoutOrNull(((retryAt - Clock.System.now().epochSeconds) * 1_000).coerceAtLeast(1)) {
+                    planningWake.receive()
+                }
+            }
+        }
+        planningWake.trySend(Unit)
         registerMemorySyncWake(object : MemorySyncWake {
             override fun onPending() = memorySyncWorker.request()
         })
@@ -271,7 +282,7 @@ class IosMobileBackend(
             bindings.unregisterAgentEventSink()
         }
         }
-        proactiveScope.launch { processPendingProactivePlans() }
+        planningWake.trySend(Unit)
 
         Unit
     }
@@ -334,10 +345,10 @@ class IosMobileBackend(
         com.openai.companion.kmp.scheduledReminders(proactiveTasks.filter { it.scenario != task.scenario } + task, proactiveSettings.enabled, Clock.System.now().epochSeconds)
         if (proactiveSettings.enabled && task.enabled && !requestNotificationPermission()) error("请先允许 App 发送通知")
         withContext(Dispatchers.Default) {
-            appPutProactiveTask(Json.encodeToString(task.copy(
+            appPutProactiveTask(task.copy(
                 timezoneOffsetMinutes = timezoneOffsetMinutes(),
                 nextRunAt = null, nextEventAt = null,
-            ))).value()
+            ).toWireJson()).value()
         }
         loadProactiveRules()
         proactiveWake.trySend(Unit)
@@ -352,7 +363,7 @@ class IosMobileBackend(
         proactiveWake.trySend(Unit)
         discoveryWake.trySend(Unit)
         if (settings.enabled) {
-            proactiveScope.launch { processPendingProactivePlans() }
+            planningWake.trySend(Unit)
             if (proactiveTasks.any { it.enabled }) requestNotificationPermission()
         }
     }
@@ -446,22 +457,40 @@ class IosMobileBackend(
         }
     }
 
-    private suspend fun processPendingProactivePlans() {
-        try {
-            val result = agentGate.withLock {
-                Json.parseToJsonElement(
-                    appProcessPendingProactivePlans(timezoneOffsetMinutes()).value()
-                ).jsonObject
+    private suspend fun processPendingProactivePlans(): Long? {
+        return try {
+            if (proactiveSettings.enabled) {
+                refreshScheduledReminders()
+                mutableReminderStatus.value += " · 正在提取计划…"
             }
-            if (result.getValue("changed").jsonPrimitive.content.toInt() > 0) {
-                loadProactiveRules()
-                proactiveWake.trySend(Unit)
+            var pending: Boolean
+            var retryAt: Long?
+            var failed = 0
+            do {
+                val result = agentGate.withLock {
+                    Json.parseToJsonElement(appProcessPendingProactivePlans(timezoneOffsetMinutes()).value()).jsonObject
+                }
+                if (result.getValue("changed").jsonPrimitive.content.toInt() > 0) {
+                    loadProactiveRules()
+                    proactiveWake.trySend(Unit)
+                }
+                if (result.getValue("enabled").jsonPrimitive.content.toInt() > 0) requestNotificationPermission()
+                failed += result.getValue("failed").jsonPrimitive.content.toInt()
+                pending = result.getValue("pending").jsonPrimitive.content.toBooleanStrict()
+                retryAt = result.getValue("retry_at").jsonPrimitive.content.toLongOrNull()
+            } while (pending)
+            refreshScheduledReminders()
+            if (failed > 0) {
+                println("主动任务提取：$failed 条暂缓，保留待重试")
+                mutableReminderStatus.value += " · $failed 条计划提取失败，稍后重试"
             }
-            if (result.getValue("enabled").jsonPrimitive.content.toInt() > 0) {
-                requestNotificationPermission()
-            }
+            retryAt
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
         } catch (error: Exception) {
             println("主动任务提取暂缓：${error.message}")
+            mutableReminderStatus.value = "计划提取失败，稍后重试；请检查主动任务列表"
+            Clock.System.now().epochSeconds + 300
         }
     }
 
@@ -527,7 +556,7 @@ class IosMobileBackend(
     override suspend fun importModel() {
         importLocalModel()
         if (localModelEngine() != "MLX") {
-            proactiveScope.launch { processPendingProactivePlans() }
+            planningWake.trySend(Unit)
             proactiveScope.launch { discoverProactiveTasks() }
         }
     }

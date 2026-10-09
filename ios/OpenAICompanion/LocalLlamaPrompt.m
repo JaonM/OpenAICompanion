@@ -69,10 +69,13 @@ NSString *OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *too
     BOOL deviceTask = [format isKindOfClass:NSDictionary.class] && [format[@"type"] isEqual:@"json_schema"] &&
         [format[@"json_schema"] isKindOfClass:NSDictionary.class] &&
         [format[@"json_schema"][@"name"] isEqual:@"device_task_result"];
-    if (!deviceTask && !toolNames.count) return nil;
+    BOOL schemaResponse = [format isKindOfClass:NSDictionary.class] && [format[@"type"] isEqual:@"json_schema"] &&
+        [format[@"json_schema"] isKindOfClass:NSDictionary.class] &&
+        [format[@"json_schema"][@"schema"] isKindOfClass:NSDictionary.class];
+    if (!deviceTask && !schemaResponse && !toolNames.count) return nil;
     BOOL requireTool = toolNames.count && [request[@"tool_choice"] isEqual:@"required"];
     NSMutableString *grammar = [NSMutableString stringWithString:
-        requireTool ? @"root ::= ws (tool-call" : (deviceTask ? @"root ::= ws (task-result" : @"root ::= ws (chat-result")];
+        requireTool ? @"root ::= ws (tool-call" : (deviceTask ? @"root ::= ws (task-result" : (schemaResponse ? @"root ::= ws (object" : @"root ::= ws (chat-result"))];
     if (toolNames.count && !requireTool) [grammar appendString:@" | tool-call"];
     [grammar appendString:@") ws\n"
         @"task-result ::= \"{\" ws \"\\\"state\\\"\" ws \":\" ws state ws \",\" ws \"\\\"text\\\"\" ws \":\" ws string ws \"}\"\n"

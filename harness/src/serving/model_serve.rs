@@ -18,10 +18,10 @@ impl std::fmt::Display for ModelServeError {
 
 impl std::error::Error for ModelServeError {}
 
-static MODEL_SERVE: OnceLock<Mutex<Option<Arc<dyn ModelServeCallback>>>> = OnceLock::new();
+static MODEL_SERVE: OnceLock<Mutex<Option<ModelServeWrapper>>> = OnceLock::new();
 static AGENT_EVENT_SINK: OnceLock<Mutex<Option<Arc<dyn AgentEventSink>>>> = OnceLock::new();
 
-fn model_serve_slot() -> &'static Mutex<Option<Arc<dyn ModelServeCallback>>> {
+fn model_serve_slot() -> &'static Mutex<Option<ModelServeWrapper>> {
     MODEL_SERVE.get_or_init(|| Mutex::new(None))
 }
 
@@ -78,12 +78,12 @@ impl ModelServeWrapper {
     }
 
     pub fn registered() -> Result<Self, AgentError> {
-        let provider = model_serve_slot()
+        let model = model_serve_slot()
             .lock()
             .map_err(|_| AgentError::Model("model serve lock poisoned".into()))?
             .clone()
             .ok_or_else(|| AgentError::Model("model serve is not registered".into()))?;
-        Ok(Self::new(provider))
+        Ok(model)
     }
 
     pub async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, AgentError> {
@@ -98,6 +98,18 @@ impl ModelServeWrapper {
         if self.foreground_turns.load(Ordering::Acquire) != 0 {
             return Err(AgentError::Model("background memory work deferred during foreground turn".into()));
         }
+        self.complete_internal(request, false, false).await
+    }
+
+    /// Keep a planning batch ahead of new memory jobs, while yielding to chat.
+    pub(crate) fn planning_priority(&self) -> Result<ForegroundTurn, AgentError> {
+        self.foreground_turns.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ForegroundTurn(Arc::clone(&self.foreground_turns)))
+            .map_err(|_| AgentError::Model("background planning deferred during higher-priority work".into()))
+    }
+
+    pub(crate) async fn complete_priority_silent(&self, request: ModelRequest) -> Result<ModelResponse, AgentError> {
+        let _priority = self.planning_priority()?;
         self.complete_internal(request, false, false).await
     }
 
@@ -273,7 +285,7 @@ impl StreamAccumulator {
 pub fn register_model_serve_callback(provider: Arc<dyn ModelServeCallback>) {
     *model_serve_slot()
         .lock()
-        .expect("model serve lock poisoned") = Some(provider);
+        .expect("model serve lock poisoned") = Some(ModelServeWrapper::new(provider));
 }
 
 pub fn unregister_model_serve_callback() {

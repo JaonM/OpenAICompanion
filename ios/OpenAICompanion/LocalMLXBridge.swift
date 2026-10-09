@@ -168,16 +168,16 @@ private final class LocalMLX: @unchecked Sendable {
         let folder = URL(fileURLWithPath: path)
         let template = (try? String(contentsOf: folder.appendingPathComponent("chat_template.jinja"), encoding: .utf8)) ??
             ((try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("tokenizer_config.json")))) as? [String: Any])?["chat_template"] as? String ?? ""
-        let usesThinking = ["qwen3", "qwen3_5", "qwen3_5_text"].contains(modelType) && template.contains("<think>")
         let structured = request["response_format"] is [String: Any]
+        let usesThinking = !structured && ["qwen3", "qwen3_5", "qwen3_5_text"].contains(modelType) && template.contains("<think>")
         let promptMessages = messages
         try await container.perform { context in
             let inputMessages: [MLXLMCommon.Message] = promptMessages.map { ["role": $0["role"] ?? "user", "content": $0["content"] ?? ""] }
-            let input = try await context.processor.prepare(input: UserInput(messages: inputMessages, additionalContext: ["enable_thinking": true]))
+            let input = try await context.processor.prepare(input: UserInput(messages: inputMessages, additionalContext: ["enable_thinking": usesThinking]))
             logMLX("prompt tokens=\(input.text.tokens.size), active=\(MLX.Memory.activeMemory)")
             let answerLimit = min(max(maxTokens, 1), 512)
             if input.text.tokens.size + 256 + answerLimit + 32 > 8192 { throw MLXFailure.message("LOCAL_MODEL_CONTEXT_EXCEEDED") }
-            let parameters = GenerateParameters(maxTokens: 256 + answerLimit + 32, temperature: 0.6, topP: 0.95, topK: 20, presencePenalty: 1.5, presenceContextSize: 1024)
+            let parameters = GenerateParameters(maxTokens: (usesThinking ? 256 : 0) + answerLimit + 32, temperature: structured ? 0 : 0.6, topP: 0.95, topK: 20, presencePenalty: 1.5, presenceContextSize: 1024)
             let thinking = usesThinking ? try ThinkingBudgetProcessor(configuration: ThinkingBudgetConfiguration(maximumTokenCount: 256, minimumAnswerTokenCount: answerLimit, transitionOverride: .immediate), reasoning: .thinkTagsWithEnableThinking, tokenizer: context.tokenizer) : nil
             var processors: [any LogitProcessor] = []
             if let penalty = parameters.processor() { processors.append(penalty) }
