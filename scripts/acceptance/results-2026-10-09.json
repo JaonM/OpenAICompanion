@@ -56,5 +56,58 @@
   "failed_attempts": [
     "First physical attempt sent before model engine selection settled; no model request occurred.",
     "Second attempt exposed unnecessary current-engine lock wait and a transient reply/think-bubble state race; both corrected before passed run."
-  ]
+  ],
+  "model_catalog_revision": {
+    "commit": "a751bf1",
+    "checks": [
+      {
+        "name": "Hugging Face metadata parsing, compatibility, mobile controller, desktop download/selection",
+        "status": "passed",
+        "tests": 21,
+        "logs": [
+          "/tmp/companion-hf-final-all-1009.log"
+        ]
+      },
+      {
+        "name": "Signed iOS physical build",
+        "status": "passed",
+        "log": "/tmp/companion-hf-keyboard-fixed-1009.log"
+      },
+      {
+        "name": "iPhone installed model state, MLX-only list and local health question",
+        "status": "passed",
+        "duration_seconds": 76.374,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-hf-keyboard-fixed-1009.xcresult"
+      },
+      {
+        "name": "Mac DMG packaging",
+        "status": "passed",
+        "log": "/tmp/companion-hf-mac-error-placement-1009.log"
+      },
+      {
+        "name": "iPhone official Hugging Face search",
+        "status": "passed",
+        "note": "Actual mlx-community search results and upstream metadata displayed."
+      },
+      {
+        "name": "iPhone file inspection and explicit model download",
+        "status": "pending",
+        "note": "XCTest tap on inspection button did not change state; awaiting manual verification. No new weight download claimed."
+      },
+      {
+        "name": "Mac live Hugging Face API client",
+        "status": "blocked",
+        "note": "CIO and curl both receive connection reset; deterministic metadata tests pass."
+      }
+    ],
+    "remaining": [
+      "Android SDK/native build and device download",
+      "Real Mac Ollama pull",
+      "Physical explicit download, integrity and relaunch persistence"
+    ],
+    "commits": [
+      "a751bf1",
+      "6dfea40"
+    ]
+  }
 }
