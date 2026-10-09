@@ -24,7 +24,7 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
         style = MaterialTheme.typography.bodySmall)
     Text(if (engine == "MLX") "来源：Hugging Face / mlx-community" else "来源：Hugging Face / GGUF 仓库",
         style = MaterialTheme.typography.bodySmall)
-    Text("浏览只读取模型信息。下载完成后点击“使用此模型”切换；兼容性按硬件估算，当前仅支持文本。", style = MaterialTheme.typography.bodySmall)
+    Text("浏览只读取模型信息。下载完成后点击“使用此模型”切换；仅显示适合当前设备的候选，兼容性按硬件估算，当前仅支持文本。", style = MaterialTheme.typography.bodySmall)
     OutlinedTextField(search, { search = it }, label = { Text("搜索 Hugging Face 模型") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     Row { Button(enabled = !loading && !busy, onClick = { focusManager.clearFocus(); browse(search, false) }) { Text("搜索") }
         TextButton(enabled = !loading && !busy, onClick = { browse(search, false) }) { Text("刷新列表") } }
@@ -32,7 +32,7 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
     fun sameEngine(model: LibraryModel) = model.engine == engine || (engine == "Ollama" && model.engine == "llama.cpp")
     val installed = state.models.filter { it.id in state.installed && sameEngine(it) }
     if (installed.isNotEmpty()) Text("已下载", style = MaterialTheme.typography.titleSmall)
-    val available = if (state.catalogEngine == engine) state.catalog.filter { it.id !in state.installed && sameEngine(it) } else emptyList()
+    val available = if (state.catalogEngine == engine) state.catalog.filter { it.id !in state.installed && sameEngine(it) && ModelLibrary.compatibility(it, device).allowed } else emptyList()
     (installed + available).distinctBy { it.id }.forEach { model ->
         val downloaded = model.id in state.installed
         val compatibility = ModelLibrary.compatibility(model, device, downloaded)
@@ -56,6 +56,6 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
     }
     if (state.catalogEngine == engine && state.hasMore) OutlinedButton(enabled = !loading && !busy, onClick = { browse(search, true) }) { Text("加载更多模型") }
     if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在读取 Hugging Face 模型信息…") }
-    if (!loading && state.catalogLoaded && available.isEmpty()) Text("没有更多匹配的模型，可调整搜索词。")
+    if (!loading && state.catalogLoaded && available.isEmpty()) Text("本页没有适合当前设备的模型，可加载下一页或调整搜索词。")
     if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在下载或加载模型，请保持 App 前台…") }
 }

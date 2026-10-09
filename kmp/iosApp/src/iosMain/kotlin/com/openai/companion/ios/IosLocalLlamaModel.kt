@@ -59,7 +59,7 @@ class IosLocalLlamaModel : AppModelServe, ModelLibraryProvider {
         val installed = catalog.models.filter { downloaded(it) }
         defaults.setObject(Json.encodeToString(installed), forKey = "downloadedCatalogModels")
     }
-    override suspend fun browseModels(engine: String, search: String, more: Boolean) = catalog.browse(engine, search, more)
+    override suspend fun browseModels(engine: String, search: String, more: Boolean) = catalog.browse(engine, search, more, modelLibrary().device)
     override suspend fun inspectModel(id: String) { catalog.inspect(id) }
     private fun ggufPath(model: LibraryModel): String {
         val legacy = defaults.stringForKey(MODEL_FILE_KEY)

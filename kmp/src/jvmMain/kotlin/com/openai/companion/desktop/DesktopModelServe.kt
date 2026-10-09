@@ -40,7 +40,7 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
     private val catalog = HuggingFaceModelCatalog().apply {
         remember(runCatching { Json.decodeFromString<List<LibraryModel>>(catalogFile.takeIf { it.isFile }?.readText() ?: "[]") }.getOrDefault(emptyList()))
     }
-    override suspend fun browseModels(engine: String, search: String, more: Boolean) = catalog.browse(engine, search, more)
+    override suspend fun browseModels(engine: String, search: String, more: Boolean) = catalog.browse(engine, search, more, modelLibrary().device)
     override suspend fun inspectModel(id: String) { catalog.inspect(id) }
 
     private val client = HttpClient.newBuilder()

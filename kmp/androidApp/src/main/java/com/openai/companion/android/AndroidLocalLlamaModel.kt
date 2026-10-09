@@ -44,7 +44,7 @@ class AndroidLocalLlamaModel(private val context: Context, private val importer:
     private val catalog = HuggingFaceModelCatalog().apply {
         remember(runCatching { Json.decodeFromString<List<LibraryModel>>(preferences.getString("downloadedCatalogModels", "[]")!!) }.getOrDefault(emptyList()))
     }
-    override suspend fun browseModels(engine: String, search: String, more: Boolean) = catalog.browse(engine, search, more)
+    override suspend fun browseModels(engine: String, search: String, more: Boolean) = catalog.browse(engine, search, more, modelLibrary().device)
     override suspend fun inspectModel(id: String) { catalog.inspect(id) }
     private fun catalogFile(model: LibraryModel): File {
         val old = preferences.getString(MODEL_KEY, null)

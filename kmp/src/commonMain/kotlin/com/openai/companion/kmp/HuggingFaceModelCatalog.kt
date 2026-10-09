@@ -6,6 +6,10 @@ import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Url
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
@@ -24,7 +28,7 @@ class HuggingFaceModelCatalog(private val http: HttpClient = HttpClient { instal
     fun get(id: String) = known[id] ?: error("请刷新模型列表")
     fun remember(models: List<LibraryModel>) { known = known + models.associateBy { it.id } }
 
-    suspend fun browse(selectedEngine: String, search: String, more: Boolean) = gate.withLock {
+    suspend fun browse(selectedEngine: String, search: String, more: Boolean, device: ModelDevice? = null) = gate.withLock {
         require(selectedEngine in setOf("MLX", "llama.cpp", "Ollama"))
         val response = if (more) {
             val page = next ?: return@withLock
@@ -58,13 +62,36 @@ class HuggingFaceModelCatalog(private val http: HttpClient = HttpClient { instal
                 })
         }
         known = known + page.associateBy { it.id }
-        items = if (more) (items + page).distinctBy { it.id } else page
+        val candidates = if (device == null) page else {
+            val eligible = page.filter { it.unavailableReason == null }
+            val results = eligible.chunked(4).flatMap { batch ->
+                coroutineScope {
+                    batch.map { model -> async {
+                        try { if (model.resolved) listOf(model) else resolve(model) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { null }
+                    } }.awaitAll()
+                }
+            }
+            val resolved = results.filterNotNull().flatten()
+            check(results.none { it == null } || resolved.isNotEmpty()) { "无法确认候选模型兼容性，请刷新重试" }
+            known = known + resolved.associateBy { it.id }
+            resolved.filter { ModelLibrary.compatibility(it, device).allowed }
+        }
+        items = if (more) (items + candidates).distinctBy { it.id } else candidates
         engine = selectedEngine; loaded = true
         next = Regex("<([^>]+)>; rel=\"next\"").find(response.headers["Link"].orEmpty())?.groupValues?.get(1)
     }
 
     suspend fun inspect(id: String): List<LibraryModel> = gate.withLock {
-        val model = get(id)
+        val resolved = resolve(get(id))
+        known = known + resolved.associateBy { it.id }
+        val index = items.indexOfFirst { it.id == id }
+        if (index >= 0) items = items.take(index) + resolved + items.drop(index + 1)
+        resolved
+    }
+
+    private suspend fun resolve(model: LibraryModel): List<LibraryModel> {
         require(validRepository(model.repository))
         val pinned = model.revision.takeIf { it.matches(Regex("[a-f0-9]{40}")) }
         val response = http.get("https://huggingface.co/api/models/${model.repository}" + (pinned?.let { "/revision/$it" } ?: "")) { parameter("blobs", true) }
@@ -105,10 +132,7 @@ class HuggingFaceModelCatalog(private val http: HttpClient = HttpClient { instal
                     })
             }.also { require(it.isNotEmpty()) { "仓库没有 GGUF 文件" } }
         }
-        known = known + resolved.associateBy { it.id }
-        val index = items.indexOfFirst { it.id == id }
-        if (index >= 0) items = items.take(index) + resolved + items.drop(index + 1)
-        resolved
+        return resolved
     }
     companion object {
         fun validRepository(id: String) = id.split('/').let { it.size == 2 && it.all { part -> part.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.-]{0,95}")) && part !in setOf(".", "..") } }
