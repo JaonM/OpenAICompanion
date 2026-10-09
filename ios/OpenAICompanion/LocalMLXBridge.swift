@@ -156,6 +156,12 @@ private final class LocalMLX: @unchecked Sendable {
             if messages.first?["role"] == "system" { messages[0]["content", default: ""] += instruction }
             else { messages.insert(["role": "system", "content": instruction], at: 0) }
         }
+        let configurationData = try Data(contentsOf: URL(fileURLWithPath: path).appendingPathComponent("config.json"))
+        let modelType = (try JSONSerialization.jsonObject(with: configurationData) as? [String: Any])?["model_type"] as? String ?? ""
+        let folder = URL(fileURLWithPath: path)
+        let template = (try? String(contentsOf: folder.appendingPathComponent("chat_template.jinja"), encoding: .utf8)) ??
+            ((try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("tokenizer_config.json")))) as? [String: Any])?["chat_template"] as? String ?? ""
+        let usesThinking = ["qwen3", "qwen3_5", "qwen3_5_text"].contains(modelType) && template.contains("<think>")
         let structured = request["response_format"] is [String: Any]
         let promptMessages = messages
         try await container.perform { context in
@@ -165,18 +171,20 @@ private final class LocalMLX: @unchecked Sendable {
             let answerLimit = min(max(maxTokens, 1), 512)
             if input.text.tokens.size + 256 + answerLimit + 32 > 8192 { throw MLXFailure.message("LOCAL_MODEL_CONTEXT_EXCEEDED") }
             let parameters = GenerateParameters(maxTokens: 256 + answerLimit + 32, temperature: 0.6, topP: 0.95, topK: 20, presencePenalty: 1.5, presenceContextSize: 1024)
-            let thinking = try ThinkingBudgetProcessor(configuration: ThinkingBudgetConfiguration(maximumTokenCount: 256, minimumAnswerTokenCount: answerLimit, transitionOverride: .immediate), reasoning: .thinkTagsWithEnableThinking, tokenizer: context.tokenizer)
+            let thinking = usesThinking ? try ThinkingBudgetProcessor(configuration: ThinkingBudgetConfiguration(maximumTokenCount: 256, minimumAnswerTokenCount: answerLimit, transitionOverride: .immediate), reasoning: .thinkTagsWithEnableThinking, tokenizer: context.tokenizer) : nil
             var processors: [any LogitProcessor] = []
             if let penalty = parameters.processor() { processors.append(penalty) }
-            processors.append(thinking)
+            if let thinking { processors.append(thinking) }
             var answerGrammar: AnswerGrammar?
             if grammar != nil {
                 if self.grammarTokenizer == nil {
                     let vocab = TokenizerVocabExtractor.extractForGrammar(from: context.tokenizer)
                     self.grammarTokenizer = try GrammarTokenizer(vocab: vocab.vocab, vocabType: vocab.vocabType, eosTokenId: Int32(context.tokenizer.eosTokenId ?? 0))
                 }
-                guard let grammarTokenizer = self.grammarTokenizer, let close = context.tokenizer.convertTokenToId("</think>") else { throw MLXFailure.message("MLX 无法准备思考/回答约束") }
+                guard let grammarTokenizer = self.grammarTokenizer else { throw MLXFailure.message("MLX 无法准备回答约束") }
+                let close = context.tokenizer.convertTokenToId("</think>") ?? -1
                 answerGrammar = AnswerGrammar(try GrammarConstraint(tokenizer: grammarTokenizer, jsonSchema: responseSchema(request: request, tools: tools)), endThinking: close)
+                answerGrammar?.answering = !usesThinking
                 processors.append(answerGrammar!)
             }
             logMLX("grammar ready: active=\(MLX.Memory.activeMemory)")
@@ -192,7 +200,7 @@ private final class LocalMLX: @unchecked Sendable {
             var decoder = NaiveStreamingDetokenizer(tokenizer: context.tokenizer)
             let stopIDs = Set([context.tokenizer.eosTokenId, context.tokenizer.convertTokenToId("<|im_end|>")].compactMap { $0 })
             var output = "", emittedText = "", emittedReasoning = ""
-            var thinkingClosed = false, answerTokens = 0, sampledTokens = 0
+            var thinkingClosed = !usesThinking, answerTokens = 0, sampledTokens = 0
             while true {
                 try Task.checkCancellation()
                 guard let token = iterator.next() else { break }
@@ -204,12 +212,12 @@ private final class LocalMLX: @unchecked Sendable {
                 if let chunk = decoder.next() { output += chunk }
                 if thinkingClosed { answerTokens += 1 }
                 else if output.contains("</think>") { thinkingClosed = true }
-                let reasoning = OCLlamaStreamingReasoningText(output)
+                let reasoning = usesThinking ? OCLlamaStreamingReasoningText(output) : ""
                 if reasoning.utf16.count > emittedReasoning.utf16.count {
                     try emit.delta((reasoning as NSString).substring(from: emittedReasoning.utf16.count), field: "reasoning_content")
                     emittedReasoning = reasoning
                 }
-                if !structured, let parts = OCLlamaSplitThinkingResponse(output) {
+                if !structured, let parts = usesThinking ? OCLlamaSplitThinkingResponse(output) : ["reasoning": "", "text": output] {
                     let answer = parts["text"] ?? ""
                     let text = grammar == nil ? answer : OCLlamaStreamingChatText(answer)
                     if let text, (emittedText.isEmpty || (text as NSString).hasPrefix(emittedText)), text.utf16.count > emittedText.utf16.count {
@@ -219,7 +227,7 @@ private final class LocalMLX: @unchecked Sendable {
                 if answerTokens >= answerLimit { break }
             }
             try Task.checkCancellation()
-            guard let parts = OCLlamaSplitThinkingResponse(output) else { throw MLXFailure.message("MLX 思考未完成") }
+            guard let parts = usesThinking ? OCLlamaSplitThinkingResponse(output) : ["reasoning": "", "text": output] else { throw MLXFailure.message("MLX 思考未完成") }
             let reasoning = parts["reasoning"] ?? ""
             if reasoning.utf16.count > emittedReasoning.utf16.count {
                 try emit.delta((reasoning as NSString).substring(from: emittedReasoning.utf16.count), field: "reasoning_content")
@@ -250,12 +258,18 @@ func ocMLXGenerate(_ path: UnsafePointer<CChar>?, _ request: UnsafePointer<CChar
 @_cdecl("oc_mlx_cancel") func ocMLXCancel() { LocalMLX.shared.cancel() }
 @_cdecl("oc_mlx_unload") func ocMLXUnload() { LocalMLX.shared.unload() }
 
-private struct MLXModelFile: Decodable { let file: String; let bytes: Int64; let sha256: String }
-private let modelRevision = "32f3e8ecf65426fc3306969496342d504bfa13f3"
-private let modelFilesJSON = #"[{"file":"chat_template.jinja","bytes":7756,"sha256":"a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715"},{"file":"config.json","bytes":3366,"sha256":"f3efc81b2ea8d96a45301037d3ccccbcccdef44a961845c87f286aaddbc6eaaa"},{"file":"model.safetensors","bytes":3034300695,"sha256":"5fb9acd0246866381cf8c5c354c6db1019f6498eec4ccb4f5edcc71ffeacb2db"},{"file":"model.safetensors.index.json","bytes":101944,"sha256":"52e534c41f7b97708329c85f762e5882bf48bd5955a422c6ae74eba321e6048a"},{"file":"preprocessor_config.json","bytes":390,"sha256":"27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"},{"file":"processor_config.json","bytes":1300,"sha256":"14932921ca485d458a04dafd8069fbb0a4505622a48208d19ed247115801385b"},{"file":"tokenizer.json","bytes":19989343,"sha256":"87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4"},{"file":"tokenizer_config.json","bytes":1139,"sha256":"e98f1901ac6f0adff67b1d540bfa0c36ac1a0cf59eb72ed78146ef89aafa1182"},{"file":"video_preprocessor_config.json","bytes":385,"sha256":"7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13"},{"file":"vocab.json","bytes":6722759,"sha256":"ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003"}]"#
+private struct MLXModelFile: Decodable {
+    let file: String
+    let bytes: Int64
+    let sha256: String?
+    let blobId: String?
+}
 
-private func downloadMLXModel(to path: String) async throws {
-    let files = try JSONDecoder().decode([MLXModelFile].self, from: Data(modelFilesJSON.utf8))
+private func downloadMLXModel(to path: String, repository: String, revision: String, manifest: String) async throws {
+    let files = try JSONDecoder().decode([MLXModelFile].self, from: Data(manifest.utf8))
+    guard repository.range(of: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$", options: .regularExpression) != nil,
+          revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
+          !files.isEmpty, files.count <= 512, Set(files.map(\.file)).count == files.count else { throw MLXFailure.message("模型文件清单无效") }
     let destination = URL(fileURLWithPath: path, isDirectory: true)
     let staging = destination.deletingLastPathComponent().appendingPathComponent(".mlx-download-" + UUID().uuidString)
     let manager = FileManager.default
@@ -263,29 +277,36 @@ private func downloadMLXModel(to path: String) async throws {
     defer { try? manager.removeItem(at: staging) }
     for file in files {
         try Task.checkCancellation()
-        let url = URL(string: "https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit/resolve/\(modelRevision)/\(file.file)")!
+        guard file.bytes > 0, file.file.count <= 200,
+              file.file.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({ $0 != "." && $0 != ".." && $0.range(of: "^[A-Za-z0-9_.-]+$", options: .regularExpression) != nil }) else { throw MLXFailure.message("模型文件路径无效") }
+        let url = URL(string: "https://huggingface.co/\(repository)/resolve/\(revision)/\(file.file)")!
         let (temporary, response) = try await URLSession.shared.download(from: url)
         defer { try? manager.removeItem(at: temporary) }
-        guard let response = response as? HTTPURLResponse, response.statusCode == 200 else { throw MLXFailure.message("MLX 模型下载失败：\(file.file)") }
-        let size = try manager.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber
-        guard size?.int64Value == file.bytes else { throw MLXFailure.message("MLX 文件大小不匹配：\(file.file)") }
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              (try manager.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == file.bytes else { throw MLXFailure.message("模型文件下载失败：\(file.file)") }
         let handle = try FileHandle(forReadingFrom: temporary)
         defer { try? handle.close() }
-        var hash = SHA256()
-        while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { try Task.checkCancellation(); hash.update(data: data) }
-        guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == file.sha256 else { throw MLXFailure.message("MLX 文件校验失败：\(file.file)") }
-        try manager.moveItem(at: temporary, to: staging.appendingPathComponent(file.file))
+        var hash = SHA256(), gitHash = Insecure.SHA1()
+        gitHash.update(data: Data("blob \(file.bytes)\0".utf8))
+        while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty {
+            try Task.checkCancellation(); hash.update(data: data); gitHash.update(data: data)
+        }
+        let digest = hash.finalize().map({ String(format: "%02x", $0) }).joined()
+        let gitDigest = gitHash.finalize().map({ String(format: "%02x", $0) }).joined()
+        let valid = !(file.sha256 ?? "").isEmpty ? digest == file.sha256 : gitDigest == file.blobId
+        guard valid else { throw MLXFailure.message("模型文件校验失败：\(file.file)") }
+        let target = staging.appendingPathComponent(file.file)
+        try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try manager.moveItem(at: temporary, to: target)
     }
-    // Keep an existing verified model until the complete replacement is available.
-    if manager.fileExists(atPath: destination.path) {
-        _ = try manager.replaceItemAt(destination, withItemAt: staging)
-    } else { try manager.moveItem(at: staging, to: destination) }
+    if manager.fileExists(atPath: destination.path) { _ = try manager.replaceItemAt(destination, withItemAt: staging) }
+    else { try manager.moveItem(at: staging, to: destination) }
 }
-@_cdecl("oc_mlx_download")
-func ocMLXDownload(_ path: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
-    guard let path else { return strdup("MLX 模型目录无效") }
-    let directory = String(cString: path)
-    return LocalMLX.shared.run { try await downloadMLXModel(to: directory) }
+@_cdecl("oc_mlx_download_manifest")
+func ocMLXDownloadManifest(_ path: UnsafePointer<CChar>?, _ repository: UnsafePointer<CChar>?, _ revision: UnsafePointer<CChar>?, _ manifest: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    guard let path, let repository, let revision, let manifest else { return strdup("MLX 模型下载参数无效") }
+    let directory = String(cString: path), repo = String(cString: repository), sha = String(cString: revision), files = String(cString: manifest)
+    return LocalMLX.shared.run { try await downloadMLXModel(to: directory, repository: repo, revision: sha, manifest: files) }
 }
 
 private func logMLX(_ message: @autoclosure () -> String) {

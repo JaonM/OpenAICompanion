@@ -103,6 +103,8 @@ data class MobileUiState(
     val modelEngine: String = "llama.cpp",
     val modelImportLabel: String = "导入 GGUF",
     val modelChanging: Boolean = false,
+    val modelCatalogLoading: Boolean = false,
+    val modelCatalogError: String? = null,
     val modelLibrary: ModelLibraryState? = null,
     val mealReminderEnabled: Boolean = false,
     val commuteReminderEnabled: Boolean = false,
@@ -144,6 +146,8 @@ interface MobileActions {
     fun answerInput(id: Long, contentJson: String?)
     fun selectModelEngine(engine: String) = Unit
     fun installModel(id: String) = Unit
+    fun browseModels(search: String, more: Boolean) = Unit
+    fun inspectModel(id: String) = Unit
     fun importModel()
     fun saveProactiveSettings(mealEnabled: Boolean, mealTime: String,
         commuteEnabled: Boolean, commuteTime: String)
@@ -289,9 +293,11 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                 }
                             }
                             Text(if (state.modelChanging) "正在准备模型…" else state.modelStatus)
-                            OutlinedButton(enabled = !state.sending && !state.modelChanging,
-                                onClick = actions::importModel) { Text(state.modelImportLabel) }
-                            state.modelLibrary?.let { ModelLibraryPanel(it, state.sending || state.modelChanging, actions::installModel) }
+                            if (state.modelEngine != "MLX") OutlinedButton(enabled = !state.sending && !state.modelChanging,
+                                onClick = actions::importModel) { Text("导入本地 GGUF 文件") }
+                            state.modelLibrary?.let { ModelLibraryPanel(it, state.sending || state.modelChanging, actions::installModel,
+                                engine = state.modelEngine, loading = state.modelCatalogLoading, error = state.modelCatalogError,
+                                browse = actions::browseModels, inspect = actions::inspectModel) }
                         }
                         if (settingsSection == "工具扩展") {
                             Row(verticalAlignment = Alignment.CenterVertically) {

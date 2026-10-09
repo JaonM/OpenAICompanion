@@ -22,6 +22,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -34,6 +36,13 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
     private val requestGate = Mutex()
     private val defaults = CompanionModelDefaults()
     private val preferences = Preferences.userNodeForPackage(DesktopModelServe::class.java)
+    private val catalogFile = File(System.getProperty("user.home"), "Library/Application Support/OpenAICompanion/model-library.json")
+    private val catalog = HuggingFaceModelCatalog().apply {
+        remember(runCatching { Json.decodeFromString<List<LibraryModel>>(catalogFile.takeIf { it.isFile }?.readText() ?: "[]") }.getOrDefault(emptyList()))
+    }
+    override suspend fun browseModels(engine: String, search: String, more: Boolean) = catalog.browse(engine, search, more)
+    override suspend fun inspectModel(id: String) { catalog.inspect(id) }
+
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(20))
         .build()
@@ -52,13 +61,14 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
             System.getProperty("os.version").substringBefore('.').toIntOrNull() ?: 0,
             System.getProperty("os.arch"), memory, File(System.getProperty("user.home")).usableSpace,
             if (isLocalEndpoint()) setOf("Ollama") else emptySet())
-        return ModelLibraryState(device, ModelLibrary.models.filter { it.ollamaName in installedModels }.map { it.id }.toSet(),
-            ModelLibrary.models.firstOrNull { it.engine == "llama.cpp" && it.ollamaName == model && model in installedModels }?.id)
+        return ModelLibraryState(device, catalog.models.filter { it.ollamaName in installedModels }.map { it.id }.toSet(),
+            catalog.models.firstOrNull { it.engine == "llama.cpp" && it.ollamaName == model && model in installedModels }?.id,
+            catalog.models, catalog.items, catalog.engine, catalog.hasMore, catalog.loaded)
     }
 
     override suspend fun installModel(id: String) = requestGate.withLock {
         withContext(Dispatchers.IO) {
-            val entry = ModelLibrary.get(id)
+            val entry = catalog.get(id)
             val state = modelLibrary()
             val compatible = ModelLibrary.compatibility(entry, state.device, id in state.installed)
             check(compatible.allowed) { compatible.description }
@@ -81,6 +91,13 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
                     check(success) { "模型下载未完成" }
                 }
                 installedModels = installedModels + entry.ollamaName
+                catalogFile.parentFile.mkdirs()
+                val temporary = File.createTempFile(".catalog-", ".json", catalogFile.parentFile)
+                try {
+                    temporary.writeText(Json.encodeToString(catalog.models.filter { it.ollamaName in installedModels }))
+                    java.nio.file.Files.move(temporary.toPath(), catalogFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+                } finally { temporary.delete() }
+                return@withContext // Downloading alone never changes the selected model.
             }
             save(endpoint, entry.ollamaName, apiKey)
         }

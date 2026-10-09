@@ -3,16 +3,26 @@ package com.openai.companion.kmp
 /** Hardware thresholds are conservative app policy, not vendor performance guarantees. */
 data class ModelDevice(val platform: String, val osMajor: Int, val architecture: String,
     val memoryBytes: Long?, val freeBytes: Long?, val engines: Set<String>)
+@kotlinx.serialization.Serializable
 data class LibraryModel(val id: String, val title: String, val engine: String, val bytes: Long,
-    val memoryGB: Int, val repository: String, val revision: String, val file: String = "", val sha256: String = "") {
+    val memoryGB: Int, val repository: String, val revision: String, val file: String = "", val sha256: String = "", val files: List<ModelArtifact> = emptyList(),
+    val downloads: Long = 0, val likes: Long = 0, val updated: String = "", val resolved: Boolean = true,
+    val unavailableReason: String? = null) {
     val url: String get() = "https://huggingface.co/$repository/resolve/$revision/$file"
-    val ollamaName: String get() = "hf.co/$repository:Q8_0"
+    val ollamaName: String get() = "hf.co/$repository:${if (id in setOf("qwen35-gguf", "qwen3-small")) "Q8_0" else file.ifBlank { "Q8_0" }}"
 }
 data class ModelCompatibility(val allowed: Boolean, val description: String)
-data class ModelLibraryState(val device: ModelDevice, val installed: Set<String> = emptySet(), val selected: String? = null)
+@kotlinx.serialization.Serializable
+data class ModelArtifact(val file: String, val bytes: Long, val sha256: String = "", val blobId: String = "")
+data class ModelLibraryState(val device: ModelDevice, val installed: Set<String> = emptySet(), val selected: String? = null,
+    val models: List<LibraryModel> = ModelLibrary.models, val catalog: List<LibraryModel> = emptyList(),
+    val catalogEngine: String = "", val hasMore: Boolean = false, val catalogLoaded: Boolean = false)
+
 interface ModelLibraryProvider {
     fun modelLibrary(): ModelLibraryState
     suspend fun installModel(id: String)
+    suspend fun browseModels(engine: String, search: String, more: Boolean = false) = Unit
+    suspend fun inspectModel(id: String) = Unit
 }
 object ModelLibrary {
     val models = listOf(
@@ -29,11 +39,13 @@ object ModelLibrary {
     fun compatibility(model: LibraryModel, device: ModelDevice, installed: Boolean = false): ModelCompatibility {
         val engine = if (device.platform == "macOS" && model.engine == "llama.cpp") "Ollama" else model.engine
         val reasons = mutableListOf<String>()
+        model.unavailableReason?.let { reasons += it }
         if (engine !in device.engines) reasons += "当前端未接入 $engine 引擎"
         val minimum = when (device.platform) { "iOS" -> 17; "Android" -> 26; "macOS" -> 14; else -> Int.MAX_VALUE }
         if (device.osMajor < minimum) reasons += "系统版本不满足要求（$minimum+）"
         if (device.architecture !in setOf("arm64", "aarch64", "arm64-v8a", "x86_64", "amd64") ||
             (model.engine == "MLX" && device.architecture !in setOf("arm64", "aarch64"))) reasons += "不支持当前处理器架构"
+        if (!model.resolved) reasons += "查看文件后确认下载大小与内存需求"
         if (device.memoryBytes == null) reasons += "无法确认设备内存"
         else if (device.memoryBytes < model.memoryGB * 1_000_000_000L) reasons += "建议至少 ${model.memoryGB} GB 内存"
         if (!installed) {

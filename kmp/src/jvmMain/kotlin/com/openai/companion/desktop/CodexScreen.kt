@@ -393,11 +393,24 @@ private fun CodexSettings(
     var connecting by remember { mutableStateOf(false) }
     var library by remember { mutableStateOf(backend.modelServe.modelLibrary()) }
     var downloading by remember { mutableStateOf(false) }
+    var catalogLoading by remember { mutableStateOf(false) }
+    var catalogError by remember { mutableStateOf<String?>(null) }
+    fun catalogAction(action: suspend () -> Unit) {
+        if (catalogLoading || downloading) return
+        catalogLoading = true
+        scope.launch {
+            try { action(); catalogError = null }
+            catch (cause: Exception) { catalogError = cause.message }
+            finally { library = backend.modelServe.modelLibrary(); catalogLoading = false }
+        }
+    }
     LaunchedEffect(Unit) { backend.modelServe.localStatus(); library = backend.modelServe.modelLibrary() }
     DialogWindow(onCloseRequest = onClose, title = "设置", state = DialogState(width = 560.dp, height = 730.dp)) {
         MaterialTheme {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ModelLibraryPanel(library, downloading) { id -> scope.launch {
+                ModelLibraryPanel(library, downloading, engine = "Ollama", loading = catalogLoading, error = catalogError,
+                    browse = { search, more -> catalogAction { backend.modelServe.browseModels("Ollama", search, more) } },
+                    inspect = { id -> catalogAction { backend.modelServe.inspectModel(id) } }, install = { id -> scope.launch {
                     downloading = true
                     try {
                         backend.modelServe.installModel(id)
@@ -405,7 +418,7 @@ private fun CodexSettings(
                         onSaved()
                     } catch (cause: Exception) { onError(cause.message) }
                     finally { library = backend.modelServe.modelLibrary(); downloading = false }
-                } }
+                } })
                 Text("模型与连接", style = MaterialTheme.typography.titleLarge)
                 Text("默认连接本机 Ollama，使用 Unsloth Qwen3.8-27B UD-Q4_K_M。", color = secondaryText,
                     style = MaterialTheme.typography.bodySmall)

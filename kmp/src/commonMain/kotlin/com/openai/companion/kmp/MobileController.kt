@@ -1,5 +1,6 @@
 package com.openai.companion.kmp
 
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -74,6 +75,8 @@ interface MobileBackend {
     val modelStatus: String
     val modelLibrary: ModelLibraryState? get() = null
     suspend fun installModel(id: String) = Unit
+    suspend fun browseModels(engine: String, search: String, more: Boolean) = Unit
+    suspend fun inspectModel(id: String) = Unit
     val modelEngines: List<String> get() = emptyList()
     val modelEngine: String get() = "llama.cpp"
     val modelImportLabel: String get() = "导入 GGUF"
@@ -250,6 +253,26 @@ class MobileController(
         scope.launch {
             try { perform { backend.selectModelEngine(engine); syncSettings() } }
             finally { mutableState.update { it.copy(modelChanging = false) } }
+        }
+    }
+
+    private var catalogJob: Job? = null
+    private var catalogGeneration = 0
+    override fun browseModels(search: String, more: Boolean) {
+        val engine = state.value.modelEngine
+        catalogAction(replace = !more) { backend.browseModels(engine, search, more) }
+    }
+    override fun inspectModel(id: String) = catalogAction { backend.inspectModel(id) }
+    private fun catalogAction(replace: Boolean = false, block: suspend () -> Unit) {
+        if (state.value.modelCatalogLoading && !replace) return
+        catalogJob?.cancel()
+        val generation = ++catalogGeneration
+        mutableState.update { it.copy(modelCatalogLoading = true, modelCatalogError = null) }
+        catalogJob = scope.launch {
+            try { block() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { if (generation == catalogGeneration) mutableState.update { it.copy(modelCatalogError = error.message) } }
+            finally { if (generation == catalogGeneration) { syncSettings(); mutableState.update { it.copy(modelCatalogLoading = false) } } }
         }
     }
 

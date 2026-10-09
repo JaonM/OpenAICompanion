@@ -25,6 +25,9 @@ class DesktopModelLibraryTest {
             adapter.endpoint = "http://127.0.0.1:${server.address.port}/v1/chat/completions"
             adapter.installModel("qwen3-small")
             assertTrue(requestBody.contains(ModelLibrary.get("qwen3-small").ollamaName))
+            assertEquals(oldModel, adapter.model, "下载不能自动切换当前模型")
+            assertTrue("qwen3-small" in adapter.modelLibrary().installed)
+            adapter.installModel("qwen3-small")
             assertEquals("qwen3-small", adapter.modelLibrary().selected)
             val selected = adapter.model
             fail = true

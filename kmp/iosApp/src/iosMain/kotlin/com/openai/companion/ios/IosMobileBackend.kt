@@ -171,6 +171,8 @@ class IosMobileBackend(
     override val mcpStatusUpdates: StateFlow<String> get() = mcp.statusUpdates
     override val modelLibrary get() = (modelServe as? com.openai.companion.kmp.ModelLibraryProvider)?.modelLibrary()
     override suspend fun installModel(id: String) { (modelServe as? com.openai.companion.kmp.ModelLibraryProvider)?.installModel(id) ?: error("当前引擎不支持模型库") }
+    override suspend fun browseModels(engine: String, search: String, more: Boolean) { (modelServe as? com.openai.companion.kmp.ModelLibraryProvider)?.browseModels(engine, search, more) }
+    override suspend fun inspectModel(id: String) { (modelServe as? com.openai.companion.kmp.ModelLibraryProvider)?.inspectModel(id) }
     override val modelStatus: String get() = localModelStatus()
     override val modelEngines: List<String> get() = listOf("llama.cpp", "MLX")
     override val modelEngine: String get() = localModelEngine()

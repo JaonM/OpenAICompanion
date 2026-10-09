@@ -14,6 +14,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -39,6 +41,16 @@ internal object AndroidLlamaNative {
 /** Device-local GGUF model; only the HTTP/MCP tools may use a network connection. */
 class AndroidLocalLlamaModel(private val context: Context, private val importer: AndroidGgufImporter) : AppModelServe, ModelLibraryProvider {
     private val preferences = context.getSharedPreferences("companion_model", Context.MODE_PRIVATE)
+    private val catalog = HuggingFaceModelCatalog().apply {
+        remember(runCatching { Json.decodeFromString<List<LibraryModel>>(preferences.getString("downloadedCatalogModels", "[]")!!) }.getOrDefault(emptyList()))
+    }
+    override suspend fun browseModels(engine: String, search: String, more: Boolean) = catalog.browse(engine, search, more)
+    override suspend fun inspectModel(id: String) { catalog.inspect(id) }
+    private fun catalogFile(model: LibraryModel): File {
+        val old = preferences.getString(MODEL_KEY, null)
+        if (model.id in ModelLibrary.models.map { it.id } && old?.endsWith(model.file) == true && File(modelDirectory(), old).isFile) return File(modelDirectory(), old)
+        return File(modelDirectory(), if (model.id in ModelLibrary.models.map { it.id }) model.file else model.repository + "/" + model.file)
+    }
 
     override fun modelLibrary(): ModelLibraryState {
         val memory = ActivityManager.MemoryInfo()
@@ -46,24 +58,25 @@ class AndroidLocalLlamaModel(private val context: Context, private val importer:
         val device = ModelDevice("Android", Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
             memory.totalMem, context.filesDir.usableSpace, setOf("llama.cpp"))
         val current = modelPath()
-        val installed = ModelLibrary.models.filter { it.engine == "llama.cpp" &&
-            (File(modelDirectory(), it.file).isFile || (current?.endsWith(it.file) == true && File(current).isFile)) }.map { it.id }.toSet()
-        val selected = ModelLibrary.models.firstOrNull { it.file.isNotEmpty() && current?.endsWith(it.file) == true }?.id
-        return ModelLibraryState(device, installed, selected)
+        val installed = catalog.models.filter { it.engine == "llama.cpp" && it.file.isNotEmpty() && catalogFile(it).isFile }.map { it.id }.toSet()
+        val selected = catalog.models.firstOrNull { it.id in installed && it.file.isNotEmpty() && current?.endsWith(it.file) == true }?.id
+        return ModelLibraryState(device, installed, selected, catalog.models, catalog.items, catalog.engine, catalog.hasMore, catalog.loaded)
     }
 
     override suspend fun installModel(id: String) = withContext(Dispatchers.IO) {
         gate.withLock {
-            val model = ModelLibrary.get(id)
+            val model = catalog.get(id)
             val state = modelLibrary()
             val compatible = ModelLibrary.compatibility(model, state.device, id in state.installed)
             check(compatible.allowed) { compatible.description }
-            val current = modelPath()
-            val destination = if (current?.endsWith(model.file) == true && File(current).isFile) File(current)
-                else File(modelDirectory(), model.file)
-            if (id !in state.installed) downloadVerifiedModel(model, destination)
+            val destination = catalogFile(model)
+            if (id !in state.installed) {
+                downloadVerifiedModel(model, destination)
+                check(preferences.edit().putString("downloadedCatalogModels", Json.encodeToString(catalog.models.filter { it.file.isNotEmpty() && catalogFile(it).isFile })).commit())
+                return@withLock
+            }
             AndroidLlamaNative.load(handle, destination.absolutePath)?.let(::error)
-            check(preferences.edit().putString(MODEL_KEY, destination.name).commit())
+            check(preferences.edit().putString("selectedCatalogModel", model.id).commit())
         }
     }
 
@@ -74,7 +87,7 @@ class AndroidLocalLlamaModel(private val context: Context, private val importer:
                 try {
                     AndroidLlamaNative.load(handle, imported.path)?.let(::error)
                     val previous = preferences.getString(MODEL_KEY, null)
-                    check(preferences.edit().putString(MODEL_KEY, imported.fileName).commit())
+                    check(preferences.edit().remove("selectedCatalogModel").putString(MODEL_KEY, imported.fileName).commit())
                     if (previous != null && previous != imported.fileName) File(modelDirectory(), previous).delete()
                 } catch (failure: Throwable) {
                     File(imported.path).delete()
@@ -168,9 +181,14 @@ class AndroidLocalLlamaModel(private val context: Context, private val importer:
     fun cancel() = AndroidLlamaNative.cancel(handle)
     fun status(): String = if (modelPath()?.let { File(it).isFile } == true) "端侧模型已导入" else "请导入 GGUF 模型"
     private fun modelDirectory() = File(context.filesDir, "Models")
-    private fun modelPath(): String? = preferences.getString(MODEL_KEY, null)?.let { name ->
+    private fun modelPath(): String? {
+        preferences.getString("selectedCatalogModel", null)?.let { id ->
+            catalog.models.firstOrNull { it.id == id }?.let { return catalogFile(it).absolutePath }
+        }
+        return preferences.getString(MODEL_KEY, null)?.let { name ->
         require(name == File(name).name && name.endsWith(".gguf", ignoreCase = true))
         File(modelDirectory(), name).absolutePath
+        }
     }
     private fun deltaChunk(text: String) = buildJsonObject {
         put("choices", kotlinx.serialization.json.buildJsonArray {
