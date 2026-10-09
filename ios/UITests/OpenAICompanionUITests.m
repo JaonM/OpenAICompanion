@@ -479,6 +479,7 @@
 
 - (void)testHuggingFaceBrowseAndExplicitMlxDownload {
     XCUIApplication *app = [self acceptanceApp];
+    app.launchArguments = @[@"-localInferenceEngine", @"MLX"];
     [app launch];
     [self openSettingsSection:@"端侧模型" app:app];
     [app.buttons[@"MLX"] tap];
@@ -491,10 +492,10 @@
     for (NSInteger i = 0; i < 6 && !searchButton.hittable; i++) [app swipeUp];
     XCTNSPredicateExpectation *canSearch = [[XCTNSPredicateExpectation alloc]
         initWithPredicate:[NSPredicate predicateWithFormat:@"enabled == YES"] object:searchButton];
-    XCTAssertEqual([XCTWaiter waitForExpectations:@[canSearch] timeout:40], XCTWaiterResultCompleted);
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[canSearch] timeout:240], XCTWaiterResultCompleted);
     [searchButton tap];
     XCUIElement *source = app.staticTexts[@"mlx-community/Qwen3-0.6B-4bit"];
-    XCTAssertTrue([source waitForExistenceWithTimeout:60]);
+    XCTAssertTrue([source waitForExistenceWithTimeout:240]);
     for (NSInteger i = 0; i < 12 && !source.hittable; i++) [app swipeUp];
     XCTAssertTrue(source.hittable);
     NSString *actionId = @"model-library-action-mlx-community/Qwen3-0.6B-4bit";
@@ -520,7 +521,12 @@
     if (download.exists) {
         for (NSInteger i = 0; i < 8 && (!download.hittable || CGRectGetMaxY(download.frame) > CGRectGetMaxY(app.frame) - 80); i++) [app swipeUp];
         XCTAssertTrue(download.enabled);
-        [download tap];
+        for (NSInteger attempt = 0; attempt < 3 && download.exists && download.enabled; attempt++) {
+            [NSThread sleepForTimeInterval:1];
+            [[download coordinateWithNormalizedOffset:CGVectorMake(0.5, 0.5)] tap];
+            [NSThread sleepForTimeInterval:1];
+        }
+        XCTAssertTrue(use.exists || !download.enabled, @"点击下载必须产生忙碌或已下载状态。");
         XCTAssertTrue([use waitForExistenceWithTimeout:600], @"显式下载应完成校验并变成已下载状态。");
     }
     XCTAssertTrue(use.exists);
@@ -537,6 +543,127 @@
     XCTAssertTrue(use.exists);
     XCTAssertFalse(app.buttons[@"下载 Qwen3.5 MLX 4bit（约 3.06 GB）"].exists);
     [self retainScreenshot:app name:@"HF downloaded model survives relaunch"];
+}
+
+- (void)tapPickerEntry:(NSString *)name app:(XCUIApplication *)app {
+    XCUIElement *entry = app.staticTexts[name].firstMatch;
+    if (![entry waitForExistenceWithTimeout:5]) entry = [app.cells matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", name]].firstMatch;
+    XCTAssertTrue([entry waitForExistenceWithTimeout:10], @"文件夹入口缺失：%@，%@", name, app.debugDescription);
+    [entry tap];
+    [NSThread sleepForTimeInterval:2];
+}
+
+- (void)testMlxLocalFolderImportAndPersistence {
+    XCUIApplication *app = [self acceptanceApp];
+    app.launchArguments = @[@"-localInferenceEngine", @"MLX"];
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    NSString *priorStatus = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"MLX 模型可用"]].firstMatch.label;
+    NSMutableArray *priorLocalIds = [NSMutableArray array];
+    for (XCUIElement *existing in [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@", @"model-library-action-local-mlx-"]].allElementsBoundByIndex) [priorLocalIds addObject:existing.identifier];
+    [app.buttons[@"导入本地 MLX 文件夹"] tap];
+    XCUIElement *pickerOpen = [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"label IN %@", @[@"Open", @"打开"]]].firstMatch;
+    XCTAssertTrue([pickerOpen waitForExistenceWithTimeout:30], @"文件夹选择器应显示打开按钮。");
+    XCUIElement *folder = app.staticTexts[@"MLXAcceptanceImport"].firstMatch;
+    if (![folder waitForExistenceWithTimeout:5]) {
+        XCUIElement *browse = app.buttons[@"浏览"];
+        if (![browse waitForExistenceWithTimeout:3]) browse = app.buttons[@"Browse"];
+        if (browse.exists) { [browse tap]; [NSThread sleepForTimeInterval:2]; }
+    }
+    if (!folder.exists) {
+        XCUIElement *phone = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", @"iPhone"]].firstMatch;
+        XCTAssertTrue([phone waitForExistenceWithTimeout:10], @"找不到本机文件位置：%@", app.debugDescription);
+        [phone tap];
+        [NSThread sleepForTimeInterval:2];
+        [self tapPickerEntry:@"OpenAICompanion" app:app];
+    }
+    XCUIElement *folderCell = [app.cells containingType:XCUIElementTypeStaticText identifier:@"MLXAcceptanceImport"].firstMatch;
+    if (folderCell.exists) {
+        XCUIElement *pickerRoot = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:[NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@", @"DOC.browsingRoot"]].firstMatch;
+        CGFloat scale = CGRectGetWidth(app.frame) / CGRectGetWidth(pickerRoot.frame);
+        if (scale > 1.5) [[[app coordinateWithNormalizedOffset:CGVectorMake(0, 0)] coordinateWithOffset:CGVectorMake(CGRectGetMidX(folderCell.frame) * scale, CGRectGetMidY(folderCell.frame) * scale)] tap];
+        else [folderCell tap];
+    }
+    else [app.staticTexts[@"MLXAcceptanceImport"].firstMatch tap];
+    XCUIElement *selectedFolder = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:[NSPredicate predicateWithFormat:@"identifier CONTAINS %@", @"Title: MLXAcceptanceImport"]].firstMatch;
+    XCTAssertTrue([selectedFolder waitForExistenceWithTimeout:10], @"必须进入模型文件夹，不能选择它的父目录：%@", app.debugDescription);
+    XCUIElement *open = app.buttons[@"打开"];
+    if (!open.exists) open = app.buttons[@"Open"];
+    XCTAssertTrue(open.enabled);
+    [self retainScreenshot:app name:@"Selected real MLX model folder"];
+    [open tap];
+    XCUIElement *localAction = [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND NOT (identifier IN %@)", @"model-library-action-local-mlx-", priorLocalIds]].firstMatch;
+    XCTAssertTrue([localAction waitForExistenceWithTimeout:180], @"真实模型必须加载验证成功并进入模型库：%@", app.debugDescription);
+    XCUIElement *current = app.staticTexts[priorStatus];
+    XCTAssertTrue(current.exists, @"导入不能自动切换当前模型。");
+    // The downloaded HF copy precedes the new local copy. Select by its local model action ID.
+    for (NSInteger i = 0; i < 16 && (!localAction.hittable || CGRectGetMaxY(localAction.frame) > CGRectGetMaxY(app.frame) - 80); i++) [app swipeUp];
+    XCTAssertTrue(localAction.enabled);
+    [NSThread sleepForTimeInterval:1];
+    for (NSInteger retry = 0; retry < 3 && localAction.enabled; retry++) {
+        [[localAction coordinateWithNormalizedOffset:CGVectorMake(0.5, 0.5)] tap];
+        [NSThread sleepForTimeInterval:2];
+    }
+    XCUIElement *active = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@ AND label CONTAINS %@", @"MLX 模型可用", @"MLXAcceptanceImport"]].firstMatch;
+    XCTAssertTrue([active waitForExistenceWithTimeout:30]);
+    [app.buttons[@"完成"] tap];
+    [app terminate];
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    XCTAssertTrue([active waitForExistenceWithTimeout:30], @"导入模型选择必须在重启后保留。");
+    [self retainScreenshot:app name:@"Local MLX import and selection survive relaunch"];
+    // Restore the user's existing Qwen3.5 choice after the isolated import inference check.
+    XCUIElement *original = app.buttons[@"model-library-action-qwen35-mlx"];
+    for (NSInteger i = 0; i < 12 && (!original.hittable || CGRectGetMaxY(original.frame) > CGRectGetMaxY(app.frame) - 80); i++) [app swipeUp];
+    XCTNSPredicateExpectation *canRestore = [[XCTNSPredicateExpectation alloc] initWithPredicate:[NSPredicate predicateWithFormat:@"enabled == YES"] object:original];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[canRestore] timeout:240], XCTWaiterResultCompleted);
+    [NSThread sleepForTimeInterval:1];
+    [[original coordinateWithNormalizedOffset:CGVectorMake(0.5, 0.5)] tap];
+    XCTAssertTrue([current waitForExistenceWithTimeout:90]);
+}
+
+- (void)testMlxSwipeLoadsNextCatalogPage {
+    XCUIApplication *app = [self acceptanceApp];
+    app.launchArguments = @[@"-localInferenceEngine", @"MLX"];
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    XCUIElement *pages = [[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:@"model-library-pages"].firstMatch;
+    XCTAssertTrue([pages waitForExistenceWithTimeout:300]);
+    XCTAssertTrue([pages.label hasPrefix:@"已加载 1 页"]);
+    XCUIElement *more = app.buttons[@"加载更多模型"];
+    XCTAssertTrue(more.exists, @"官方列表应提供下一页游标。");
+    // Swipe only; never tap the manual load-more fallback.
+    for (NSInteger i = 0; i < 80 && [pages.label hasPrefix:@"已加载 1 页"]; i++) {
+        [app swipeUp];
+        if (more.hittable) break;
+    }
+    XCTNSPredicateExpectation *next = [[XCTNSPredicateExpectation alloc] initWithPredicate:
+        [NSPredicate predicateWithBlock:^BOOL(id object, NSDictionary *bindings) {
+            return pages.exists && ![pages.label hasPrefix:@"已加载 1 页"];
+        }] object:app];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[next] timeout:300], XCTWaiterResultCompleted, @"上拉应自动加载下一页：%@", app.debugDescription);
+    [self retainScreenshot:app name:@"MLX swipe automatically loads next page"];
+}
+
+- (void)testMlxFolderImportPickerAndCancel {
+    XCUIApplication *app = [self acceptanceApp];
+    app.launchArguments = @[@"-localInferenceEngine", @"MLX"];
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    XCUIElement *button = app.buttons[@"导入本地 MLX 文件夹"];
+    XCTAssertTrue([button waitForExistenceWithTimeout:20]);
+    XCTAssertTrue(button.enabled);
+    [button tap];
+    XCUIElement *cancel = app.buttons[@"Cancel"];
+    if (![cancel waitForExistenceWithTimeout:5]) cancel = app.buttons[@"取消"];
+    XCTAssertTrue([cancel waitForExistenceWithTimeout:10], @"必须打开系统文件夹选择器。");
+    [self retainScreenshot:app name:@"MLX native folder picker"];
+    [cancel tap];
+    XCTNSPredicateExpectation *ready = [[XCTNSPredicateExpectation alloc] initWithPredicate:
+        [NSPredicate predicateWithFormat:@"enabled == YES"] object:button];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[ready] timeout:20], XCTWaiterResultCompleted);
+    XCUIElement *active = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"MLX 模型可用"]].firstMatch;
+    XCTAssertTrue(active.exists);
 }
 
 - (void)testMlxStreamsReplyAndCanStop {

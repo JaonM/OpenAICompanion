@@ -102,8 +102,7 @@
     ],
     "remaining": [
       "Android SDK/native build and device download",
-      "Real Mac Ollama pull",
-      "Physical explicit download, integrity and relaunch persistence"
+      "Real Mac Ollama pull"
     ],
     "commits": [
       "a751bf1",
@@ -132,9 +131,75 @@
       }
     ],
     "remaining": [
-      "Updated physical prefiltered list and actual download acceptance",
       "Android SDK/native build and physical acceptance",
       "Real Mac Ollama weight download"
     ]
+  },
+  "mlx_import_and_catalog_paging": {
+    "checks": [
+      {
+        "name": "Physical explicit Hugging Face MLX download, installed state and relaunch persistence",
+        "status": "passed",
+        "model": "mlx-community/Qwen3-0.6B-4bit",
+        "bytes": 351383618,
+        "duration_seconds": 176.038,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-download-import-phase4-1009.xcresult"
+      },
+      {
+        "name": "Physical folder picker and cancel",
+        "status": "passed",
+        "duration_seconds": 10.64
+      },
+      {
+        "name": "Physical swipe to next compatible catalog page",
+        "status": "passed",
+        "duration_seconds": 14.165
+      },
+      {
+        "name": "Actual imported model file integrity",
+        "status": "passed",
+        "files": 9,
+        "bytes": 351383618,
+        "verification": "Every file size and SHA256 matches the source fixture",
+        "manifest": "/tmp/companion-physical-acceptance-20261007/local-import-source-manifest-1009.json"
+      },
+      {
+        "name": "Shared catalog, gate, compatibility, desktop and controller regression",
+        "status": "passed",
+        "tests": 24,
+        "log": "/tmp/companion-mlx-import-final-regression-1009.log"
+      },
+      {
+        "name": "Final Mac DMG package",
+        "status": "passed",
+        "log": "/tmp/companion-import-pagination-final-mac-1009.log"
+      },
+      {
+        "name": "Imported 0.6B answer quality",
+        "status": "failed",
+        "evidence": "Run 11 answered 17 + 25 = 42; run 13 gave an unrelated response. Functional import does not establish answer quality.",
+        "bundles": [
+          "/tmp/companion-physical-acceptance-20261007/ios-mlx-local-import-inference11-1009.xcresult",
+          "/tmp/companion-physical-acceptance-20261007/ios-mlx-local-import-inference13-1009.xcresult"
+        ]
+      },
+      {
+        "name": "Physical valid local folder import, selection, relaunch persistence and restore Qwen3.5",
+        "status": "passed",
+        "duration_seconds": 35.543,
+        "bundle": "/tmp/companion-physical-acceptance-20261007/ios-mlx-local-import-persistence14-1009.xcresult"
+      }
+    ],
+    "investigation": [
+      "One earlier import run exited without user action; no corresponding crash or jetsam report found. Native task priority and load synchronization adjusted; subsequent real import and inference remained running.",
+      "Picker waits and coordinates corrected against actual screen recordings."
+    ],
+    "remaining": [
+      "Android native build/device acceptance",
+      "GGUF and Mac actual model downloads",
+      "Investigate unstable 0.6B answer quality",
+      "Earlier application exit root cause remains unconfirmed"
+    ],
+    "implementation_commit": "25e2dad"
   }
 }
