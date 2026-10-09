@@ -342,9 +342,10 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                 Row {
                                     Checkbox(task.enabled, { enabled ->
                                         actions.saveProactiveTask(task.copy(enabled = enabled))
-                                    })
+                                    }, modifier = Modifier.testTag("proactive-toggle-${task.title}"))
                                     Text(task.title)
-                                    TextButton(onClick = { actions.deleteProactiveTask(task.scenario) }) { Text("删除") }
+                                    TextButton(onClick = { actions.deleteProactiveTask(task.scenario) },
+                                        modifier = Modifier.testTag("proactive-delete-${task.title}")) { Text("删除") }
                                 }
                             }
                             Spacer(Modifier.height(20.dp))

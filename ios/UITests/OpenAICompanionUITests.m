@@ -276,6 +276,66 @@
     XCTAssertTrue([notification waitForExistenceWithTimeout:180]);
 }
 
+// Physical end-to-end path: real dialogue -> model plan -> OS schedule -> notification.
+- (void)testPhysicalProactiveReminderFromDialogue {
+    XCUIApplication *app = [self acceptanceApp];
+    app.launchArguments = @[@"-localInferenceEngine", @"MLX"];
+    [app launch];
+    [self openSettingsSection:@"主动任务" app:app];
+    XCUIElement *toggle = app.buttons[@"主动推送开关"];
+    BOOL previouslyEnabled = toggle.selected;
+    if (!previouslyEnabled) [toggle tap];
+    XCUIApplication *springboard = [[XCUIApplication alloc] initWithBundleIdentifier:@"com.apple.springboard"];
+    XCUIElement *allow = [springboard.alerts.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"label IN %@", @[@"允许", @"Allow"]]].firstMatch;
+    if ([allow waitForExistenceWithTimeout:5]) [allow tap];
+    XCUIElement *scheduled = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"系统已安排 "]].firstMatch;
+    XCTAssertTrue([scheduled waitForExistenceWithTimeout:20], @"必须获得系统通知授权。");
+    [self retainScreenshot:app name:@"Physical proactive permission and initial schedule"];
+    [app.buttons[@"完成"] tap];
+    NSString *token = [@"验收提醒" stringByAppendingString:[NSUUID.UUID.UUIDString substringToIndex:8]];
+    NSDate *fireDate = [NSDate dateWithTimeIntervalSinceNow:420];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    NSString *prompt = [NSString stringWithFormat:@"请在本地时间 %@ 提醒我打开 App。创建一次性主动提醒任务，任务名称必须是%@，不提前提醒，不重复。不要委托其他设备。", [formatter stringFromDate:fireDate], token];
+    NSLog(@"Physical reminder acceptance token: %@; target: %@", token, [formatter stringFromDate:fireDate]);
+    [self sendKeyboardPrompt:prompt app:app];
+    [self openSettingsSection:@"主动任务" app:app];
+    XCUIElement *task = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", token]].firstMatch;
+    XCTAssertTrue([task waitForExistenceWithTimeout:240], @"真实对话必须生成主动任务，不能以聊天承诺替代排程。");
+    NSString *taskTitle = task.label;
+    XCUIElement *taskToggle = app.buttons[[@"proactive-toggle-" stringByAppendingString:taskTitle]];
+    for (NSInteger i = 0; i < 8 && !taskToggle.hittable; i++) [app swipeUp];
+    XCTAssertTrue(taskToggle.selected, @"任务应已启用。");
+    [taskToggle tap];
+    XCTAssertFalse(taskToggle.selected);
+    [self retainScreenshot:app name:@"Physical reminder task disabled"];
+    [taskToggle tap];
+    XCTAssertTrue(taskToggle.selected);
+    XCTAssertTrue(scheduled.exists);
+    [self retainScreenshot:app name:@"Physical reminder scheduled from real dialogue"];
+    XCTAssertGreaterThan([fireDate timeIntervalSinceNow], 10, @"排程完成前提醒时间已过去，不能判为退出后送达。");
+    [app terminate];
+    XCUIElement *notification = [springboard.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", token]].firstMatch;
+    XCTAssertTrue([notification waitForExistenceWithTimeout:480], @"App 退出后系统必须实际展示该新提醒。");
+    [self retainScreenshot:springboard name:@"Physical scheduled reminder while app terminated"];
+    [notification tap];
+    NSPredicate *foreground = [NSPredicate predicateWithFormat:@"state == %d", XCUIApplicationStateRunningForeground];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[[[XCTNSPredicateExpectation alloc] initWithPredicate:foreground object:app]] timeout:20], XCTWaiterResultCompleted);
+    [self retainScreenshot:app name:@"Physical notification click opens app"];
+    [self openSettingsSection:@"主动任务" app:app];
+    XCUIElement *delete = app.buttons[[@"proactive-delete-" stringByAppendingString:taskTitle]];
+    for (NSInteger i = 0; i < 8 && !delete.hittable; i++) [app swipeUp];
+    [delete tap];
+    XCTAssertFalse(task.exists);
+    if (!previouslyEnabled) {
+        for (NSInteger i = 0; i < 8 && !toggle.hittable; i++) [app swipeDown];
+        [toggle tap];
+        XCTAssertTrue([app.staticTexts[@"后台提醒未启用"] waitForExistenceWithTimeout:15]);
+    }
+    [app.buttons[@"完成"] tap];
+}
+
 - (void)testSingleConversationAndSettingsSurviveRelaunch {
     XCUIApplication *app = [self acceptanceApp];
     [app launch];

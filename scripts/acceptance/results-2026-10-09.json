@@ -201,5 +201,59 @@
       "Earlier application exit root cause remains unconfirmed"
     ],
     "implementation_commit": "25e2dad"
+  },
+  "ios_physical_proactive_notifications": {
+    "status": "failed",
+    "device": "iPhone 17 Pro Max, iOS 27.0.1",
+    "model_engine": "MLX",
+    "model": "Qwen3.5-4B-MLX-4bit",
+    "bundle": "/tmp/companion-physical-acceptance-20261007/ios-proactive-physical1-1009.xcresult",
+    "log": "/tmp/companion-proactive-physical1-1009.log",
+    "duration_seconds": 331.024,
+    "test_token": "验收提醒7A915BF8",
+    "requested_local_time": "2026-10-09 19:22:14",
+    "checks": [
+      {
+        "name": "Proactive feature enabled and system notification permission available",
+        "status": "passed",
+        "evidence": "Actual UI reports 系统已安排 0 个计划提醒; global feature was already enabled before test."
+      },
+      {
+        "name": "Real dialogue produces scheduled proactive task",
+        "status": "failed",
+        "evidence": "After completed model response, no task containing the unique token appeared within 240 seconds; schedule remained zero."
+      },
+      {
+        "name": "Scheduled reminder while application terminated",
+        "status": "blocked",
+        "reason": "No test reminder was created; dependent step not executed."
+      },
+      {
+        "name": "Notification click foreground routing",
+        "status": "blocked",
+        "reason": "Dependent on notification delivery."
+      },
+      {
+        "name": "Task disable/delete cancels OS schedule",
+        "status": "blocked",
+        "reason": "No test task was created; dependent step not executed."
+      },
+      {
+        "name": "Scheduled reminders and mobile controller regression",
+        "status": "passed",
+        "tests": 16,
+        "log": "/tmp/companion-proactive-regression-1009.log"
+      }
+    ],
+    "diagnostic_findings": [
+      "Native model log reports invalid proactive plan: expected value at line 1 column 1.",
+      "Native model log also reports proactive planning timed out.",
+      "Code inspection shows pending turns are processed oldest first, up to 20, and an error aborts the batch; historical failed extraction can block newer work. This is a code-level risk, not a confirmed identification of the failed turn in this run."
+    ],
+    "remaining": [
+      "Repair structured plan generation and extraction timeout behavior, then rerun the full physical sequence.",
+      "Verify cancellation, weekly repeating reminders, permission revocation and focus mode separately.",
+      "App-exit real-time model execution and APNs delivery remain unimplemented."
+    ]
   }
 }
