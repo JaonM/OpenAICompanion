@@ -526,8 +526,10 @@ class IosMobileBackend(
 
     override suspend fun importModel() {
         importLocalModel()
-        proactiveScope.launch { processPendingProactivePlans() }
-        proactiveScope.launch { discoverProactiveTasks() }
+        if (localModelEngine() != "MLX") {
+            proactiveScope.launch { processPendingProactivePlans() }
+            proactiveScope.launch { discoverProactiveTasks() }
+        }
     }
 
     override suspend fun addA2aAgent(cardUrl: String) = a2a.addAgent(cardUrl)

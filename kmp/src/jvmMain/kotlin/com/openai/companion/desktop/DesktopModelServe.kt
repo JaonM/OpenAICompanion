@@ -63,7 +63,7 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
             if (isLocalEndpoint()) setOf("Ollama") else emptySet())
         return ModelLibraryState(device, catalog.models.filter { it.ollamaName in installedModels }.map { it.id }.toSet(),
             catalog.models.firstOrNull { it.engine == "llama.cpp" && it.ollamaName == model && model in installedModels }?.id,
-            catalog.models, catalog.items, catalog.engine, catalog.hasMore, catalog.loaded)
+            catalog.models, catalog.items, catalog.engine, catalog.hasMore, catalog.loaded, catalog.pages)
     }
 
     override suspend fun installModel(id: String) = requestGate.withLock {

@@ -1,6 +1,8 @@
 package com.openai.companion.kmp
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ScrollState
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalUriHandler
@@ -13,11 +15,22 @@ import androidx.compose.ui.unit.dp
 fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String) -> Unit,
     engine: String = state.catalogEngine.ifBlank { if (state.device.platform == "macOS") "Ollama" else "llama.cpp" },
     loading: Boolean = false, error: String? = null, browse: (String, Boolean) -> Unit = { _, _ -> },
-    inspect: (String) -> Unit = {}) {
+    inspect: (String) -> Unit = {}, scrollState: ScrollState? = null) {
     val uriHandler = LocalUriHandler.current
     val focusManager = LocalFocusManager.current
     var search by remember(engine) { mutableStateOf("") }
     LaunchedEffect(engine) { browse("", false) }
+    val currentBrowse by rememberUpdatedState(browse)
+    val currentSearch by rememberUpdatedState(search)
+    val canLoadMore by rememberUpdatedState(state.catalogEngine == engine && state.hasMore && !loading && !busy && error == null)
+    LaunchedEffect(scrollState, engine) {
+        if (scrollState != null) snapshotFlow {
+            scrollState.isScrollInProgress && scrollState.maxValue > 0 &&
+                scrollState.value >= scrollState.maxValue - 48 && canLoadMore
+        }.distinctUntilChanged().collect { atEnd ->
+            if (atEnd) currentBrowse(currentSearch, true)
+        }
+    }
     Text("$engine 模型库", style = MaterialTheme.typography.titleMedium)
     val device = state.device
     Text("${device.platform} ${device.osMajor} · ${device.architecture} · 内存 ${device.memoryBytes?.let(ModelLibrary::gb) ?: "未知"} GB · 可用空间 ${device.freeBytes?.let(ModelLibrary::gb) ?: "未知"} GB",
@@ -39,8 +52,8 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(model.title)
-                Text(model.repository, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { uriHandler.openUri("https://huggingface.co/${model.repository}") }) { Text("Hugging Face 模型页") }
+                Text(if (model.revision == "local") "本地文件夹" else model.repository, style = MaterialTheme.typography.bodySmall)
+                if (model.revision != "local") TextButton(onClick = { uriHandler.openUri("https://huggingface.co/${model.repository}") }) { Text("Hugging Face 模型页") }
                 Text(if (model.resolved) "${ModelLibrary.gb(model.bytes)} GB · 建议内存 ${model.memoryGB} GB+" else "查看文件以确认大小和量化版本", style = MaterialTheme.typography.bodySmall)
                 if (model.downloads > 0) Text("下载 ${model.downloads} · 喜欢 ${model.likes} · 更新 ${model.updated.take(10)}", style = MaterialTheme.typography.bodySmall)
                 if (model.resolved) Text(compatibility.description, style = MaterialTheme.typography.bodySmall)
@@ -54,6 +67,8 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
             }
         }
     }
+    if (state.catalogEngine == engine && state.catalogLoaded) Text("已加载 ${state.catalogPages} 页 · ${available.size} 个可用候选",
+        style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("model-library-pages"))
     if (state.catalogEngine == engine && state.hasMore) OutlinedButton(enabled = !loading && !busy, onClick = { browse(search, true) }) { Text("加载更多模型") }
     if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在读取 Hugging Face 模型信息…") }
     if (!loading && state.catalogLoaded && available.isEmpty()) Text("本页没有适合当前设备的模型，可加载下一页或调整搜索词。")

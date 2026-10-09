@@ -14,6 +14,7 @@ import platform.UIKit.UIApplication
 import platform.UIKit.UIDocumentPickerDelegateProtocol
 import platform.UIKit.UIDocumentPickerViewController
 import platform.UniformTypeIdentifiers.UTTypeData
+import platform.UniformTypeIdentifiers.UTTypeFolder
 import platform.darwin.NSObject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -27,17 +28,32 @@ class IosGgufImporter {
     private var activeDelegate: PickerDelegate? = null
 
     suspend fun import(): ImportedGguf = gate.withLock {
-        val source = try {
+        val source = pick(false)
+        withContext(Dispatchers.Default) { copyIntoSandbox(source) }
+    }
+
+    suspend fun <T> importFolder(copy: suspend (String) -> T): T = gate.withLock {
+        val source = pick(true)
+        withContext(Dispatchers.Default) {
+            val accessed = source.startAccessingSecurityScopedResource()
+            try { copy(source.path ?: error("模型文件夹路径无效")) }
+            finally { if (accessed) source.stopAccessingSecurityScopedResource() }
+        }
+    }
+
+    private suspend fun pick(folder: Boolean): NSURL {
+        return try {
             withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<NSURL> { continuation ->
                     val picker = UIDocumentPickerViewController(
-                        forOpeningContentTypes = listOf(UTTypeData), asCopy = true,
+                        forOpeningContentTypes = listOf(if (folder) UTTypeFolder else UTTypeData), asCopy = !folder,
                     )
+                    if (folder) picker.directoryURL = NSURL.fileURLWithPath(NSHomeDirectory() + "/Documents")
                     val delegate = PickerDelegate(
                         onPick = { url -> if (continuation.isActive) continuation.resume(url) },
                         onCancel = {
                             if (continuation.isActive) continuation.resumeWithException(
-                                IllegalStateException("已取消导入 GGUF"),
+                                IllegalStateException("已取消模型导入"),
                             )
                         },
                     )
@@ -53,7 +69,6 @@ class IosGgufImporter {
         } finally {
             activeDelegate = null
         }
-        withContext(Dispatchers.Default) { copyIntoSandbox(source) }
     }
 
     private fun copyIntoSandbox(source: NSURL): ImportedGguf {

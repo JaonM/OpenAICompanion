@@ -60,7 +60,7 @@ class AndroidLocalLlamaModel(private val context: Context, private val importer:
         val current = modelPath()
         val installed = catalog.models.filter { it.engine == "llama.cpp" && it.file.isNotEmpty() && catalogFile(it).isFile }.map { it.id }.toSet()
         val selected = catalog.models.firstOrNull { it.id in installed && it.file.isNotEmpty() && current?.endsWith(it.file) == true }?.id
-        return ModelLibraryState(device, installed, selected, catalog.models, catalog.items, catalog.engine, catalog.hasMore, catalog.loaded)
+        return ModelLibraryState(device, installed, selected, catalog.models, catalog.items, catalog.engine, catalog.hasMore, catalog.loaded, catalog.pages)
     }
 
     override suspend fun installModel(id: String) = withContext(Dispatchers.IO) {

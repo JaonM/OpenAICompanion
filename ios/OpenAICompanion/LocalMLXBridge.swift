@@ -122,7 +122,7 @@ private final class LocalMLX: @unchecked Sendable {
     func run(_ operation: @escaping @Sendable () async throws -> Void) -> UnsafeMutablePointer<CChar>? {
         let done = DispatchSemaphore(value: 0)
         let result = ResultBox()
-        let task = Task.detached {
+        let task = Task.detached(priority: .userInitiated) {
             do { try await operation() } catch { result.error = error is GrammarError ? String(describing: error) : error.localizedDescription }
             done.signal()
         }
@@ -133,6 +133,13 @@ private final class LocalMLX: @unchecked Sendable {
     }
     func cancel() { lock.lock(); let task = active; lock.unlock(); task?.cancel() }
     func unload() { container = nil; grammarTokenizer = nil; loadedPath = nil; MLX.Memory.clearCache() }
+
+    func validateImportedModel(path: String) async throws {
+        unload()
+        defer { Stream.defaultStream.synchronize(); unload() }
+        MLX.Memory.cacheLimit = 128 * 1024 * 1024
+        _ = try await LLMModelFactory.shared.loadContainer(from: URL(fileURLWithPath: path), using: LocalTokenizerLoader())
+    }
 
     func generate(path: String, requestJSON: String, maxTokens: Int, emit: ChunkEmitter) async throws {
         if loadedPath != path {
@@ -307,6 +314,61 @@ func ocMLXDownloadManifest(_ path: UnsafePointer<CChar>?, _ repository: UnsafePo
     guard let path, let repository, let revision, let manifest else { return strdup("MLX 模型下载参数无效") }
     let directory = String(cString: path), repo = String(cString: repository), sha = String(cString: revision), files = String(cString: manifest)
     return LocalMLX.shared.run { try await downloadMLXModel(to: directory, repository: repo, revision: sha, manifest: files) }
+}
+
+// Local import never resolves remote files. Only safe model files are copied.
+@_cdecl("oc_mlx_import_directory")
+func ocMLXImportDirectory(_ sourcePath: UnsafePointer<CChar>?, _ modelsPath: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    guard let sourcePath, let modelsPath else { return strdup("MLX 导入路径无效") }
+    let source = URL(fileURLWithPath: String(cString: sourcePath), isDirectory: true)
+    let base = URL(fileURLWithPath: String(cString: modelsPath), isDirectory: true)
+    let result = ResultBox()
+    if let failure = LocalMLX.shared.run({
+        let manager = FileManager.default
+        let urls = try manager.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        let files = try urls.filter { url in
+            let name = url.lastPathComponent
+            return name.hasSuffix(".safetensors") || name.hasSuffix(".json") || ["tokenizer.model", "merges.txt", "vocab.txt", "chat_template.jinja"].contains(name)
+        }.map { url -> (URL, Int64) in
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true,
+                  url.lastPathComponent.range(of: "^[A-Za-z0-9_.-]{1,200}$", options: .regularExpression) != nil,
+                  let size = values.fileSize, size > 0 else { throw MLXFailure.message("模型文件不完整或包含不安全路径") }
+            return (url, Int64(size))
+        }
+        let names = Set(files.map { $0.0.lastPathComponent })
+        guard files.count <= 512, names.contains("config.json"), names.contains("tokenizer_config.json"),
+              names.contains("tokenizer.json") || names.contains("tokenizer.model"),
+              names.contains(where: { $0.hasSuffix(".safetensors") }) else { throw MLXFailure.message("请选择完整 MLX 模型文件夹，包含配置、tokenizer 和 safetensors 权重") }
+        let config = try JSONSerialization.jsonObject(with: Data(contentsOf: source.appendingPathComponent("config.json"))) as? [String: Any]
+        guard let family = config?["model_type"] as? String,
+              ["qwen3", "qwen3_5", "qwen3_5_text", "qwen2", "llama", "mistral", "gemma", "gemma2", "gemma3_text", "phi3"].contains(family) else { throw MLXFailure.message("当前 MLX 文本引擎不支持这个模型架构") }
+        let bytes = files.reduce(Int64(0)) { $0 + $1.1 }
+        let weightBytes = files.filter { $0.0.pathExtension == "safetensors" }.reduce(Int64(0)) { $0 + $1.1 }
+        let memoryGB = max(4, Int(ceil((Double(weightBytes) * 1.5 + 2_000_000_000) / 1_000_000_000)))
+        guard ProcessInfo.processInfo.physicalMemory >= UInt64(memoryGB) * 1_000_000_000 else { throw MLXFailure.message("此模型建议至少 \(memoryGB) GB 内存") }
+        let available = try manager.attributesOfFileSystem(forPath: NSHomeDirectory())[.systemFreeSize] as? NSNumber
+        guard let available, available.int64Value >= bytes * 2 + 1_000_000_000 else { throw MLXFailure.message("模型导入暂存空间不足") }
+        let id = UUID().uuidString
+        let staging = base.appendingPathComponent(".import-" + id)
+        let destination = base.appendingPathComponent("local/" + id)
+        try manager.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: staging) }
+        for (url, _) in files {
+            try Task.checkCancellation()
+            try manager.copyItem(at: url, to: staging.appendingPathComponent(url.lastPathComponent))
+        }
+        logMLX("local import copied: files=\(files.count), bytes=\(bytes)")
+        try await LocalMLX.shared.validateImportedModel(path: staging.path)
+        logMLX("local import validated")
+        try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try manager.moveItem(at: staging, to: destination)
+        let manifest: [[String: Any]] = files.map { ["file": $0.0.lastPathComponent, "bytes": $0.1] }
+        let descriptor: [String: Any] = ["id": "local-mlx-" + id, "title": source.lastPathComponent + "（本地导入）", "engine": "MLX", "bytes": bytes, "memoryGB": memoryGB, "repository": "local/" + id, "revision": "local", "files": manifest]
+        result.error = String(data: try JSONSerialization.data(withJSONObject: descriptor), encoding: .utf8)
+        logMLX("local import installed")
+    }) { return failure }
+    return result.error.flatMap { strdup($0) }
 }
 
 private func logMLX(_ message: @autoclosure () -> String) {

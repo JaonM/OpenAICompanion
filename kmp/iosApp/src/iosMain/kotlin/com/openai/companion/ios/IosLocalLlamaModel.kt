@@ -4,6 +4,7 @@ import com.openai.companion.kmp.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
+import com.openai.companion.ios.llama.oc_mlx_import_directory
 import com.openai.companion.ios.llama.oc_mlx_download_manifest
 import com.openai.companion.ios.llama.oc_model_download
 import com.openai.companion.kmp.ModelLibrary
@@ -88,7 +89,7 @@ class IosLocalLlamaModel : AppModelServe, ModelLibraryProvider {
         val selected = if (selectedEngine == "MLX") active?.takeIf { it in installed } ?: "qwen35-mlx".takeIf { it in installed }
             else active?.takeIf { it in installed && catalog.get(it).engine == "llama.cpp" }
                 ?: catalog.models.firstOrNull { it.id in installed && it.file.isNotEmpty() && modelPath()?.endsWith(it.file) == true }?.id
-        return ModelLibraryState(device, installed, selected, catalog.models, catalog.items, catalog.engine, catalog.hasMore, catalog.loaded)
+        return ModelLibraryState(device, installed, selected, catalog.models, catalog.items, catalog.engine, catalog.hasMore, catalog.loaded, catalog.pages)
     }
 
     override suspend fun installModel(id: String) = withContext(Dispatchers.Default) {
@@ -134,7 +135,16 @@ class IosLocalLlamaModel : AppModelServe, ModelLibraryProvider {
     }
 
     suspend fun importModel() {
-        check(selectedEngine == "llama.cpp") { "请在 MLX 模型库中下载模型" }
+        if (selectedEngine == "MLX") {
+            importer.importFolder { source -> gate.withLock {
+                val result = oc_mlx_import_directory(source, NSHomeDirectory() + "/Library/Application Support/OpenAICompanion/MLXModels")
+                    ?: error("MLX 导入未返回结果")
+                val raw = try { result.toKString() } finally { oc_llama_free_string(result) }
+                val model = runCatching { Json.decodeFromString<LibraryModel>(raw) }.getOrElse { error(raw) }
+                rememberDownload(model)
+            } }
+            return
+        }
         val imported = importer.import()
         withContext(Dispatchers.Default) {
             gate.withLock {
@@ -206,7 +216,7 @@ class IosLocalLlamaModel : AppModelServe, ModelLibraryProvider {
     }
 
     fun status(): String {
-        if (selectedEngine == "MLX") return if (mlxReady(activeMLX())) "MLX 模型可用 · ${activeMLX().repository.substringAfter('/')}" else "请在模型库下载并选择 MLX 模型"
+        if (selectedEngine == "MLX") return if (mlxReady(activeMLX())) "MLX 模型可用 · ${activeMLX().let { if (it.revision == "local") it.title else it.repository.substringAfter('/') }}" else "请在模型库下载并选择 MLX 模型"
         val path = modelPath() ?: return "请导入 GGUF 模型"
         return if (NSFileManager.defaultManager.fileExistsAtPath(path)) "端侧模型已导入 · ${path.substringAfterLast('/').removeSuffix(".gguf")}"
             else "模型文件丢失，请重新导入"

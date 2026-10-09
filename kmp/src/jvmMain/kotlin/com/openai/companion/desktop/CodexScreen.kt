@@ -407,8 +407,9 @@ private fun CodexSettings(
     LaunchedEffect(Unit) { backend.modelServe.localStatus(); library = backend.modelServe.modelLibrary() }
     DialogWindow(onCloseRequest = onClose, title = "设置", state = DialogState(width = 560.dp, height = 730.dp)) {
         MaterialTheme {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ModelLibraryPanel(library, downloading, engine = "Ollama", loading = catalogLoading, error = catalogError,
+            val modelLibraryScroll = rememberScrollState()
+            Column(Modifier.fillMaxSize().verticalScroll(modelLibraryScroll).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ModelLibraryPanel(library, downloading, engine = "Ollama", scrollState = modelLibraryScroll, loading = catalogLoading, error = catalogError,
                     browse = { search, more -> catalogAction { backend.modelServe.browseModels("Ollama", search, more) } },
                     inspect = { id -> catalogAction { backend.modelServe.inspectModel(id) } }, install = { id -> scope.launch {
                     downloading = true

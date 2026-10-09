@@ -22,6 +22,7 @@ class HuggingFaceModelCatalog(private val http: HttpClient = HttpClient { instal
     var items: List<LibraryModel> = emptyList(); private set
     var engine: String = ""; private set
     var loaded = false; private set
+    var pages = 0; private set
     private var next: String? = null
     val hasMore get() = next != null
     val models get() = known.values.toList()
@@ -79,7 +80,7 @@ class HuggingFaceModelCatalog(private val http: HttpClient = HttpClient { instal
             resolved.filter { ModelLibrary.compatibility(it, device).allowed }
         }
         items = if (more) (items + candidates).distinctBy { it.id } else candidates
-        engine = selectedEngine; loaded = true
+        engine = selectedEngine; loaded = true; pages = if (more) pages + 1 else 1
         next = Regex("<([^>]+)>; rel=\"next\"").find(response.headers["Link"].orEmpty())?.groupValues?.get(1)
     }
 

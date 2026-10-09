@@ -16,7 +16,7 @@ data class ModelCompatibility(val allowed: Boolean, val description: String)
 data class ModelArtifact(val file: String, val bytes: Long, val sha256: String = "", val blobId: String = "")
 data class ModelLibraryState(val device: ModelDevice, val installed: Set<String> = emptySet(), val selected: String? = null,
     val models: List<LibraryModel> = ModelLibrary.models, val catalog: List<LibraryModel> = emptyList(),
-    val catalogEngine: String = "", val hasMore: Boolean = false, val catalogLoaded: Boolean = false)
+    val catalogEngine: String = "", val hasMore: Boolean = false, val catalogLoaded: Boolean = false, val catalogPages: Int = 0)
 
 interface ModelLibraryProvider {
     fun modelLibrary(): ModelLibraryState

@@ -266,8 +266,10 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 when {
-                    showSettings -> { key(settingsSection) { Column(Modifier.weight(1f).background(MaterialTheme.colorScheme.surfaceVariant)
-                        .verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    showSettings -> { key(settingsSection) {
+                        val settingsScroll = rememberScrollState()
+                        Column(Modifier.weight(1f).background(MaterialTheme.colorScheme.surfaceVariant)
+                        .verticalScroll(settingsScroll).padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (settingsSection == null) {
                             Text("按功能管理你的助理", style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -293,11 +295,12 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                 }
                             }
                             Text(if (state.modelChanging) "正在准备模型…" else state.modelStatus)
-                            if (state.modelEngine != "MLX") OutlinedButton(enabled = !state.sending && !state.modelChanging,
-                                onClick = actions::importModel) { Text("导入本地 GGUF 文件") }
+                            OutlinedButton(enabled = !state.sending && !state.modelChanging,
+                                onClick = actions::importModel) { Text(if (state.modelEngine == "MLX") "导入本地 MLX 文件夹" else "导入本地 GGUF 文件") }
+                            if (state.modelEngine == "MLX") Text("进入包含配置、tokenizer 和 safetensors 权重的模型文件夹，再点“打开”。导入后点击“使用此模型”启用。", style = MaterialTheme.typography.bodySmall)
                             state.modelLibrary?.let { ModelLibraryPanel(it, state.sending || state.modelChanging, actions::installModel,
                                 engine = state.modelEngine, loading = state.modelCatalogLoading, error = state.modelCatalogError,
-                                browse = actions::browseModels, inspect = actions::inspectModel) }
+                                browse = actions::browseModels, inspect = actions::inspectModel, scrollState = settingsScroll) }
                         }
                         if (settingsSection == "工具扩展") {
                             Row(verticalAlignment = Alignment.CenterVertically) {
