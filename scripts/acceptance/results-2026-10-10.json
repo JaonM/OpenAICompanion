@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-10",
+  "scope": "Shared Markdown rendering on Mac/iOS/Android",
+  "implementation_commit": "58b0c43",
+  "checks": [
+    {
+      "name": "JVM regression including real Compose narrow Markdown rendering",
+      "status": "passed",
+      "tests": 133,
+      "passed": 130,
+      "skipped": 3,
+      "log": "/tmp/companion-markdown-tests-verified2-1010.log"
+    },
+    {
+      "name": "Visual inspection of rendered heading, emphasis, list, quote, code fence, table and link",
+      "status": "passed",
+      "screenshot": "/tmp/companion-markdown-preview-1010.png"
+    },
+    {
+      "name": "Full signed iOS build",
+      "status": "passed",
+      "log": "/tmp/companion-markdown-ios-verified-1010.log"
+    },
+    {
+      "name": "Mac DMG package",
+      "status": "passed",
+      "log": "/tmp/companion-markdown-mac-final-1010.log"
+    }
+  ],
+  "remaining": [
+    "Android native build and device acceptance; SDK/device unavailable.",
+    "Real conversation Markdown display on physical iPhone, Android and Mac window."
+  ],
+  "limits": [
+    "Remote image loading, syntax highlighting, LaTeX and Mermaid are not configured.",
+    "Tools and collapsed reasoning retain plain text."
+  ],
+  "failed_diagnostics": [
+    "Initial JVM run lacked HARNESS_LIBRARY_PATH; native bridge failures resolved by supplying the existing library.",
+    "Markdown 0.33.0 passed JVM rendering but failed native linking; 0.37.0 linked on iOS but failed JVM UI runtime. Stable 0.35.0 passes both.",
+    "An intermediate streamed-state wrapper re-created parser instances; instances are now remembered and final render test passes."
+  ]
+}
