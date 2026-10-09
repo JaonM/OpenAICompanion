@@ -109,5 +109,32 @@
       "a751bf1",
       "6dfea40"
     ]
+  },
+  "model_candidate_prefilter": {
+    "commit": "fb1d0bd",
+    "behavior": "Resolve file metadata before showing online candidates, then filter by platform, OS, engine, architecture, memory, temporary disk space and supported text model type. Installed models remain separately visible. Browsing never downloads weights.",
+    "checks": [
+      {
+        "name": "Shared model catalog/controller/compatibility and desktop regression",
+        "status": "passed",
+        "tests": 23,
+        "log": "/tmp/companion-catalog-prefilter-verified-1009.log"
+      },
+      {
+        "name": "Signed iOS build and physical installation",
+        "status": "passed",
+        "log": "/tmp/companion-catalog-prefilter-ios-1009.log"
+      },
+      {
+        "name": "Mac DMG packaging",
+        "status": "passed",
+        "log": "/tmp/companion-catalog-prefilter-mac-1009.log"
+      }
+    ],
+    "remaining": [
+      "Updated physical prefiltered list and actual download acceptance",
+      "Android SDK/native build and physical acceptance",
+      "Real Mac Ollama weight download"
+    ]
   }
 }
