@@ -110,3 +110,5 @@ iOS 的 KMP 核心代码可在 `kmp/` 下用 `./gradlew -PkmpJvmToolchain=21 :co
 ## 许可证
 
 本项目采用 [Apache License 2.0](LICENSE)。
+
+模型库选择、设备兼容性与配对步骤见 [模型库与跨设备使用](docs/model-library-and-devices.md)。

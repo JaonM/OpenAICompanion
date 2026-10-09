@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-09",
+  "scope": "device-aware model library, ordinary-question routing, simplified pairing UX",
+  "commits": [
+    "f49d3bd",
+    "fcb6396"
+  ],
+  "checks": [
+    {
+      "name": "Rust unit regressions",
+      "status": "passed",
+      "tests": 68,
+      "log": "/tmp/companion-routing-last-1009.log"
+    },
+    {
+      "name": "Shared compatibility/mobile/cross-device and desktop pull regressions",
+      "status": "passed",
+      "tests": 25,
+      "log": "/tmp/companion-library-jvm-last-1009.log",
+      "note": "Desktop download test uses a simulated Ollama streaming endpoint, not real model weight transfer."
+    },
+    {
+      "name": "Foundation prompt and stream parsing",
+      "status": "passed",
+      "command": "scripts/test-ios-prompt.sh"
+    },
+    {
+      "name": "iPhone model library hardware display and persimmon/crab question stays local",
+      "status": "passed",
+      "duration_seconds": 72.508,
+      "test": "testModelLibraryAndHealthQuestionStayLocal",
+      "note": "MLX response shown, no delegation approval, no increase in remote task count."
+    },
+    {
+      "name": "iPhone MLX explicitly delegates to Mac and shows result inline",
+      "status": "passed",
+      "duration_seconds": 154.634,
+      "test": "testMlxCrossDeviceDelegatesToMacAndShowsResult",
+      "note": "Actual Mac execution returns 42 in current iOS conversation."
+    },
+    {
+      "name": "Mac DMG build",
+      "status": "passed",
+      "artifact": "kmp/build/compose/binaries/main/dmg/OpenAICompanion-1.0.0.dmg",
+      "log": "/tmp/companion-library-mac-final-1009.log"
+    }
+  ],
+  "physical_result_bundle": "/tmp/companion-physical-acceptance-20261007/ios-library-routing-verified-1009.xcresult",
+  "remaining_acceptance": [
+    "Android SDK build and physical model download/inference (SDK/device previously unavailable).",
+    "Full in-app network download of new GGUF/MLX weights, interruptions, backgrounding and low-disk behavior on physical devices.",
+    "Mac model-library UI and full real Ollama pull through the new button.",
+    "Memory thresholds on additional low-memory devices and sustained/long-context performance."
+  ],
+  "policy": "Ordinary questions stay local. Cross-device tools require current explicit remote execution intent; model-generated capabilities alone do not grant permission.",
+  "failed_attempts": [
+    "First physical attempt sent before model engine selection settled; no model request occurred.",
+    "Second attempt exposed unnecessary current-engine lock wait and a transient reply/think-bubble state race; both corrected before passed run."
+  ]
+}
