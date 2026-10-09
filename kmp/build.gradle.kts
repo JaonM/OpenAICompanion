@@ -1,3 +1,5 @@
+@file:OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
@@ -58,6 +60,7 @@ kotlin {
             implementation(compose.foundation)
             implementation(compose.material3)
             implementation(compose.ui)
+            implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.35.0")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
@@ -72,6 +75,7 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation("io.ktor:ktor-client-mock:3.2.3")
+            implementation(compose.uiTest)
         }
         iosMain.dependencies {
             implementation("io.ktor:ktor-client-darwin:3.2.3")

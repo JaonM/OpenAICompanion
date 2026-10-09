@@ -740,7 +740,7 @@ private fun A2aTaskCard(task: A2aTask, agentName: String, actions: MobileActions
             task.result?.let { result ->
                 Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.primaryContainer) {
-                    Text("远端结果：$result", modifier = Modifier.padding(12.dp).semantics {
+                    MessageMarkdown("远端结果：\n\n$result", modifier = Modifier.padding(12.dp).semantics {
                         contentDescription = "任务 ${task.id} 远端结果：$result"
                     })
                 }
@@ -852,7 +852,7 @@ private fun MobileMessageRow(message: MobileMessage, modifier: Modifier = Modifi
                 if (!user) Text(if (message.role == "tool") "工具" else "Companion",
                     style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(bottom = 6.dp))
-                Text(message.content, style = MaterialTheme.typography.bodyMedium,
+                MessageMarkdown(message.content,
                     modifier = modifier.semantics { contentDescription = "${message.role}：${message.content}" })
             }
         }

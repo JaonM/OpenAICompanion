@@ -1,5 +1,7 @@
 package com.openai.companion.desktop
 
+import com.openai.companion.kmp.MessageMarkdown
+
 import com.openai.companion.kmp.ModelLibraryPanel
 import com.openai.companion.kmp.DeviceExecutionPanel
 
@@ -282,8 +284,7 @@ internal fun CodexScreen(backend: DesktopBackend) {
                             if (showReasoning) Text(reasoning, color = secondaryText,
                                 style = MaterialTheme.typography.bodySmall)
                         }
-                        if (streamedText.isNotEmpty()) Text(streamedText,
-                            style = MaterialTheme.typography.bodyMedium,
+                        if (streamedText.isNotEmpty()) MessageMarkdown(streamedText,
                             modifier = Modifier.padding(top = 8.dp))
                     }
                 }
@@ -369,7 +370,8 @@ private fun CodexMessage(message: DesktopMessage) {
                 if (!user) Text(if (message.role == "tool") "工具" else "Companion",
                     style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(bottom = 5.dp))
-                Text(message.content, style = MaterialTheme.typography.bodyMedium)
+                if (message.role == "tool") Text(message.content, style = MaterialTheme.typography.bodyMedium)
+                else MessageMarkdown(message.content)
             }
         }
     }
