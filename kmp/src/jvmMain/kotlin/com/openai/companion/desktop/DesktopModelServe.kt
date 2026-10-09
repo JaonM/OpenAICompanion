@@ -1,5 +1,8 @@
 package com.openai.companion.desktop
 
+import com.openai.companion.kmp.*
+import java.io.File
+import java.lang.management.ManagementFactory
 import com.openai.companion.kmp.AppModelServe
 import com.openai.companion.kmp.ModelStreamCallback
 import com.openai.companion.kmp.CompanionModelDefaults
@@ -26,7 +29,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** The model adapter stays in the host app; Harness owns the agent loop. */
-class DesktopModelServe : AppModelServe {
+class DesktopModelServe : AppModelServe, ModelLibraryProvider {
+    @Volatile private var installedModels: Set<String> = emptySet()
     private val requestGate = Mutex()
     private val defaults = CompanionModelDefaults()
     private val preferences = Preferences.userNodeForPackage(DesktopModelServe::class.java)
@@ -41,6 +45,46 @@ class DesktopModelServe : AppModelServe {
     @Volatile var apiKey: String = ""
     @Volatile var lastError: String? = null
     @Volatile private var cancelled = false
+
+    override fun modelLibrary(): ModelLibraryState {
+        val memory = (ManagementFactory.getOperatingSystemMXBean() as? com.sun.management.OperatingSystemMXBean)?.totalMemorySize
+        val device = ModelDevice(if (System.getProperty("os.name").contains("Mac")) "macOS" else System.getProperty("os.name"),
+            System.getProperty("os.version").substringBefore('.').toIntOrNull() ?: 0,
+            System.getProperty("os.arch"), memory, File(System.getProperty("user.home")).usableSpace,
+            if (isLocalEndpoint()) setOf("Ollama") else emptySet())
+        return ModelLibraryState(device, ModelLibrary.models.filter { it.ollamaName in installedModels }.map { it.id }.toSet(),
+            ModelLibrary.models.firstOrNull { it.engine == "llama.cpp" && it.ollamaName == model && model in installedModels }?.id)
+    }
+
+    override suspend fun installModel(id: String) = requestGate.withLock {
+        withContext(Dispatchers.IO) {
+            val entry = ModelLibrary.get(id)
+            val state = modelLibrary()
+            val compatible = ModelLibrary.compatibility(entry, state.device, id in state.installed)
+            check(compatible.allowed) { compatible.description }
+            check(isLocalEndpoint()) { "模型库仅支持本机 Ollama，请先连接 localhost" }
+            if (id !in state.installed) {
+                val uri = URI.create(endpoint)
+                val pull = URI(uri.scheme, null, uri.host, uri.port, "/api/pull", null, null)
+                val body = buildJsonObject { put("model", JsonPrimitive(entry.ollamaName)); put("stream", JsonPrimitive(true)) }.toString()
+                val request = HttpRequest.newBuilder(pull).timeout(Duration.ofHours(2)).header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body)).build()
+                val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+                response.body().bufferedReader().use { reader ->
+                    check(response.statusCode() == 200) { "Ollama 下载失败 HTTP ${response.statusCode()}" }
+                    var success = false
+                    reader.forEachLine { line ->
+                        val item = Json.parseToJsonElement(line).jsonObject
+                        item["error"]?.jsonPrimitive?.content?.let(::error)
+                        if (item["status"]?.jsonPrimitive?.content == "success") success = true
+                    }
+                    check(success) { "模型下载未完成" }
+                }
+                installedModels = installedModels + entry.ollamaName
+            }
+            save(endpoint, entry.ollamaName, apiKey)
+        }
+    }
 
     fun isLocalEndpoint(): Boolean = runCatching { URI.create(endpoint).host }
         .getOrNull() in setOf("localhost", "127.0.0.1", "::1")
@@ -68,6 +112,8 @@ class DesktopModelServe : AppModelServe {
             val request = HttpRequest.newBuilder(base).timeout(Duration.ofSeconds(3)).GET().build()
             val response = client.send(request, HttpResponse.BodyHandlers.ofString())
             if (response.statusCode() !in 200..299) return@withContext "本地服务不可用"
+            installedModels = Json.parseToJsonElement(response.body()).jsonObject["models"]
+                ?.jsonArray?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.content }?.toSet().orEmpty()
             val installed = Json.parseToJsonElement(response.body()).jsonObject["models"]
                 ?.jsonArray?.any { item ->
                     val entry = item.jsonObject

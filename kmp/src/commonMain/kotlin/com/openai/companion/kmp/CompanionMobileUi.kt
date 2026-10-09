@@ -103,6 +103,7 @@ data class MobileUiState(
     val modelEngine: String = "llama.cpp",
     val modelImportLabel: String = "导入 GGUF",
     val modelChanging: Boolean = false,
+    val modelLibrary: ModelLibraryState? = null,
     val mealReminderEnabled: Boolean = false,
     val commuteReminderEnabled: Boolean = false,
     val mealTime: String = "19:00",
@@ -142,6 +143,7 @@ interface MobileActions {
     fun answerApproval(id: Long, allow: Boolean)
     fun answerInput(id: Long, contentJson: String?)
     fun selectModelEngine(engine: String) = Unit
+    fun installModel(id: String) = Unit
     fun importModel()
     fun saveProactiveSettings(mealEnabled: Boolean, mealTime: String,
         commuteEnabled: Boolean, commuteTime: String)
@@ -188,6 +190,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var deviceNameDraft by remember(state.deviceName) { mutableStateOf(state.deviceName) }
     var deviceAcceptsDraft by remember(state.deviceAcceptsTasks) { mutableStateOf(state.deviceAcceptsTasks) }
     var deviceTokenDraft by remember { mutableStateOf("") }
+    var advancedDevices by remember { mutableStateOf(false) }
     var pairingCode by remember { mutableStateOf("") }
     var a2aCardDraft by remember { mutableStateOf("") }
     var memorySyncEndpointDraft by remember(state.memorySyncEndpoint) { mutableStateOf(state.memorySyncEndpoint) }
@@ -267,7 +270,6 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             MobileSettingsEntry("端侧模型", state.modelStatus) { settingsSection = "端侧模型" }
                             MobileSettingsEntry("主动任务", state.backgroundReminderStatus) { settingsSection = "主动任务" }
                             MobileSettingsEntry("跨设备执行", state.deviceStatus) { settingsSection = "跨设备执行" }
-                            MobileSettingsEntry("远端 Agent（A2A）", "${state.a2aAgents.count { it.enabled }} 个已启用") { settingsSection = "远端 Agent（A2A）" }
                             MobileSettingsEntry("记忆点跨端同步", state.memorySyncStatus) { settingsSection = "记忆点跨端同步" }
                             MobileSettingsEntry("远程 MCP", state.mcpStatus) { settingsSection = "远程 MCP" }
                             MobileSettingsEntry("工具扩展", if (state.deviceToolsEnabled) "已开启" else "默认关闭 · 可选扩展") { settingsSection = "工具扩展" }
@@ -289,6 +291,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             Text(if (state.modelChanging) "正在准备模型…" else state.modelStatus)
                             OutlinedButton(enabled = !state.sending && !state.modelChanging,
                                 onClick = actions::importModel) { Text(state.modelImportLabel) }
+                            state.modelLibrary?.let { ModelLibraryPanel(it, state.sending || state.modelChanging, actions::installModel) }
                         }
                         if (settingsSection == "工具扩展") {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -394,10 +397,17 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             Spacer(Modifier.height(20.dp))
                         }
                         if (settingsSection == "跨设备执行") {
-                            MobileSectionTitle("跨设备执行")
+                            MobileSectionTitle("我的设备 · 跨设备执行")
+                            Text("普通问答默认在本机完成。需要其他设备时，在对话中说“委托给 Mac：整理这份资料”，确认后发送；结果会回到当前对话。")
+                            Text("首次连接：从已连接的 Mac 获取服务地址和配对码，填入下方即可。所有设备使用同一个 HTTPS 设备服务；配对后自动发现，无需再配置 A2A。", style = MaterialTheme.typography.bodySmall)
                             OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "设备服务地址" })
                             OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "本设备名称" })
+                            TextButton(onClick = { advancedDevices = !advancedDevices }) { Text(if (advancedDevices) "收起高级设置" else "高级设置（令牌与第三方智能体）") }
+                            if (advancedDevices) {
                             OutlinedTextField(deviceTokenDraft, { deviceTokenDraft = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                                Text("管理员首次接入可填写令牌；已有设备通常使用配对码。令牌不需要重复填写。", style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = { settingsSection = "远端 Agent（A2A）" }) { Text("远端 Agent（A2A）") }
+                            }
                             OutlinedTextField(pairingCode, { pairingCode = it }, label = { Text("一次性配对码（10 分钟有效）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "一次性配对码" })
                             OutlinedButton(enabled = pairingCode.isNotBlank(), onClick = {
                                 actions.pairDevice(deviceEndpointDraft, pairingCode, deviceNameDraft, deviceAcceptsDraft)
@@ -408,6 +418,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                 Text("允许本设备在前台接收任务")
                             }
                             Text(state.deviceStatus)
+                            if (state.a2aAgents.any { it.enabled }) Text("可委托设备 / 智能体：" + state.a2aAgents.filter { it.enabled }.joinToString { it.name })
                             Text("任务使用独立上下文；工具权限仍需本机确认。清空地址可停用。")
                             Button(onClick = {
                                 actions.configureDevices(deviceEndpointDraft, deviceTokenDraft, deviceNameDraft, deviceAcceptsDraft)
@@ -415,7 +426,8 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             }) { Text("保存设备连接") }
                         }
                         if (settingsSection == "远端 Agent（A2A）") {
-                            MobileSectionTitle("远端 Agent（A2A）")
+                            MobileSectionTitle("第三方智能体（A2A）")
+                            Text("仅连接独立的第三方 Agent 时需要。自己的手机和 Mac 配对后会自动发现，不用在这里重复添加。Agent Card 地址由该服务提供方提供。")
                             OutlinedTextField(
                                 value = a2aCardDraft,
                                 onValueChange = { a2aCardDraft = it },

@@ -114,6 +114,8 @@ class AndroidMobileBackend(
     override val mcpEndpoint: String get() = mcp.endpoint
     override val mcpStatus: String get() = mcp.status
     override val mcpStatusUpdates: StateFlow<String> get() = mcp.statusUpdates
+    override val modelLibrary get() = model.modelLibrary()
+    override suspend fun installModel(id: String) = model.installModel(id)
     override val modelStatus: String get() = model.status()
     override val a2aAgents: StateFlow<List<A2aAgent>> get() = a2a.agents
     override val a2aTasks: StateFlow<List<A2aTask>> get() = a2a.tasks

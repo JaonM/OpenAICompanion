@@ -1,5 +1,6 @@
 package com.openai.companion.desktop
 
+import com.openai.companion.kmp.ModelLibraryPanel
 import com.openai.companion.kmp.DeviceExecutionPanel
 
 import androidx.compose.foundation.background
@@ -390,9 +391,21 @@ private fun CodexSettings(
     var showDevices by remember { mutableStateOf(false) }
     var deviceToolsEnabled by remember { mutableStateOf(backend.deviceToolsEnabled) }
     var connecting by remember { mutableStateOf(false) }
+    var library by remember { mutableStateOf(backend.modelServe.modelLibrary()) }
+    var downloading by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { backend.modelServe.localStatus(); library = backend.modelServe.modelLibrary() }
     DialogWindow(onCloseRequest = onClose, title = "设置", state = DialogState(width = 560.dp, height = 730.dp)) {
         MaterialTheme {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ModelLibraryPanel(library, downloading) { id -> scope.launch {
+                    downloading = true
+                    try {
+                        backend.modelServe.installModel(id)
+                        model = backend.modelServe.model
+                        onSaved()
+                    } catch (cause: Exception) { onError(cause.message) }
+                    finally { library = backend.modelServe.modelLibrary(); downloading = false }
+                } }
                 Text("模型与连接", style = MaterialTheme.typography.titleLarge)
                 Text("默认连接本机 Ollama，使用 Unsloth Qwen3.8-27B UD-Q4_K_M。", color = secondaryText,
                     style = MaterialTheme.typography.bodySmall)
@@ -426,7 +439,7 @@ private fun CodexSettings(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onClose) { Text("取消") }
                     Spacer(Modifier.width(8.dp))
-                    Button(enabled = !connecting && endpoint.isNotBlank() && model.isNotBlank(), onClick = {
+                    Button(enabled = !connecting && !downloading && endpoint.isNotBlank() && model.isNotBlank(), onClick = {
                         scope.launch {
                             connecting = true
                             try {

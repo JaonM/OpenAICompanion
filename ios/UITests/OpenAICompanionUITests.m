@@ -20,6 +20,14 @@
 }
 
 - (void)openSettingsSection:(NSString *)section app:(XCUIApplication *)app {
+    if ([section isEqualToString:@"远端 Agent（A2A）"]) {
+        [self openSettingsSection:@"跨设备执行" app:app];
+        XCUIElement *advanced = app.buttons[@"高级设置（令牌与第三方智能体）"];
+        for (NSInteger i = 0; i < 6 && !advanced.hittable; i++) [app swipeUp];
+        [advanced tap];
+        [app.buttons[@"远端 Agent（A2A）"] tap];
+        return;
+    }
     [app.buttons[@"设置"] tap];
     XCUIElement *entry = [[app descendantsMatchingType:XCUIElementTypeAny]
         matchingIdentifier:[@"settings-" stringByAppendingString:section]].firstMatch;
@@ -183,6 +191,9 @@
     if (engine) {
         [self openSettingsSection:@"端侧模型" app:app];
         [app.buttons[engine] tap];
+        XCTNSPredicateExpectation *ready = [[XCTNSPredicateExpectation alloc]
+            initWithPredicate:[NSPredicate predicateWithFormat:@"enabled == YES"] object:app.buttons[engine]];
+        XCTAssertEqual([XCTWaiter waitForExpectations:@[ready] timeout:180], XCTWaiterResultCompleted);
         [app.buttons[@"完成"] tap];
     }
     [self openSettingsSection:@"远端 Agent（A2A）" app:app];
@@ -349,7 +360,10 @@
     XCTAssertTrue(reply.exists, @"新模型没有返回正文：%@", modelError.exists ? modelError.label : @"等待超时");
     XCTAssertTrue([reply.label hasPrefix:@"assistant："] && reply.label.length > [@"assistant：" length]);
     XCTAssertFalse([reply.label containsString:@"</think>"]);
-    XCTAssertFalse(thinking.exists, @"回复完成后应移除思考气泡。");
+    XCTNSPredicateExpectation *settled = [[XCTNSPredicateExpectation alloc]
+        initWithPredicate:[NSPredicate predicateWithFormat:@"exists == NO"] object:thinking];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[settled] timeout:10], XCTWaiterResultCompleted,
+        @"回复完成后应移除思考气泡。");
     XCTAssertFalse([reply.label hasPrefix:@"assistant：{\"text\":"]);
     XCTNSPredicateExpectation *visibleReply = [[XCTNSPredicateExpectation alloc]
         initWithPredicate:[NSPredicate predicateWithFormat:@"hittable == YES"] object:reply];
@@ -433,6 +447,30 @@
     XCTAssertEqualObjects(reply.label, @"assistant：42");
     [app.buttons[@"任务"] tap];
     XCTAssertEqual([self latestRemoteTaskNumber:app], priorTask, @"普通问答不能创建远端任务。");
+    [app.buttons[@"对话"] tap];
+}
+
+- (void)testModelLibraryAndHealthQuestionStayLocal {
+    XCUIApplication *app = [self acceptanceApp];
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    [app.buttons[@"MLX"] tap];
+    XCUIElement *available = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"MLX 模型可用"]].firstMatch;
+    XCTAssertTrue([available waitForExistenceWithTimeout:180], @"必须等待引擎切换完成再输入问答。");
+    XCTAssertTrue([app.staticTexts[@"模型库"] waitForExistenceWithTimeout:10]);
+    XCUIElement *small = app.staticTexts[@"Qwen3 0.6B · GGUF Q8（轻量）"];
+    for (NSInteger i = 0; i < 8 && !small.hittable; i++) [app swipeUp];
+    XCTAssertTrue(small.hittable);
+    [self retainScreenshot:app name:@"Device model library compatibility"];
+    [app.buttons[@"完成"] tap];
+    [app.buttons[@"任务"] tap];
+    NSUInteger priorTask = [self latestRemoteTaskNumber:app];
+    [app.buttons[@"对话"] tap];
+    XCUIElement *reply = [self sendKeyboardPrompt:@"柿子能和螃蟹一起吃吗" app:app];
+    XCTAssertFalse([reply.label containsString:@"已委托"]);
+    XCTAssertFalse([reply.label containsString:@"已提交"]);
+    [app.buttons[@"任务"] tap];
+    XCTAssertEqual([self latestRemoteTaskNumber:app], priorTask);
     [app.buttons[@"对话"] tap];
 }
 

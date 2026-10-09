@@ -1,5 +1,14 @@
 package com.openai.companion.ios
 
+import com.openai.companion.ios.llama.oc_model_download
+import com.openai.companion.kmp.ModelLibrary
+import com.openai.companion.kmp.ModelLibraryProvider
+import com.openai.companion.kmp.ModelLibraryState
+import com.openai.companion.kmp.ModelDevice
+import platform.Foundation.NSProcessInfo
+import platform.Foundation.NSNumber
+import platform.Foundation.NSFileSystemFreeSize
+import platform.UIKit.UIDevice
 import com.openai.companion.ios.llama.oc_mlx_generate
 import com.openai.companion.ios.llama.oc_mlx_download
 import com.openai.companion.ios.llama.oc_mlx_cancel
@@ -33,7 +42,7 @@ import platform.Foundation.NSUserDefaults
 
 /** Kotlin/Native model callback; both native engines share the serialized model gate. */
 @OptIn(ExperimentalForeignApi::class)
-class IosLocalLlamaModel : AppModelServe {
+class IosLocalLlamaModel : AppModelServe, ModelLibraryProvider {
     private var engine = oc_llama_create() ?: error("无法创建 llama.cpp 引擎")
     private val gate = Mutex()
     private val defaults = NSUserDefaults.standardUserDefaults
@@ -42,8 +51,53 @@ class IosLocalLlamaModel : AppModelServe {
     val selectedEngine: String get() = defaults.stringForKey("localInferenceEngine")?.takeIf { it == "MLX" } ?: "llama.cpp"
     val importLabel: String get() = if (selectedEngine == "MLX") "下载 Qwen3.5 MLX 4bit（约 3.06 GB）" else "导入 GGUF"
 
+    override fun modelLibrary(): ModelLibraryState {
+        val files = NSFileManager.defaultManager
+        val free = (files.attributesOfFileSystemForPath(NSHomeDirectory(), error = null)?.get(NSFileSystemFreeSize) as? NSNumber)?.longLongValue
+        val device = ModelDevice("iOS", UIDevice.currentDevice.systemVersion.substringBefore('.').toIntOrNull() ?: 0,
+            if (NSBundle.mainBundle.bundlePath.contains("CoreSimulator")) "simulator" else "arm64",
+            NSProcessInfo.processInfo.physicalMemory.toLong(), free, setOf("llama.cpp", "MLX"))
+        val current = modelPath()
+        val installed = ModelLibrary.models.filter { model ->
+            if (model.engine == "MLX") mlxReady()
+            else files.fileExistsAtPath(modelDirectory() + model.file) ||
+                (current?.endsWith(model.file) == true && files.fileExistsAtPath(current))
+        }.map { it.id }.toSet()
+        val selected = if (selectedEngine == "MLX" && mlxReady()) "qwen35-mlx"
+            else if (selectedEngine == "llama.cpp") ModelLibrary.models.firstOrNull { it.id in installed && it.file.isNotEmpty() && current?.endsWith(it.file) == true }?.id else null
+        return ModelLibraryState(device, installed, selected)
+    }
+
+    override suspend fun installModel(id: String) = withContext(Dispatchers.Default) {
+        gate.withLock {
+            val model = ModelLibrary.get(id)
+            val state = modelLibrary()
+            val compatible = ModelLibrary.compatibility(model, state.device, id in state.installed)
+            check(compatible.allowed) { compatible.description }
+            // Download before switching engines, preserving the current model on failure.
+            if (id !in state.installed) {
+                if (model.engine == "MLX") checkNative(oc_mlx_download(mlxDirectory()))
+                else checkNative(oc_model_download(model.url, modelDirectory() + model.file, model.sha256, model.bytes))
+            }
+            if (model.engine == "llama.cpp") {
+                val current = modelPath()
+                val path = if (current?.endsWith(model.file) == true && NSFileManager.defaultManager.fileExistsAtPath(current)) current
+                    else modelDirectory() + model.file
+                oc_mlx_unload()
+                checkNative(oc_llama_load(engine, path))
+                defaults.setObject(path.substringAfterLast('/'), forKey = MODEL_FILE_KEY)
+                defaults.setObject(model.title, forKey = MODEL_DISPLAY_KEY)
+            } else {
+                oc_llama_destroy(engine)
+                engine = oc_llama_create() ?: error("无法创建 llama.cpp 引擎")
+            }
+            defaults.setObject(model.engine, forKey = "localInferenceEngine")
+        }
+    }
+
     suspend fun selectEngine(name: String) = withContext(Dispatchers.Default) {
         require(name in listOf("llama.cpp", "MLX")) { "未知推理引擎" }
+        if (name == selectedEngine) return@withContext
         gate.withLock {
             if (name != selectedEngine) {
                 oc_llama_destroy(engine)

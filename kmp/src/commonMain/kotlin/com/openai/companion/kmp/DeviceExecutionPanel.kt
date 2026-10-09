@@ -21,7 +21,8 @@ fun DeviceExecutionPanel(service: CrossDeviceService, client: A2aClient) {
     var name by remember { mutableStateOf(service.deviceName) }
     var token by remember { mutableStateOf("") }
     var pairingCode by remember { mutableStateOf("") }
-    var inviteDeviceId by remember { mutableStateOf("") }
+    var inviteDeviceId by remember { mutableStateOf("device-" + kotlin.random.Random.nextLong().toULong().toString(16)) }
+    var advanced by remember { mutableStateOf(false) }
     var issuedCode by remember { mutableStateOf("") }
     var credentials by remember { mutableStateOf<kotlinx.serialization.json.JsonArray?>(null) }
     var accepts by remember { mutableStateOf(service.acceptsTasks) }
@@ -37,10 +38,16 @@ fun DeviceExecutionPanel(service: CrossDeviceService, client: A2aClient) {
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("跨设备执行", style = MaterialTheme.typography.titleLarge)
+        Text("我的设备 · 跨设备执行", style = MaterialTheme.typography.titleLarge)
+        Text("普通问答在本机完成。需要远端时，在对话中说“委托给设备名称：任务内容”，确认后发送，结果回到对话。")
+        Text("1. 首台设备由管理员填写 HTTPS 服务地址和令牌。\n2. 在已连接的 Mac 上生成配对码。\n3. 手机填写相同服务地址、设备名称和配对码。设备会自动发现，无需重复添加 A2A。", style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(endpoint, { endpoint = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(name, { name = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(token, { token = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "收起高级设置" else "高级设置（首台设备接入与权限）") }
+        if (advanced) {
+            OutlinedTextField(token, { token = it }, label = { Text("设备令牌（留空复用）") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+            Text("设备令牌由服务管理员提供；其他设备使用配对码即可。", style = MaterialTheme.typography.bodySmall)
+        }
         OutlinedTextField(pairingCode, { pairingCode = it }, label = { Text("一次性配对码") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         OutlinedButton(enabled = !busy && pairingCode.isNotBlank(), onClick = { action {
             service.pair(endpoint, pairingCode, name, accepts); pairingCode = ""
@@ -53,12 +60,14 @@ fun DeviceExecutionPanel(service: CrossDeviceService, client: A2aClient) {
         Button(enabled = !busy, onClick = { action { service.configure(endpoint, token, name, accepts); token = "" } }) { Text("保存设备连接") }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         HorizontalDivider()
-        OutlinedTextField(inviteDeviceId, { inviteDeviceId = it }, label = { Text("新设备 ID（字母、数字、下划线或短横线）") })
+        Text("添加另一台设备", style = MaterialTheme.typography.titleMedium)
+        if (advanced) OutlinedTextField(inviteDeviceId, { inviteDeviceId = it }, label = { Text("新设备 ID（字母、数字、下划线或短横线）") })
         OutlinedButton(enabled = !busy && inviteDeviceId.isNotBlank(), onClick = { action {
             issuedCode = service.createPairingCode(inviteDeviceId)
+            inviteDeviceId = "device-" + kotlin.random.Random.nextLong().toULong().toString(16)
         } }) { Text("生成 10 分钟配对码") }
-        if (issuedCode.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer { Text(issuedCode) }
-        TextButton(enabled = !busy, onClick = { action { credentials = service.credentials() } }) { Text("查看设备访问权限") }
+        if (issuedCode.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer { Text("服务地址：${service.endpoint}\n配对码：$issuedCode\n10 分钟内在另一台设备输入；请勿公开分享。") }
+        if (advanced) TextButton(enabled = !busy, onClick = { action { credentials = service.credentials() } }) { Text("查看设备访问权限") }
         credentials?.forEach { entry ->
             val record = entry as kotlinx.serialization.json.JsonObject
             val id = record["id"] as kotlinx.serialization.json.JsonPrimitive

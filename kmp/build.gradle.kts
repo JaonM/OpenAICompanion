@@ -98,7 +98,7 @@ compose.desktop {
                     <string>经你确认后查询和新建日程，帮助安排日程。</string>
                 """.trimIndent() }
             }
-            modules("java.net.http")
+            modules("java.net.http", "java.management", "jdk.management")
             appResourcesRootDir.set(project.layout.projectDirectory.dir("appResources"))
         }
     }

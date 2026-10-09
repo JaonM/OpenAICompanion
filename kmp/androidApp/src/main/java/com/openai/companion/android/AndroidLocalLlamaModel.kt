@@ -1,5 +1,8 @@
 package com.openai.companion.android
 
+import com.openai.companion.kmp.*
+import android.app.ActivityManager
+import android.os.Build
 import android.content.Context
 import com.openai.companion.kmp.LocalModelContext
 import com.openai.companion.kmp.AppModelServe
@@ -34,8 +37,35 @@ internal object AndroidLlamaNative {
 }
 
 /** Device-local GGUF model; only the HTTP/MCP tools may use a network connection. */
-class AndroidLocalLlamaModel(private val context: Context, private val importer: AndroidGgufImporter) : AppModelServe {
+class AndroidLocalLlamaModel(private val context: Context, private val importer: AndroidGgufImporter) : AppModelServe, ModelLibraryProvider {
     private val preferences = context.getSharedPreferences("companion_model", Context.MODE_PRIVATE)
+
+    override fun modelLibrary(): ModelLibraryState {
+        val memory = ActivityManager.MemoryInfo()
+        (context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(memory)
+        val device = ModelDevice("Android", Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+            memory.totalMem, context.filesDir.usableSpace, setOf("llama.cpp"))
+        val current = modelPath()
+        val installed = ModelLibrary.models.filter { it.engine == "llama.cpp" &&
+            (File(modelDirectory(), it.file).isFile || (current?.endsWith(it.file) == true && File(current).isFile)) }.map { it.id }.toSet()
+        val selected = ModelLibrary.models.firstOrNull { it.file.isNotEmpty() && current?.endsWith(it.file) == true }?.id
+        return ModelLibraryState(device, installed, selected)
+    }
+
+    override suspend fun installModel(id: String) = withContext(Dispatchers.IO) {
+        gate.withLock {
+            val model = ModelLibrary.get(id)
+            val state = modelLibrary()
+            val compatible = ModelLibrary.compatibility(model, state.device, id in state.installed)
+            check(compatible.allowed) { compatible.description }
+            val current = modelPath()
+            val destination = if (current?.endsWith(model.file) == true && File(current).isFile) File(current)
+                else File(modelDirectory(), model.file)
+            if (id !in state.installed) downloadVerifiedModel(model, destination)
+            AndroidLlamaNative.load(handle, destination.absolutePath)?.let(::error)
+            check(preferences.edit().putString(MODEL_KEY, destination.name).commit())
+        }
+    }
 
     suspend fun importModel() {
         val imported = importer.import()

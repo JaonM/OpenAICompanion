@@ -291,3 +291,26 @@ func ocMLXDownload(_ path: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>
 private func logMLX(_ message: @autoclosure () -> String) {
     if ProcessInfo.processInfo.environment["COMPANION_ACCEPTANCE_MODEL_DIAGNOSTICS"] == "1" { NSLog("MLX: %@", message()) }
 }
+
+// GGUF downloads use a temporary file and verify the pinned artifact before installation.
+@_cdecl("oc_model_download")
+func ocModelDownload(_ rawURL: UnsafePointer<CChar>?, _ rawPath: UnsafePointer<CChar>?, _ rawHash: UnsafePointer<CChar>?, _ bytes: Int64) -> UnsafeMutablePointer<CChar>? {
+    guard let rawURL, let rawPath, let rawHash,
+          let url = URL(string: String(cString: rawURL)), url.scheme == "https", url.host == "huggingface.co" else { return strdup("模型下载参数无效") }
+    let destination = URL(fileURLWithPath: String(cString: rawPath)), expectedHash = String(cString: rawHash)
+    return LocalMLX.shared.run {
+        let manager = FileManager.default
+        let (temporary, response) = try await URLSession.shared.download(from: url)
+        defer { try? manager.removeItem(at: temporary) }
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              (try manager.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == bytes else { throw MLXFailure.message("模型下载失败或文件大小不匹配") }
+        let handle = try FileHandle(forReadingFrom: temporary)
+        defer { try? handle.close() }
+        var hash = SHA256()
+        while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
+        guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == expectedHash else { throw MLXFailure.message("模型 SHA256 校验失败") }
+        try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if manager.fileExists(atPath: destination.path) { _ = try manager.replaceItemAt(destination, withItemAt: temporary) }
+        else { try manager.moveItem(at: temporary, to: destination) }
+    }
+}

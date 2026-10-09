@@ -72,6 +72,8 @@ interface MobileBackend {
     val mcpStatus: String
     val mcpStatusUpdates: StateFlow<String>? get() = null
     val modelStatus: String
+    val modelLibrary: ModelLibraryState? get() = null
+    suspend fun installModel(id: String) = Unit
     val modelEngines: List<String> get() = emptyList()
     val modelEngine: String get() = "llama.cpp"
     val modelImportLabel: String get() = "导入 GGUF"
@@ -248,6 +250,15 @@ class MobileController(
         scope.launch {
             try { perform { backend.selectModelEngine(engine); syncSettings() } }
             finally { mutableState.update { it.copy(modelChanging = false) } }
+        }
+    }
+
+    override fun installModel(id: String) {
+        if (state.value.sending || state.value.modelChanging) return
+        mutableState.update { it.copy(modelChanging = true) }
+        scope.launch {
+            try { perform { backend.installModel(id) } }
+            finally { syncSettings(); mutableState.update { it.copy(modelChanging = false) } }
         }
     }
 
@@ -428,6 +439,7 @@ class MobileController(
                 deviceToolsEnabled = backend.deviceToolsEnabled,
                 mcpStatus = backend.mcpStatus,
                 modelStatus = backend.modelStatus,
+                modelLibrary = backend.modelLibrary,
                 modelEngines = backend.modelEngines,
                 modelEngine = backend.modelEngine,
                 modelImportLabel = backend.modelImportLabel,

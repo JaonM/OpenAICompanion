@@ -21,6 +21,7 @@ void oc_llama_free_string(char *value);
 char *oc_mlx_generate(const char *model_directory, const char *request_json,
                       int max_tokens, OCLlamaOnChunk on_chunk, void *context);
 char *oc_mlx_download(const char *model_directory);
+char *oc_model_download(const char *url, const char *path, const char *sha256, long long bytes);
 void oc_mlx_cancel(void);
 void oc_mlx_unload(void);
 
