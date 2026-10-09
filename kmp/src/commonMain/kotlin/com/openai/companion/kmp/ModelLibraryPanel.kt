@@ -28,6 +28,7 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
     OutlinedTextField(search, { search = it }, label = { Text("搜索 Hugging Face 模型") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     Row { Button(enabled = !loading && !busy, onClick = { focusManager.clearFocus(); browse(search, false) }) { Text("搜索") }
         TextButton(enabled = !loading && !busy, onClick = { browse(search, false) }) { Text("刷新列表") } }
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     fun sameEngine(model: LibraryModel) = model.engine == engine || (engine == "Ollama" && model.engine == "llama.cpp")
     val installed = state.models.filter { it.id in state.installed && sameEngine(it) }
     if (installed.isNotEmpty()) Text("已下载", style = MaterialTheme.typography.titleSmall)
@@ -55,7 +56,6 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
     }
     if (state.catalogEngine == engine && state.hasMore) OutlinedButton(enabled = !loading && !busy, onClick = { browse(search, true) }) { Text("加载更多模型") }
     if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在读取 Hugging Face 模型信息…") }
-    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     if (!loading && state.catalogLoaded && available.isEmpty()) Text("没有更多匹配的模型，可调整搜索词。")
     if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在下载或加载模型，请保持 App 前台…") }
 }

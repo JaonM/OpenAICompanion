@@ -22,6 +22,33 @@ import kotlin.test.assertTrue
 
 class MobileControllerTest {
     @Test
+    fun catalogInspectionPublishesResolvedFilesWithoutInstalling() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val unresolved = ModelLibrary.models.first().copy(resolved = false, files = emptyList())
+        var library = ModelLibraryState(ModelDevice("iOS", 27, "arm64", 12_000_000_000, 20_000_000_000, setOf("MLX")), emptySet(), null,
+            listOf(unresolved), listOf(unresolved), "MLX")
+        var installs = 0
+        val controller = MobileController(scope) { approve, _ ->
+            object : MobileBackend by FakeMobileBackend(approve) {
+                override val modelLibrary get() = library
+                override suspend fun inspectModel(id: String) {
+                    assertEquals(unresolved.id, id)
+                    library = library.copy(catalog = listOf(unresolved.copy(resolved = true)))
+                }
+                override suspend fun installModel(id: String) { installs++ }
+            }
+        }
+        try {
+            controller.start().join()
+            controller.inspectModel(unresolved.id)
+            val result = withTimeout(1000) { controller.state.first { !it.modelCatalogLoading && it.modelLibrary?.catalog?.first()?.resolved == true } }
+            assertNull(result.modelCatalogError)
+            assertEquals(0, installs)
+            assertTrue(result.modelLibrary!!.installed.isEmpty())
+        } finally { scope.cancel() }
+    }
+
+    @Test
     fun remoteResultIsLinkedOnlyToTheActualDelegationReceipt() {
         assertEquals(42L, delegatedTaskId(MobileMessage("tool", "delegate_to_agent: {\"local_task_id\":42}")))
         assertNull(delegatedTaskId(MobileMessage("user", "delegate_to_agent: {\"local_task_id\":42}")))

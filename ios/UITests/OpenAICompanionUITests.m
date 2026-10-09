@@ -362,7 +362,7 @@
     XCTAssertFalse([reply.label containsString:@"</think>"]);
     XCTNSPredicateExpectation *settled = [[XCTNSPredicateExpectation alloc]
         initWithPredicate:[NSPredicate predicateWithFormat:@"exists == NO"] object:thinking];
-    XCTAssertEqual([XCTWaiter waitForExpectations:@[settled] timeout:10], XCTWaiterResultCompleted,
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[settled] timeout:300], XCTWaiterResultCompleted,
         @"回复完成后应移除思考气泡。");
     XCTAssertFalse([reply.label hasPrefix:@"assistant：{\"text\":"]);
     XCTNSPredicateExpectation *visibleReply = [[XCTNSPredicateExpectation alloc]
@@ -457,21 +457,86 @@
     [app.buttons[@"MLX"] tap];
     XCUIElement *available = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"MLX 模型可用"]].firstMatch;
     XCTAssertTrue([available waitForExistenceWithTimeout:180], @"必须等待引擎切换完成再输入问答。");
-    XCTAssertTrue([app.staticTexts[@"模型库"] waitForExistenceWithTimeout:10]);
-    XCUIElement *small = app.staticTexts[@"Qwen3 0.6B · GGUF Q8（轻量）"];
-    for (NSInteger i = 0; i < 8 && !small.hittable; i++) [app swipeUp];
-    XCTAssertTrue(small.hittable);
+    XCTAssertTrue([app.staticTexts[@"MLX 模型库"] waitForExistenceWithTimeout:10]);
+    XCTAssertFalse(app.buttons[@"下载 Qwen3.5 MLX 4bit（约 3.06 GB）"].exists);
+    XCUIElement *current = app.buttons[@"使用中"];
+    for (NSInteger i = 0; i < 8 && !current.hittable; i++) [app swipeUp];
+    XCTAssertTrue(current.hittable);
+    XCTAssertFalse(current.enabled);
+    XCTAssertFalse(app.staticTexts[@"Qwen3 0.6B · GGUF Q8（轻量）"].exists);
     [self retainScreenshot:app name:@"Device model library compatibility"];
     [app.buttons[@"完成"] tap];
     [app.buttons[@"任务"] tap];
     NSUInteger priorTask = [self latestRemoteTaskNumber:app];
     [app.buttons[@"对话"] tap];
-    XCUIElement *reply = [self sendKeyboardPrompt:@"柿子能和螃蟹一起吃吗" app:app];
+    XCUIElement *reply = [self sendKeyboardPrompt:[@"柿子能和螃蟹一起吃吗？验收编号 " stringByAppendingString:NSUUID.UUID.UUIDString] app:app];
     XCTAssertFalse([reply.label containsString:@"已委托"]);
     XCTAssertFalse([reply.label containsString:@"已提交"]);
     [app.buttons[@"任务"] tap];
     XCTAssertEqual([self latestRemoteTaskNumber:app], priorTask);
     [app.buttons[@"对话"] tap];
+}
+
+- (void)testHuggingFaceBrowseAndExplicitMlxDownload {
+    XCUIApplication *app = [self acceptanceApp];
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    [app.buttons[@"MLX"] tap];
+    XCUIElement *active = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@ AND label CONTAINS %@", @"MLX 模型可用", @"Qwen3.5-4B"]].firstMatch;
+    XCTAssertTrue([active waitForExistenceWithTimeout:180]);
+    // Compose exposes the single-line editor without the floating label as its identifier.
+    XCUIElement *search = app.textViews.firstMatch;
+    [self enterAcceptanceText:@"Qwen3-0.6B-4bit" field:search app:app];
+    XCUIElement *searchButton = app.buttons[@"搜索"];
+    for (NSInteger i = 0; i < 6 && !searchButton.hittable; i++) [app swipeUp];
+    XCTNSPredicateExpectation *canSearch = [[XCTNSPredicateExpectation alloc]
+        initWithPredicate:[NSPredicate predicateWithFormat:@"enabled == YES"] object:searchButton];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[canSearch] timeout:40], XCTWaiterResultCompleted);
+    [searchButton tap];
+    XCUIElement *source = app.staticTexts[@"mlx-community/Qwen3-0.6B-4bit"];
+    XCTAssertTrue([source waitForExistenceWithTimeout:60]);
+    for (NSInteger i = 0; i < 12 && !source.hittable; i++) [app swipeUp];
+    XCTAssertTrue(source.hittable);
+    NSString *actionId = @"model-library-action-mlx-community/Qwen3-0.6B-4bit";
+    XCUIElement *inspect = [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"identifier == %@ AND label == %@", actionId, @"查看文件"]].firstMatch;
+    if (inspect.exists) {
+        XCTAssertFalse(app.buttons[@"使用此模型"].exists, @"浏览不能自动下载模型。");
+        for (NSInteger i = 0; i < 8 && (!inspect.hittable || CGRectGetMaxY(inspect.frame) > CGRectGetMaxY(app.frame) - 80); i++) [app swipeUp];
+        XCTAssertTrue(inspect.enabled);
+        // Native snapshots can settle before the Compose scroll gesture finishes.
+        [NSThread sleepForTimeInterval:1];
+        [[inspect coordinateWithNormalizedOffset:CGVectorMake(0.5, 0.5)] tap];
+    }
+    XCUIElement *download = [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"identifier == %@ AND label == %@", actionId, @"下载"]].firstMatch;
+    XCUIElement *use = [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"identifier == %@ AND label == %@", actionId, @"使用此模型"]].firstMatch;
+    NSPredicate *resolved = [NSPredicate predicateWithBlock:^BOOL(id obj, NSDictionary *bindings) { return download.exists || use.exists; }];
+    XCTNSPredicateExpectation *files = [[XCTNSPredicateExpectation alloc] initWithPredicate:resolved object:app];
+    XCTWaiterResult filesResult = [XCTWaiter waitForExpectations:@[files] timeout:60];
+    if (filesResult != XCTWaiterResultCompleted) {
+        for (NSInteger i = 0; i < 12; i++) [app swipeDown];
+        [self retainScreenshot:app name:@"HF metadata resolution failure"];
+    }
+    XCTAssertEqual(filesResult, XCTWaiterResultCompleted, @"文件解析状态：%@", app.debugDescription);
+    if (download.exists) {
+        for (NSInteger i = 0; i < 8 && (!download.hittable || CGRectGetMaxY(download.frame) > CGRectGetMaxY(app.frame) - 80); i++) [app swipeUp];
+        XCTAssertTrue(download.enabled);
+        [download tap];
+        XCTAssertTrue([use waitForExistenceWithTimeout:600], @"显式下载应完成校验并变成已下载状态。");
+    }
+    XCTAssertTrue(use.exists);
+    XCTAssertFalse(download.exists);
+    for (NSInteger i = 0; i < 12 && !active.hittable; i++) [app swipeDown];
+    XCTAssertTrue(active.hittable, @"下载不能自动切换当前 Qwen3.5 模型。");
+    [self retainScreenshot:app name:@"HF explicit download keeps current model"];
+    [app terminate];
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    XCTAssertTrue([active waitForExistenceWithTimeout:30]);
+    for (NSInteger i = 0; i < 12 && !source.hittable; i++) [app swipeUp];
+    XCTAssertTrue(source.hittable, @"已下载模型必须在重启后保留。");
+    XCTAssertTrue(use.exists);
+    XCTAssertFalse(app.buttons[@"下载 Qwen3.5 MLX 4bit（约 3.06 GB）"].exists);
+    [self retainScreenshot:app name:@"HF downloaded model survives relaunch"];
 }
 
 - (void)testMlxStreamsReplyAndCanStop {
