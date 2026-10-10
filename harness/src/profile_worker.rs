@@ -128,6 +128,8 @@ impl MemoryStore {
             .lock()
             .map_err(|_| MemoryError::LockPoisoned)?;
         let transaction = connection.transaction()?;
+        let cleared: bool = transaction.query_row("SELECT user_input='' FROM trace_turns WHERE id=?1", [turn_id], |row| row.get(0))?;
+        if cleared { return Ok(()); }
         for candidate in candidates {
             let content = candidate.content.trim();
             let topic = candidate.topic_id.trim();
@@ -137,6 +139,8 @@ impl MemoryStore {
                 "long" => MemoryTier::Long,
                 _ => continue, // Short-term content stays in the trace window.
             };
+            let cutoff: i64 = transaction.query_row("SELECT COALESCE(MAX(turn_id),0) FROM memory_clear_watermarks WHERE tier=?1", [tier.as_str()], |row| row.get(0))?;
+            if turn_id <= cutoff { continue; }
             if topic.is_empty()
                 || topic.chars().count() > 80
                 || evidence.is_empty()
@@ -247,6 +251,26 @@ mod tests {
     use super::*;
     use crate::{ModelServeCallback, ModelServeError, ModelStreamCallback};
     use std::sync::Arc;
+
+    #[test]
+    fn cleared_tier_rejects_inflight_profile_output_but_accepts_new_turns() {
+        for cleared in ["short", "medium", "long"] {
+            let store = MemoryStore::in_memory().unwrap();
+            let session = store.ensure_single_trace_session().unwrap().id;
+            let old = finished(&store, session, "记住我喜欢 Kotlin", TraceStatus::Completed);
+            let tier = if cleared == "medium" { "medium" } else { "long" };
+            let candidates: Vec<Candidate> = serde_json::from_value(serde_json::json!([{
+                "tier": tier, "kind": "preference", "topic_id": "language",
+                "content": "喜欢 Kotlin", "evidence": "我喜欢 Kotlin"
+            }])).unwrap();
+            store.clear_memory(cleared).unwrap();
+            store.apply_profile_candidates(old, "记住我喜欢 Kotlin", &candidates).unwrap();
+            assert!(store.list_active().unwrap().is_empty());
+            let new = finished(&store, session, "记住我喜欢 Kotlin", TraceStatus::Completed);
+            store.apply_profile_candidates(new, "记住我喜欢 Kotlin", &candidates).unwrap();
+            assert_eq!(store.list_active().unwrap().len(), 1);
+        }
+    }
 
     struct FixedModel(&'static str);
 

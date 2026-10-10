@@ -1,5 +1,7 @@
 package com.openai.companion.desktop
 
+import com.openai.companion.kmp.MemoryManagementPanel
+import com.openai.companion.kmp.MemoryClearTier
 import com.openai.companion.kmp.MessageMarkdown
 
 import com.openai.companion.kmp.ModelLibraryPanel
@@ -163,9 +165,21 @@ internal fun CodexScreen(backend: DesktopBackend) {
         val count = messages.size + if (busy && (streamedText.isNotEmpty() || reasoning.isNotEmpty())) 1 else 0
         if (count > 0) scroll.animateScrollToItem(count)
     }
-    if (settings) CodexSettings(backend, { settings = false }, { error = it }) {
-        scope.launch { modelStatus = backend.modelServe.localStatus() }
-    }
+    if (settings) CodexSettings(backend, { settings = false }, { error = it }, !busy,
+        onClearMemory = { tier ->
+            check(!busy) { "请先结束当前生成" }
+            busy = true
+            try {
+                backend.clearMemory(tier)
+                if (tier == MemoryClearTier.Short) {
+                    messages = activeId?.let { backend.loadSession(it) }.orEmpty()
+                    streamedText = ""
+                    reasoning = ""
+                }
+            } finally { busy = false }
+        },
+        onSaved = { scope.launch { modelStatus = backend.modelServe.localStatus() } },
+    )
     pendingApproval?.let { request ->
         AlertDialog(
             onDismissRequest = { backend.answerMcpApproval(request.id, false) },
@@ -382,6 +396,8 @@ private fun CodexSettings(
     backend: DesktopBackend,
     onClose: () -> Unit,
     onError: (String?) -> Unit,
+    memoryClearEnabled: Boolean,
+    onClearMemory: suspend (MemoryClearTier) -> Unit,
     onSaved: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -445,6 +461,8 @@ private fun CodexSettings(
                     style = MaterialTheme.typography.bodySmall)
                 Text("远程 MCP 使用 HTTPS；本机 localhost 可使用 HTTP。连接成功后保存，下次启动会自动恢复。",
                     color = secondaryText, style = MaterialTheme.typography.labelSmall)
+                HorizontalDivider()
+                MemoryManagementPanel(memoryClearEnabled && !connecting && !downloading, onClearMemory)
                 HorizontalDivider()
                 Text("主动提醒", style = MaterialTheme.typography.titleMedium)
                 Text("使用本地模型时，每轮对话后及后台每 30 分钟主动发现机会；App 运行期间按时调用 Harness 判断是否推送。",

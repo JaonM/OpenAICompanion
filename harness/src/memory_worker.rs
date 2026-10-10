@@ -19,7 +19,7 @@ pub(crate) fn summarize_through(
         .map_err(memory_error)?
         .last()
         .map(|entry| entry.last_turn_id)
-        .unwrap_or(0);
+        .unwrap_or(0).max(store.summary_clear_cutoff().map_err(memory_error)?);
     let pending = store
         .completed_turns_between(session_id, watermark, target_turn_id)
         .map_err(memory_error)?;

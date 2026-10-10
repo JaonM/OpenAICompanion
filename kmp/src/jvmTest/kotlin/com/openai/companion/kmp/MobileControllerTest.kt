@@ -22,6 +22,67 @@ import kotlin.test.assertTrue
 
 class MobileControllerTest {
     @Test
+    fun clearingShortMemoryReloadsChatAndBlocksConcurrentSend() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var cleared = false
+        var sends = 0
+        val controller = MobileController(scope) { approve, _ ->
+            object : MobileBackend by FakeMobileBackend(approve) {
+                override suspend fun openSession(id: Long) = if (cleared) emptyList() else listOf(MobileMessage("user", "旧对话"))
+                override suspend fun clearMemory(tier: MemoryClearTier) {
+                    assertEquals(MemoryClearTier.Short, tier)
+                    entered.complete(Unit)
+                    release.await()
+                    cleared = true
+                }
+                override suspend fun send(text: String, onText: (String) -> Unit) { sends++ }
+            }
+        }
+        try {
+            controller.start().join()
+            assertEquals(1, controller.state.value.messages.size)
+            val operation = async { controller.clearMemory(MemoryClearTier.Short) }
+            entered.await()
+            assertTrue(controller.state.value.memoryClearing)
+            controller.send("不应提交")
+            assertEquals(0, sends)
+            assertFalse(controller.state.value.sending)
+            release.complete(Unit)
+            operation.await()
+            assertTrue(controller.state.value.messages.isEmpty())
+            assertEquals(1L, controller.state.value.activeSessionId)
+            assertFalse(controller.state.value.memoryClearing)
+        } finally { release.complete(Unit); scope.cancel() }
+    }
+
+    @Test
+    fun clearingOtherTiersPreservesChatAndFailureIsReported() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val calls = mutableListOf<MemoryClearTier>()
+        val controller = MobileController(scope) { approve, _ ->
+            object : MobileBackend by FakeMobileBackend(approve) {
+                override suspend fun openSession(id: Long) = listOf(MobileMessage("user", "保留聊天"))
+                override suspend fun clearMemory(tier: MemoryClearTier) {
+                    calls += tier
+                    if (tier == MemoryClearTier.Long) error("storage unavailable")
+                }
+            }
+        }
+        try {
+            controller.start().join()
+            controller.clearMemory(MemoryClearTier.Medium)
+            assertEquals("保留聊天", controller.state.value.messages.single().content)
+            val error = runCatching { controller.clearMemory(MemoryClearTier.Long) }.exceptionOrNull()
+            assertEquals("storage unavailable", error?.message)
+            assertFalse(controller.state.value.memoryClearing)
+            assertEquals("保留聊天", controller.state.value.messages.single().content)
+            assertEquals(listOf(MemoryClearTier.Medium, MemoryClearTier.Long), calls)
+        } finally { scope.cancel() }
+    }
+
+    @Test
     fun catalogInspectionPublishesResolvedFilesWithoutInstalling() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val unresolved = ModelLibrary.models.first().copy(resolved = false, files = emptyList())

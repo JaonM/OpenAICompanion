@@ -23,6 +23,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.runBlocking
+import uniffi.harness.appClearMemory
 import uniffi.harness.appDeleteSession
 import uniffi.harness.appListSessions
 import uniffi.harness.appLoadSession
@@ -329,6 +330,18 @@ class DesktopBridgeTest {
             assertTrue(failedMessages[4].jsonObject.getValue("content").jsonPrimitive.content
                 .contains("model offline"))
             assertTrue(!appDeleteSession(id).ok)
+            assertEquals(1, Json.parseToJsonElement(appListSessions().valueJson).jsonArray.size)
+            assertTrue(!appClearMemory("all").ok)
+            for (tier in listOf("medium", "long")) {
+                val cleared = appClearMemory(tier)
+                assertTrue(cleared.ok, cleared.error)
+                val retained = Json.parseToJsonElement(appLoadSession(id).valueJson).jsonObject.getValue("messages").jsonArray
+                assertEquals(failedMessages, retained)
+            }
+            val cleared = appClearMemory("short")
+            assertTrue(cleared.ok, cleared.error)
+            assertTrue(Json.parseToJsonElement(appLoadSession(id).valueJson).jsonObject.getValue("messages").jsonArray.isEmpty())
+            assertTrue(appResumeSession(id).ok)
             assertEquals(1, Json.parseToJsonElement(appListSessions().valueJson).jsonArray.size)
         } finally {
             bindings.unregisterAgentEventSink()

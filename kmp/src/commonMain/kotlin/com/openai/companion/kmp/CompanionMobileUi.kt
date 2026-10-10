@@ -98,6 +98,7 @@ data class MobileUiState(
     val streamedText: String = "",
     val streamedReasoning: String = "",
     val sending: Boolean = false,
+    val memoryClearing: Boolean = false,
     val modelStatus: String = "未导入端侧模型",
     val modelEngines: List<String> = emptyList(),
     val modelEngine: String = "llama.cpp",
@@ -156,6 +157,7 @@ interface MobileActions {
     fun openReminderSettings() = Unit
     fun configureMemorySync(endpoint: String, token: String) = Unit
     fun syncMemories() = Unit
+    suspend fun clearMemory(tier: MemoryClearTier) { error("当前宿主未接入记忆清理") }
     fun deleteProactiveTask(id: String) = Unit
     fun configureDevices(endpoint: String, token: String, name: String, accepts: Boolean) = Unit
     fun pairDevice(endpoint: String, code: String, name: String, accepts: Boolean) = Unit
@@ -180,7 +182,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
     var followLatest by remember { mutableStateOf(true) }
     var draft by remember { mutableStateOf("") }
     val sendDraft = {
-        if (!state.sending && !state.modelChanging && state.activeSessionId != null && draft.isNotBlank()) {
+        if (!state.sending && !state.modelChanging && !state.memoryClearing && state.activeSessionId != null && draft.isNotBlank()) {
             followSentMessage = true
             followLatest = true
             actions.send(draft.trim())
@@ -276,6 +278,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             MobileSettingsEntry("端侧模型", state.modelStatus) { settingsSection = "端侧模型" }
                             MobileSettingsEntry("主动任务", state.backgroundReminderStatus) { settingsSection = "主动任务" }
                             MobileSettingsEntry("跨设备执行", state.deviceStatus) { settingsSection = "跨设备执行" }
+                            MobileSettingsEntry("历史与记忆", "分档清理聊天、摘要与长期记忆") { settingsSection = "历史与记忆" }
                             MobileSettingsEntry("记忆点跨端同步", state.memorySyncStatus) { settingsSection = "记忆点跨端同步" }
                             MobileSettingsEntry("远程 MCP", state.mcpStatus) { settingsSection = "远程 MCP" }
                             MobileSettingsEntry("工具扩展", if (state.deviceToolsEnabled) "已开启" else "默认关闭 · 可选扩展") { settingsSection = "工具扩展" }
@@ -349,6 +352,9 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                                 }
                             }
                             Spacer(Modifier.height(20.dp))
+                        }
+                        if (settingsSection == "历史与记忆") {
+                            MemoryManagementPanel(!state.sending && !state.modelChanging && !state.memoryClearing, actions::clearMemory)
                         }
                         if (settingsSection == "记忆点跨端同步") {
                             MobileSectionTitle("记忆点跨端同步")

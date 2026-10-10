@@ -180,6 +180,10 @@ impl MemoryStore {
             .connection
             .lock()
             .map_err(|_| MemoryError::LockPoisoned)?;
+        let stale: bool = connection.query_row(
+            "SELECT ?1 <= COALESCE((SELECT MAX(turn_id) FROM memory_clear_watermarks WHERE tier IN ('short','medium')),0)",
+            [first_turn_id], |row| row.get(0))?;
+        if stale { return Ok(()); }
         connection.execute(
             "INSERT INTO medium_summary_blocks (session_id, first_turn_id, last_turn_id, content, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
@@ -344,7 +348,7 @@ impl MemoryStore {
                 .lock()
                 .map_err(|_| MemoryError::LockPoisoned)?;
             let mut statement = connection
-                .prepare("SELECT id FROM trace_turns WHERE session_id = ?1 ORDER BY id")?;
+                .prepare("SELECT id FROM trace_turns WHERE session_id = ?1 AND user_input != '' ORDER BY id")?;
             statement
                 .query_map([session_id], |row| row.get::<_, i64>(0))?
                 .collect::<Result<Vec<_>, _>>()?
@@ -394,9 +398,10 @@ impl MemoryStore {
             .connection
             .lock()
             .map_err(|_| MemoryError::LockPoisoned)?;
+        let cutoff: i64 = connection.query_row("SELECT COALESCE(MAX(turn_id),0) FROM memory_clear_watermarks WHERE tier IN ('short','medium')", [], |row| row.get(0))?;
         let completed_count: i64 = connection.query_row(
-            "SELECT COUNT(*) FROM trace_turns WHERE session_id = ?1 AND status IN ('completed', 'max_steps')",
-            [session_id], |row| row.get(0),
+            "SELECT COUNT(*) FROM trace_turns WHERE session_id = ?1 AND id > ?2 AND status IN ('completed', 'max_steps')",
+            params![session_id, cutoff], |row| row.get(0),
         )?;
         let older_count = (completed_count as usize).saturating_sub(recent_limit);
         if older_count == 0 {
@@ -404,9 +409,9 @@ impl MemoryStore {
         }
         let target_position = older_count.div_ceil(block_size) * block_size - 1;
         connection.query_row(
-            "SELECT id FROM trace_turns WHERE session_id = ?1 AND status IN ('completed', 'max_steps')
-             ORDER BY id ASC LIMIT 1 OFFSET ?2",
-            params![session_id, target_position as i64], |row| row.get(0),
+            "SELECT id FROM trace_turns WHERE session_id = ?1 AND id > ?2 AND status IN ('completed', 'max_steps')
+             ORDER BY id ASC LIMIT 1 OFFSET ?3",
+            params![session_id, cutoff, target_position as i64], |row| row.get(0),
         ).optional().map_err(Into::into)
     }
 

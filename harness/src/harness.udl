@@ -22,6 +22,7 @@ namespace harness {
     AppResult app_list_sessions();
     AppResult app_load_session(i64 session_id);
     AppResult app_delete_session(i64 session_id);
+    AppResult app_clear_memory(string tier);
     AppResult app_put_proactive_rule(string scenario, boolean enabled, i64 local_minute,
         i64 weekday_mask, i64 lead_minutes, i64 timezone_offset_minutes);
     AppResult app_put_proactive_task(string task_json);

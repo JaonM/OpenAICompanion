@@ -191,6 +191,24 @@ pub fn app_send_message(user_input: String) -> AppResult {
     }
 }
 
+/// Called only after an explicit user confirmation; never exposed as a model tool.
+pub fn app_clear_memory(tier: String) -> AppResult {
+    let result = (|| {
+        let state = app_state()?;
+        let mut active = state.active_session.try_lock()
+            .map_err(|_| "请先结束当前生成，再清空记忆".to_owned())?;
+        let deleted = state.store.clear_memory(&tier).map_err(|error| error.to_string())?;
+        if tier == "short" {
+            if let Some(session) = active.as_mut() { session.turns.clear(); }
+        }
+        Ok::<_, String>(deleted)
+    })();
+    match result {
+        Ok(deleted) => AppResult::success(json!({"deleted": deleted})),
+        Err(error) => AppResult::failure(error),
+    }
+}
+
 pub fn app_list_sessions() -> AppResult {
     let result = (|| {
         let state = app_state()?;

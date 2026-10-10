@@ -54,6 +54,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import uniffi.harness.AppResult
+import uniffi.harness.appClearMemory
+import com.openai.companion.kmp.MemoryClearTier
 import uniffi.harness.appDeleteSession
 import uniffi.harness.appListSessions
 import uniffi.harness.appLoadSession
@@ -454,6 +456,11 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe(), pr
         output
         }
         }
+    }
+
+    suspend fun clearMemory(tier: MemoryClearTier) = withContext(Dispatchers.IO) {
+        appClearMemory(tier.key).value()
+        Unit
     }
 
     suspend fun deleteSession(id: Long) = withContext(Dispatchers.IO) {

@@ -184,6 +184,11 @@ class AndroidMobileBackend(
         appResumeSession(id).value()
         codec.messages(appLoadSession(id).value()).map { MobileMessage(it.role, it.content) }
     }
+    override suspend fun clearMemory(tier: MemoryClearTier) = withContext(Dispatchers.IO) {
+        appClearMemory(tier.key).value()
+        Unit
+    }
+
     override suspend fun deleteSession(id: Long) = withContext(Dispatchers.IO) {
         appDeleteSession(id).value()
         Unit

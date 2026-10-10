@@ -11,6 +11,7 @@ pub mod context;
 mod error;
 pub mod r#loop;
 pub mod memory;
+mod memory_clear;
 mod memory_sync;
 mod memory_worker;
 mod proactive;
@@ -27,7 +28,7 @@ pub use a2a::A2aProvider;
 pub use app_bridge::{
     AppResult, app_answer_device_question, app_execute_device_task, app_a2a_delete_agent, app_a2a_list_agents, app_a2a_list_tasks, app_a2a_put_agent,
     app_a2a_put_task, app_acknowledge_memory_sync, app_delete_proactive_task, app_delete_session,
-    app_discover_proactive_tasks, app_export_memory_sync, app_get_proactive_settings,
+    app_clear_memory, app_discover_proactive_tasks, app_export_memory_sync, app_get_proactive_settings,
     app_list_proactive_rules, app_list_sessions, app_load_session, app_mark_proactive_delivered,
     app_memory_sync_pending, app_merge_memory_sync, app_next_proactive_wake_at, app_open_store,
     app_prepare_memory_sync, app_process_pending_proactive_plans, app_put_proactive_rule,

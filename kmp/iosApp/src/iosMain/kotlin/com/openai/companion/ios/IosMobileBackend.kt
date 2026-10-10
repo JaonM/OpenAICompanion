@@ -59,6 +59,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
 import io.ktor.client.plugins.HttpTimeout
 import uniffi.harness.AppResult
+import uniffi.harness.appClearMemory
+import com.openai.companion.kmp.MemoryClearTier
 import uniffi.harness.appDeleteSession
 import uniffi.harness.appListSessions
 import uniffi.harness.appLoadSession
@@ -259,6 +261,11 @@ class IosMobileBackend(
     override suspend fun openSession(id: Long): List<MobileMessage> = withContext(Dispatchers.Default) {
         appResumeSession(id).value()
         codec.messages(appLoadSession(id).value()).map { MobileMessage(it.role, it.content) }
+    }
+
+    override suspend fun clearMemory(tier: MemoryClearTier) = withContext(Dispatchers.Default) {
+        appClearMemory(tier.key).value()
+        Unit
     }
 
     override suspend fun deleteSession(id: Long) = withContext(Dispatchers.Default) {

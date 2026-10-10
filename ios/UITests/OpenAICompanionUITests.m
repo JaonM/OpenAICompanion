@@ -135,6 +135,24 @@
     XCTAssertFalse(body.exists);
 }
 
+- (void)testMemoryClearConfirmationCanBeCancelledWithoutDeletingData {
+    XCUIApplication *app = [self acceptanceApp];
+    [app launch];
+    [self openSettingsSection:@"历史与记忆" app:app];
+    for (NSString *tier in @[@"短期记忆", @"中期记忆", @"长期记忆"]) {
+        XCUIElement *button = app.buttons[[@"清空" stringByAppendingString:tier]];
+        for (NSInteger i = 0; i < 6 && !button.hittable; i++) [app swipeUp];
+        XCTAssertTrue(button.hittable);
+        [button tap];
+        XCTAssertTrue([app.buttons[@"确认清空"] waitForExistenceWithTimeout:5]);
+        [self retainScreenshot:app name:[@"Memory clear confirmation " stringByAppendingString:tier]];
+        [app.buttons[@"取消"] tap];
+        XCTAssertFalse(app.buttons[@"确认清空"].exists);
+        XCTAssertTrue(button.hittable);
+    }
+    // Never confirm deletion in the user's physical-device data store.
+}
+
 - (void)testCrossDeviceConfigurationHelp {
     XCUIApplication *app = [self acceptanceApp];
     [app launch];

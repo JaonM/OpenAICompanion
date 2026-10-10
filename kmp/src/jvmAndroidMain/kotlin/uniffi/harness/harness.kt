@@ -999,6 +999,8 @@ internal open class UniffiVTableCallbackInterfaceToolProvider(
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1027,6 +1029,8 @@ fun uniffi_harness_checksum_func_app_a2a_put_task(
 fun uniffi_harness_checksum_func_app_acknowledge_memory_sync(
 ): Short
 fun uniffi_harness_checksum_func_app_answer_device_question(
+): Short
+fun uniffi_harness_checksum_func_app_clear_memory(
 ): Short
 fun uniffi_harness_checksum_func_app_delete_proactive_task(
 ): Short
@@ -1259,6 +1263,8 @@ fun uniffi_harness_fn_func_app_acknowledge_memory_sync(`generation`: Long,uniffi
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_answer_device_question(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_harness_fn_func_app_clear_memory(`tier`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_delete_proactive_task(`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_harness_fn_func_app_delete_session(`sessionId`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -1486,6 +1492,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_app_answer_device_question() != 23654.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_harness_checksum_func_app_clear_memory() != 27966.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_harness_checksum_func_app_delete_proactive_task() != 62451.toShort()) {
@@ -4522,6 +4531,15 @@ public object FfiConverterSequenceTypeMcpTool: FfiConverterRustBuffer<List<McpTo
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_harness_fn_func_app_answer_device_question(
         FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+
+ fun `appClearMemory`(`tier`: kotlin.String): AppResult {
+            return FfiConverterTypeAppResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_harness_fn_func_app_clear_memory(
+        FfiConverterString.lower(`tier`),_status)
 }
     )
     }

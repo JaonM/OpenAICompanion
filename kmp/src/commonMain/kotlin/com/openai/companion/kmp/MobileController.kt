@@ -24,6 +24,7 @@ interface MobileBackend {
     suspend fun sessions(): List<MobileSession>
     suspend fun createSession(): Long
     suspend fun openSession(id: Long): List<MobileMessage>
+    suspend fun clearMemory(tier: MemoryClearTier) { error("当前宿主未接入记忆清理") }
     suspend fun deleteSession(id: Long)
     suspend fun send(text: String, onText: (String) -> Unit)
     suspend fun send(text: String, onText: (String) -> Unit, onReasoning: (String) -> Unit) = send(text, onText)
@@ -193,7 +194,7 @@ class MobileController(
 
     override fun send(text: String) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || state.value.activeSessionId == null || state.value.sending || state.value.modelChanging) return
+        if (trimmed.isEmpty() || state.value.activeSessionId == null || state.value.sending || state.value.modelChanging || state.value.memoryClearing) return
         val id = state.value.activeSessionId ?: return
         mutableState.update {
             it.copy(
@@ -248,7 +249,7 @@ class MobileController(
     }
 
     override fun selectModelEngine(engine: String) {
-        if (state.value.sending || state.value.modelChanging) return
+        if (state.value.sending || state.value.modelChanging || state.value.memoryClearing) return
         mutableState.update { it.copy(modelChanging = true) }
         scope.launch {
             try { perform { backend.selectModelEngine(engine); syncSettings() } }
@@ -277,7 +278,7 @@ class MobileController(
     }
 
     override fun installModel(id: String) {
-        if (state.value.sending || state.value.modelChanging) return
+        if (state.value.sending || state.value.modelChanging || state.value.memoryClearing) return
         mutableState.update { it.copy(modelChanging = true) }
         scope.launch {
             try { perform { backend.installModel(id) } }
@@ -286,7 +287,7 @@ class MobileController(
     }
 
     override fun importModel() {
-        if (state.value.sending || state.value.modelChanging) return
+        if (state.value.sending || state.value.modelChanging || state.value.memoryClearing) return
         mutableState.update { it.copy(modelChanging = true) }
         scope.launch {
             try { perform { backend.importModel(); syncSettings() } }
@@ -314,6 +315,20 @@ class MobileController(
             perform { backend.saveProactiveConfig(settings) }
             syncSettings()
         }
+    }
+
+    override suspend fun clearMemory(tier: MemoryClearTier) {
+        val current = state.value
+        check(!current.sending && !current.modelChanging && !current.memoryClearing) { "请先结束当前操作" }
+        check(mutableState.compareAndSet(current, current.copy(memoryClearing = true))) { "状态已改变，请重试" }
+        try {
+            backend.clearMemory(tier)
+            if (tier == MemoryClearTier.Short) {
+                val messages = current.activeSessionId?.let { backend.openSession(it) }.orEmpty()
+                val sessions = backend.sessions()
+                mutableState.update { it.copy(messages = messages, sessions = sessions, streamedText = "", streamedReasoning = "") }
+            }
+        } finally { mutableState.update { it.copy(memoryClearing = false) } }
     }
 
     override fun configureMemorySync(endpoint: String, token: String) {
