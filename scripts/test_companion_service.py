@@ -70,6 +70,21 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 peer='172.30.73.2', headers=headers)
             self.assertEqual(status, 400)
 
+    async def test_readiness_rejects_missing_schema_but_health_remains_live(self):
+        with self.app.tasks.connect() as db:
+            db.execute('DROP TABLE completions')
+        status, _ = await self.request('/readyz')
+        self.assertEqual(status, 503)
+        status, _ = await self.request('/healthz')
+        self.assertEqual(status, 200)
+
+    async def test_readiness_does_not_recreate_lost_database(self):
+        path = Path(self.app.tasks.path)
+        path.unlink()
+        status, _ = await self.request('/readyz')
+        self.assertEqual(status, 503)
+        self.assertFalse(path.exists())
+
     async def register(self, credential):
         status, _ = await self.request('/v1/devices/register', {
             'name': 'Device', 'platform': 'test', 'tools': [], 'resources': [],
@@ -246,9 +261,10 @@ class RuntimeTests(unittest.TestCase):
                 listener.bind(('127.0.0.1', 0))
                 port = listener.getsockname()[1]
             environment = dict(os.environ, COMPANION_SERVICE_DATA=directory,
-                               COMPANION_SERVICE_URL=f'http://127.0.0.1:{port}')
+                               COMPANION_SERVICE_URL=f'http://127.0.0.1:{port}',
+                               COMPANION_TRUSTED_PROXIES='127.0.0.1', COMPANION_METRICS_TOKEN='runtime-fixture-only')
             process = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'companion_service:create_app',
-                '--factory', '--host', '127.0.0.1', '--port', str(port), '--no-access-log'],
+                '--factory', '--host', '127.0.0.1', '--port', str(port), '--no-proxy-headers', '--no-access-log'],
                 cwd=Path(__file__).parent, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
                 deadline = time.monotonic() + 10
@@ -262,6 +278,29 @@ class RuntimeTests(unittest.TestCase):
                         if process.poll() is not None or time.monotonic() > deadline:
                             self.fail('Uvicorn did not become ready')
                         time.sleep(0.05)
+                def redeem(client):
+                    request = urllib.request.Request(f'http://127.0.0.1:{port}/v1/pairing/redeem',
+                        data=b'{"code":"invalid"}', headers={'Content-Type': 'application/json', 'X-Companion-Client-IP': client})
+                    try:
+                        with urllib.request.urlopen(request, timeout=2) as reply:
+                            return reply.status
+                    except urllib.error.HTTPError as error:
+                        error.close()
+                        return error.code
+                for _ in range(30):
+                    self.assertEqual(redeem('192.0.2.1'), 400)
+                self.assertEqual(redeem('192.0.2.1'), 429)
+                self.assertEqual(redeem('192.0.2.2'), 400)
+                probe = [sys.executable, str(Path(__file__).with_name('service_check.py')),
+                    '--url', f'http://127.0.0.1:{port}', '--data', directory, '--state', str(Path(directory) / 'probe.json')]
+                healthy = subprocess.run(probe, env=environment, capture_output=True, text=True, timeout=10)
+                self.assertEqual(healthy.returncode, 0, healthy.stdout)
+                self.assertTrue(json.loads(healthy.stdout)['checks']['metrics'])
+                with closing(sqlite3.connect(Path(directory) / 'device-tasks.sqlite')) as db, db:
+                    db.execute('DROP TABLE completions')
+                unavailable = subprocess.run(probe, env=environment, capture_output=True, text=True, timeout=10)
+                self.assertEqual(unavailable.returncode, 1)
+                self.assertFalse(json.loads(unavailable.stdout)['checks']['ready'])
             finally:
                 process.terminate()
                 try:

@@ -7,13 +7,7 @@ import os
 from pathlib import Path
 import sqlite3
 
-from service_storage import backup
-
-TABLES = {
-    'credentials.sqlite': ('credentials', 'invitations'),
-    'device-tasks.sqlite': ('devices', 'tasks', 'messages', 'completions'),
-    'memory-sync.sqlite': ('records', 'changes'),
-}
+from service_storage import backup, TABLES
 
 
 def export_user(directory, user):

@@ -2,6 +2,12 @@
 import sqlite3
 from contextlib import closing
 
+TABLES = {
+    'credentials.sqlite': ('credentials', 'invitations'),
+    'device-tasks.sqlite': ('devices', 'tasks', 'messages', 'completions'),
+    'memory-sync.sqlite': ('records', 'changes'),
+}
+
 
 def migrate(db, statements, version=1):
     current = db.execute('PRAGMA user_version').fetchone()[0]

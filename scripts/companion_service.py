@@ -2,6 +2,7 @@
 """Bounded ASGI entry point for the memory relay and personal-device gateway."""
 import asyncio
 from collections import Counter, OrderedDict
+from contextlib import closing
 import hmac
 import ipaddress
 import json
@@ -17,6 +18,7 @@ import uuid
 from device_task_server import TaskStore, RpcError, TERMINAL, INTERRUPTED, encode
 from memory_sync_server import RelayStore, CapacityError, MAX_BODY
 from service_credentials import Credentials
+from service_storage import TABLES
 
 LOG = logging.getLogger('companion.service')
 
@@ -169,8 +171,14 @@ class CompanionService:
         if scope['path'] == '/readyz':
             def check():
                 for store in (self.credentials, self.tasks, self.memories):
-                    with store.connect() as db:
-                        db.execute('SELECT 1').fetchone()
+                    # Read-only mode must not recreate a lost database and then
+                    # incorrectly report an empty SQLite file as ready.
+                    path = Path(store.path).resolve()
+                    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=1)) as db:
+                        if db.execute('PRAGMA user_version').fetchone()[0] != 1:
+                            raise sqlite3.DatabaseError('unsupported service schema')
+                        for table in TABLES[path.name]:
+                            db.execute(f'SELECT 1 FROM {table} LIMIT 0')
             await asyncio.to_thread(check)
         return {'ok': True, 'protocol': 1}, 200
 
