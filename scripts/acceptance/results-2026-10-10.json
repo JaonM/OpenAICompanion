@@ -117,5 +117,110 @@
       "MLX input remains text-only. llama.cpp tool compatibility handling is unchanged.",
       "Automatic calls are parsed and validated before execution; simultaneous tools plus response schema use final JSON instructions and existing Harness result validation rather than a JSON-only mask."
     ]
+  },
+  "production_review_fixes": {
+    "implementation_commits": [
+      "245d2db",
+      "99f3886",
+      "50fd8c1"
+    ],
+    "regression": {
+      "rust": {
+        "passed": 80,
+        "log": "/tmp/companion-production-rust.log"
+      },
+      "python": {
+        "passed": 29,
+        "skipped": 0,
+        "log": "/tmp/companion-production-python-final.log"
+      },
+      "jvm": {
+        "total": 141,
+        "passed": 138,
+        "skipped": 3,
+        "log": "/tmp/companion-production-kmp-final.log"
+      },
+      "swift_checks": [
+        "prompt",
+        "MLX values",
+        "MLX SDK parser",
+        "download cache integrity/cancellation (3 host checks)"
+      ],
+      "actual_uvicorn_http": "trusted-proxy pairing limit isolation and readiness probe healthy-to-missing-table failure passed"
+    },
+    "builds": {
+      "signed_ios": "passed",
+      "unsigned_ios_simulator": "passed",
+      "mac_dmg": "passed",
+      "compose_yaml": "validated; actual production deployment pending"
+    },
+    "ios_physical": {
+      "model_removal_confirmation_cancel": {
+        "status": "passed",
+        "seconds": 16.132,
+        "actual_delete": false,
+        "log": "/tmp/companion-production-ios-ui-retry.log",
+        "xcresult": "/tmp/companion-physical-acceptance-20261007/DerivedData/Logs/Test/Test-OpenAICompanion-2026.10.10_22-20-18-+0800.xcresult"
+      },
+      "memory_clear_confirmation_cancel": {
+        "status": "passed",
+        "seconds": 15.407,
+        "actual_delete": false
+      },
+      "prior_model_confirmation_attempts": {
+        "failed_seconds": [
+          14.972,
+          11.634
+        ],
+        "reason": "offscreen/inertia UI selection; retained original xcresult bundles"
+      },
+      "latest_signed_app_installed": true
+    },
+    "mac_native_notification": {
+      "first_attempt": "permission denied (-4), user did not see notification; expired without delivered_at",
+      "after_user_enabled_permission": "submitted (1), system delivered record (2); actual visible banner awaiting user confirmation",
+      "fixture": "isolated ready reminder; not real dialogue scheduling",
+      "click_worker_terminated_app": "pending"
+    },
+    "simulator_ui": {
+      "status": "three cases passed, zero failures; local Xcode final result writer stalled and owned process terminated (exit 143), incomplete command/bundle acceptance",
+      "attempts": [
+        {
+          "xcresult": "/tmp/companion-production-simulator-build/Logs/Test/Test-OpenAICompanion-2026.10.10_22-45-35-+0800.xcresult",
+          "passed": 2,
+          "failed": 1,
+          "reason": "outdated GGUF import label"
+        },
+        {
+          "xcresult": "/tmp/companion-production-simulator-build/Logs/Test/Test-OpenAICompanion-2026.10.10_22-47-09-+0800.xcresult",
+          "passed": 2,
+          "failed": 1,
+          "reason": "GGUF import label still outdated; corrected to actual UI string"
+        },
+        {
+          "log": "/tmp/companion-production-simulator-ui-third.log",
+          "passed": 2,
+          "failed": 1,
+          "reason": "navigation transition checked before UI updated; changed to bounded element disappearance wait"
+        }
+      ],
+      "result_bundle_limitation": "Local Xcode stalled finalizing both failed and passed suites; original logs retained. Only individual cases count as passed; remote CI command completion remains to verify.",
+      "passed_cases": {
+        "configuration_help_seconds": 12.182,
+        "memory_clear_confirmation_cancel_seconds": 11.866,
+        "settings_navigation_draft_seconds": 20.908
+      },
+      "log": "/tmp/companion-production-simulator-ui.log"
+    },
+    "deferred_by_user": [
+      "remote APNs",
+      "formal distribution"
+    ],
+    "remaining": [
+      "Android native SDK/device acceptance",
+      "actual model deletion and interruption/resume matrix",
+      "native model timeout resource release and pressure validation",
+      "production proxy/TLS, deployment, restore and alert closed-loop"
+    ]
   }
 }

@@ -27,12 +27,20 @@ if ! rustup target list --installed | grep -qx "$host_target"; then
 fi
 
 "$project_root/scripts/ios-llama.sh"
+build_options=()
+if [[ -n "${COMPANION_IOS_PACKAGES:-}" ]]; then
+  build_options+=(-clonedSourcePackagesDirPath "$COMPANION_IOS_PACKAGES")
+fi
+if [[ -n "${COMPANION_IOS_DERIVED_DATA:-}" ]]; then
+  build_options+=(-derivedDataPath "$COMPANION_IOS_DERIVED_DATA")
+fi
 xcodebuild \
   -project "$project_root/ios/OpenAICompanion.xcodeproj" \
-  -target OpenAICompanion \
+  -scheme OpenAICompanion \
   -configuration Debug \
   -sdk iphonesimulator \
   "ARCHS=$(uname -m)" \
   ONLY_ACTIVE_ARCH=YES \
   CODE_SIGNING_ALLOWED=NO \
+  "${build_options[@]}" \
   build

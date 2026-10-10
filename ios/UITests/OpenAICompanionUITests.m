@@ -221,10 +221,10 @@
     XCTAssertTrue(app.buttons[@"send-message"].enabled, @"草稿输入未写入。");
     [self retainScreenshot:app name:@"Draft before navigation"];
     [app.buttons[@"任务"] tap];
-    XCTAssertTrue(app.buttons[@"刷新"].exists);
-    XCTAssertFalse(app.buttons[@"send-message"].exists);
+    XCTAssertTrue([app.buttons[@"刷新"] waitForExistenceWithTimeout:5]);
+    XCTAssertTrue([app.buttons[@"send-message"] waitForNonExistenceWithTimeout:5]);
     [app.buttons[@"对话"] tap];
-    XCTAssertFalse(app.buttons[@"刷新"].exists);
+    XCTAssertTrue([app.buttons[@"刷新"] waitForNonExistenceWithTimeout:5]);
     [self retainScreenshot:app name:@"Draft after navigation"];
     XCTAssertTrue(app.buttons[@"send-message"].enabled, @"导航后草稿应仍可发送。");
     [self openSettingsSection:@"跨设备执行" app:app];
@@ -232,7 +232,9 @@
     [app.buttons[@"‹ 所有设置"] tap];
     XCUIElement *model = [[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:@"settings-端侧模型"].firstMatch;
     [model tap];
-    XCTAssertTrue(app.buttons[@"导入 GGUF"].exists);
+    XCUIElement *importButton = [app.buttons matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label IN %@", @[@"导入本地 GGUF 文件", @"导入本地 MLX 文件夹"]]].firstMatch;
+    XCTAssertTrue([importButton waitForExistenceWithTimeout:10]);
     [self retainScreenshot:app name:@"Grouped model settings"];
     [app.buttons[@"‹ 所有设置"] tap];
     [self retainScreenshot:app name:@"Settings overview"];
@@ -435,7 +437,9 @@
     XCTAssertFalse([app.buttons[@"新建会话"] exists]);
 
     [self openSettingsSection:@"端侧模型" app:app];
-    XCTAssertTrue([app.buttons[@"导入 GGUF"] waitForExistenceWithTimeout:10]);
+    XCUIElement *importButton = [app.buttons matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label IN %@", @[@"导入本地 GGUF 文件", @"导入本地 MLX 文件夹"]]].firstMatch;
+    XCTAssertTrue([importButton waitForExistenceWithTimeout:10]);
     [self retainScreenshot:app name:@"Companion settings"];
     [app.buttons[@"完成"] tap];
 

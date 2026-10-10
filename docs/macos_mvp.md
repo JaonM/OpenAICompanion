@@ -1,5 +1,7 @@
 # macOS MVP（KMP + Rust）
 
+当前结论统一见[功能与验收状态](project-status.md)。本文的日期记录保留历史证据，不能用早期失败或旧测试数量替代最新结论。
+
 macOS 桌面端使用 Compose Desktop 作为 KMP/JVM 界面。Kotlin 侧处理模型 HTTP 请求、远程 MCP 连接与会话界面；Rust Harness 负责 Agent Loop、记忆和本地 SQLite 会话轨迹。两者通过 UniFFI 生成的 Kotlin/JNA 绑定通信。
 
 ## 运行
@@ -83,3 +85,7 @@ Mac 通知缺陷：`DesktopNotificationSink.deliver` 在 `TrayIcon.displayMessag
 继续验收：跨设备设置入口、无令牌时“缺少设备令牌”的错误反馈、返回设置和对话后的草稿保留通过。用户手动操作快捷键后第 4 轮完成并返回 `42`。第 5 轮正文在生成中从 `155` 增长到 `235`，设置往返不阻塞推理，点击停止后恢复就绪；数据库状态同步核验。通知送达失败仍是发布阻断项，不能用其他通过项目替代。
 
 第 6 轮在取消后重新发送完成，正文与逗号分隔的 `1` 到 `1000` 完全一致，steps=1；确认取消后的模型调用和 UI 仍可继续使用。
+
+## 2026-10-10 原生通知修复
+
+已改用 UserNotifications；提交成功不再直接标记 delivered，轮询系统送达记录后才更新。首次隔离复验权限为 denied，用户未看到，任务到期且 delivered_at 为空；开启权限后新测试通知被系统记录送达。实际横幅反馈待确认，点击、worker 与退出后流程仍待验收。此 ready fixture 不替代真实对话创建提醒的全流程。

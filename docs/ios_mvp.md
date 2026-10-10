@@ -1,5 +1,7 @@
 # iOS MVP（KMP + Compose Multiplatform）
 
+当前结论统一见[功能与验收状态](project-status.md)。本文的日期记录保留历史证据，不能用早期失败或旧测试数量替代最新结论。
+
 iOS 的目标架构是 KMP + Compose Multiplatform 界面、Kotlin/Native 的 Rust Harness 绑定及可选 llama.cpp / MLX 端侧推理。界面仍由 KMP 实现；MLX 使用薄 Swift 原生桥接调用官方库。共享 Compose 界面位于 [`kmp/src/commonMain`](../kmp/src/commonMain)，MCP 客户端位于同一源码集；iOS 的 Compose `UIViewController` 工厂和 MCP 连接管理位于 [`kmp/src/iosMain`](../kmp/src/iosMain)。
 
 **基础对话与指定 Mac 跨设备委托已通过真机验收，完整生产验收尚未完成。** 最新结果见本文末尾及 [2026-10-08 验收记录](../scripts/acceptance/results-2026-10-08.json)。以下 2026-09 的构建与验证描述保留为历史记录。 [`ios/OpenAICompanion.xcodeproj`](../ios/OpenAICompanion.xcodeproj) 的 App target 编译 Objective-C 启动壳、Objective-C++ llama.cpp 适配和 Swift MLX 适配，Gradle 构建 `kmp/iosApp` 静态框架；旧 Swift 原型和 Swift UniFFI 生成文件已移除。`kmp/iosApp` 已增加 Kotlin/Native Harness 适配、MCP 服务、Compose 状态控制器、GGUF 文件导入和 llama.cpp C 桥接的组装代码。`kmp/iosRustBridge` 已能生成 Kotlin/Native UniFFI 源码。2026-09-26 已在 Xcode 27.0 环境完成 llama.cpp XCFramework、Apple Silicon 模拟器与 iPhone 的无签名 App 构建；iPhone 18 Pro 模拟器已安装并启动 App，首屏、本地 SQLite 初始化、单一持续对话与重启恢复，以及小型 GGUF 的端侧生成回复已在模拟器验证。本机 MCP 连接和 3 个工具的发现已通过模拟器 UI 测试；工具调用、OAuth 与真机端到端验收仍需完成。

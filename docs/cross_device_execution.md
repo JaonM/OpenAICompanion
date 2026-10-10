@@ -1,5 +1,7 @@
 # 跨设备任务执行（v1）
 
+当前结论统一见[功能与验收状态](project-status.md)。本文的日期记录保留历史证据，不能用早期失败或旧测试数量替代最新结论。
+
 用户请求默认由发起设备的 Harness 处理。普通聊天不经过网关；需要设备动作时，模型使用 `list_execution_devices` 获取真实能力，再使用 `route_task` 检查能力、资源、指定设备和可用性。`LOCAL` 继续本地执行，`REMOTE` 使用已有 `delegate_to_agent` 提交；`NEEDS_USER_ACTION` 要求打开目标 App 或开启接单，`WAITING` 可明确委托排队，`UNSUPPORTED` 不能假装执行成功。
 
 ## 架构与边界

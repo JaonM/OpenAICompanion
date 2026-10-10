@@ -1,5 +1,7 @@
 # Android MVP
 
+当前结论统一见[功能与验收状态](project-status.md)。本文的日期记录保留历史证据，不能用早期失败或旧测试数量替代最新结论。
+
 Android App 位于 [`kmp/androidApp`](../kmp/androidApp)。界面、状态控制器、MCP 连接与 OAuth 流程、A2A 客户端和存储编解码、会话编码及 Rust UniFFI JVM 绑定与其他平台共享；Android 平台层负责 GGUF 文件导入、llama.cpp JNI、OAuth 浏览器回跳、Keystore 凭据、通知和系统数据源。Rust Harness 通过 `libharness.so` 在设备本地保存会话、记忆和主动任务。
 
 ## 构建
