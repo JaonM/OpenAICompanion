@@ -153,6 +153,39 @@
     // Never confirm deletion in the user's physical-device data store.
 }
 
+- (void)testModelRemovalConfirmationCanBeCancelled {
+    XCUIApplication *app = [self acceptanceApp];
+    app.launchArguments = @[@"-localInferenceEngine", @"MLX"];
+    [app launch];
+    [self openSettingsSection:@"端侧模型" app:app];
+    [app.buttons[@"MLX"] tap];
+    XCUIElement *remove = nil;
+    for (NSInteger i = 0; i < 10 && !remove; i++) {
+        for (XCUIElement *candidate in [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"label == %@ AND enabled == YES", @"删除模型"]].allElementsBoundByIndex) {
+            if (candidate.hittable && CGRectGetMidY(candidate.frame) > 180 && CGRectGetMaxY(candidate.frame) < CGRectGetMaxY(app.frame) - 100) { remove = candidate; break; }
+        }
+        if (!remove) [app swipeUp];
+    }
+    [self retainScreenshot:app name:@"Downloaded models and available remove action"];
+    if (!remove) {
+        XCTSkip(@"需要至少一个已下载且非当前使用的 MLX 模型；不下载或删除个人模型作为测试前置。");
+    }
+    XCTAssertTrue(remove.hittable);
+    [self retainScreenshot:app name:@"Downloaded model remove action before tap"];
+    [remove tap];
+    if (![app.buttons[@"确认删除"] waitForExistenceWithTimeout:2]) {
+        // The first touch may stop Compose scroll inertia instead of clicking.
+        [self retainScreenshot:app name:@"Model remove action after first tap"];
+        [remove tap];
+    }
+    XCTAssertTrue([app.buttons[@"确认删除"] waitForExistenceWithTimeout:5]);
+    [self retainScreenshot:app name:@"Model removal confirmation preserves downloaded model"];
+    [app.buttons[@"取消"] tap];
+    XCTAssertFalse(app.buttons[@"确认删除"].exists);
+    XCTAssertTrue(remove.exists);
+    // Do not confirm removal of the user's installed model.
+}
+
 - (void)testCrossDeviceConfigurationHelp {
     XCUIApplication *app = [self acceptanceApp];
     [app launch];

@@ -110,6 +110,28 @@ class MobileControllerTest {
     }
 
     @Test
+    fun cancelledDownloadReleasesModelBusyStateWithoutSelectingAnything() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val entered = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        val controller = MobileController(scope) { approve, _ ->
+            object : MobileBackend by FakeMobileBackend(approve) {
+                override suspend fun installModel(id: String) { entered.complete(Unit); cancelled.await() }
+                override fun cancelModelDownload() { cancelled.complete(Unit) }
+            }
+        }
+        try {
+            controller.start().join()
+            controller.installModel("qwen3-small")
+            entered.await()
+            assertTrue(controller.state.value.modelDownloading)
+            controller.cancelModelDownload()
+            withTimeout(1000) { controller.state.first { !it.modelChanging && !it.modelDownloading } }
+            Unit
+        } finally { scope.cancel() }
+    }
+
+    @Test
     fun remoteResultIsLinkedOnlyToTheActualDelegationReceipt() {
         assertEquals(42L, delegatedTaskId(MobileMessage("tool", "delegate_to_agent: {\"local_task_id\":42}")))
         assertNull(delegatedTaskId(MobileMessage("user", "delegate_to_agent: {\"local_task_id\":42}")))

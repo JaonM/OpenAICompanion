@@ -40,6 +40,8 @@ internal object AndroidLlamaNative {
 
 /** Device-local GGUF model; only the HTTP/MCP tools may use a network connection. */
 class AndroidLocalLlamaModel(private val context: Context, private val importer: AndroidGgufImporter) : AppModelServe, ModelLibraryProvider {
+    private val downloadConnection = java.util.concurrent.atomic.AtomicReference<java.net.HttpURLConnection?>()
+    fun cancelDownload() { downloadConnection.get()?.disconnect() }
     private val preferences = context.getSharedPreferences("companion_model", Context.MODE_PRIVATE)
     private val catalog = HuggingFaceModelCatalog().apply {
         remember(runCatching { Json.decodeFromString<List<LibraryModel>>(preferences.getString("downloadedCatalogModels", "[]")!!) }.getOrDefault(emptyList()))
@@ -71,7 +73,7 @@ class AndroidLocalLlamaModel(private val context: Context, private val importer:
             check(compatible.allowed) { compatible.description }
             val destination = catalogFile(model)
             if (id !in state.installed) {
-                downloadVerifiedModel(model, destination)
+                downloadVerifiedModel(model, destination, connectionChanged = { downloadConnection.set(it) })
                 check(preferences.edit().putString("downloadedCatalogModels", Json.encodeToString(catalog.models.filter { it.file.isNotEmpty() && catalogFile(it).isFile })).commit())
                 return@withLock
             }
@@ -94,6 +96,16 @@ class AndroidLocalLlamaModel(private val context: Context, private val importer:
                     throw failure
                 }
             }
+        }
+    }
+
+    override suspend fun removeModel(id: String) = withContext(Dispatchers.IO) {
+        gate.withLock {
+            val state = modelLibrary()
+            check(id in state.installed && state.selected != id) { "请先切换当前模型，再删除" }
+            check(catalogFile(catalog.get(id)).delete()) { "模型删除失败" }
+            check(preferences.edit().putString("downloadedCatalogModels", Json.encodeToString(catalog.models.filter {
+                it.file.isNotEmpty() && catalogFile(it).isFile })).commit())
         }
     }
 

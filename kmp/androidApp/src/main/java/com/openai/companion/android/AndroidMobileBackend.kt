@@ -117,6 +117,8 @@ class AndroidMobileBackend(
     override val mcpStatusUpdates: StateFlow<String> get() = mcp.statusUpdates
     override val modelLibrary get() = model.modelLibrary()
     override suspend fun installModel(id: String) = model.installModel(id)
+    override suspend fun removeModel(id: String) = model.removeModel(id)
+    override fun cancelModelDownload() = model.cancelDownload()
     override suspend fun browseModels(engine: String, search: String, more: Boolean) { model.browseModels(engine, search, more) }
     override suspend fun inspectModel(id: String) { model.inspectModel(id) }
     override val modelStatus: String get() = model.status()

@@ -21,6 +21,7 @@ data class ModelLibraryState(val device: ModelDevice, val installed: Set<String>
 interface ModelLibraryProvider {
     fun modelLibrary(): ModelLibraryState
     suspend fun installModel(id: String)
+    suspend fun removeModel(id: String)
     suspend fun browseModels(engine: String, search: String, more: Boolean = false) = Unit
     suspend fun inspectModel(id: String) = Unit
 }

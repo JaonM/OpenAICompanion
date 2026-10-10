@@ -10,9 +10,12 @@ mkdir -p "$app_resources"
 xcrun clang -dynamiclib -fobjc-arc -mmacosx-version-min=11.0 -framework Foundation -framework EventKit -framework AppKit \
   "$project_root/macos/CalendarBridge/CalendarBridge.m" -o "$app_resources/libcompanion_calendar.dylib"
 cp "$project_root/harness/target/release/libharness.dylib" "$app_resources/libharness.dylib"
+xcrun clang -dynamiclib -fobjc-arc -mmacosx-version-min=11.0 -framework Foundation -framework AppKit -framework UserNotifications \
+  "$project_root/macos/NotificationBridge/NotificationBridge.m" -o "$app_resources/libcompanion_notifications.dylib"
 
 cd "$project_root/kmp"
 export COMPANION_CALENDAR_LIBRARY_PATH="$app_resources/libcompanion_calendar.dylib"
+export COMPANION_NOTIFICATION_LIBRARY_PATH="$app_resources/libcompanion_notifications.dylib"
 export HARNESS_LIBRARY_PATH="$app_resources/libharness.dylib"
 gradle_args=(-PkmpJvmToolchain=21 -PskipAndroidApp=true)
 if [[ -n "${COMPANION_BUILD_DIR:-}" ]]; then

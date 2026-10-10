@@ -1,28 +1,28 @@
 package com.openai.companion.desktop
 
-import java.awt.Color
-import java.awt.SystemTray
-import java.awt.TrayIcon
-import java.awt.image.BufferedImage
+import com.sun.jna.Library
+import com.sun.jna.Native
+import java.io.File
 
-/** macOS/JVM delivery port. The user enables proactive reminders in Settings. */
-internal class DesktopNotificationSink {
-    private val trayIcon: TrayIcon? by lazy {
-        if (!SystemTray.isSupported()) return@lazy null
-        val image = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
-        val graphics = image.createGraphics()
-        graphics.color = Color(34, 95, 232)
-        graphics.fillOval(1, 1, 14, 14)
-        graphics.dispose()
-        TrayIcon(image, "OpenAICompanion").also { icon ->
-            icon.isImageAutoSize = true
-            SystemTray.getSystemTray().add(icon)
-        }
+/** Only a native system-delivery record can transition a reminder to delivered. */
+internal class DesktopNotificationSink(private val send: ((String, String, String) -> Int)? = null) {
+    private interface Bridge : Library {
+        fun companion_notification_deliver(identifier: String, title: String, body: String): Int
     }
-
-    fun deliver(title: String, body: String): Boolean {
-        val icon = trayIcon ?: return false
-        icon.displayMessage(title, body, TrayIcon.MessageType.INFO)
-        return true
+    private val bridge by lazy {
+        val path = System.getenv("COMPANION_NOTIFICATION_LIBRARY_PATH")
+            ?: System.getProperty("compose.application.resources.dir")?.let { File(it, "libcompanion_notifications.dylib").absolutePath }
+            ?: File("appResources/macos-arm64/libcompanion_notifications.dylib").absolutePath
+        try { Native.load(path, Bridge::class.java) }
+        catch (error: LinkageError) { throw IllegalStateException("通知组件不可用，请使用 scripts/macos-app.sh 构建的 App", error) }
+    }
+    fun deliver(identifier: String, title: String, body: String): Boolean = when (
+        send?.invoke(identifier, title, body) ?: bridge.companion_notification_deliver(identifier, title, body)) {
+        1 -> false
+        2 -> true
+        -4 -> error("系统通知权限未获允许，请在系统设置 → 通知中允许 OpenAICompanion")
+        -2 -> error("通知无法识别 App 身份，请运行正确打包的 OpenAICompanion.app")
+        -3 -> error("系统通知接口超时，请稍后重试")
+        else -> error("系统通知接口不可用，请运行打包 App 并检查系统通知设置")
     }
 }

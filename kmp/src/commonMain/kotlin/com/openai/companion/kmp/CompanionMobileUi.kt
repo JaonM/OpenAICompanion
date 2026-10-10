@@ -104,6 +104,7 @@ data class MobileUiState(
     val modelEngine: String = "llama.cpp",
     val modelImportLabel: String = "导入 GGUF",
     val modelChanging: Boolean = false,
+    val modelDownloading: Boolean = false,
     val modelCatalogLoading: Boolean = false,
     val modelCatalogError: String? = null,
     val modelLibrary: ModelLibraryState? = null,
@@ -147,6 +148,8 @@ interface MobileActions {
     fun answerInput(id: Long, contentJson: String?)
     fun selectModelEngine(engine: String) = Unit
     fun installModel(id: String) = Unit
+    fun removeModel(id: String) = Unit
+    fun cancelModelDownload() = Unit
     fun browseModels(search: String, more: Boolean) = Unit
     fun inspectModel(id: String) = Unit
     fun importModel()
@@ -301,9 +304,11 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             OutlinedButton(enabled = !state.sending && !state.modelChanging,
                                 onClick = actions::importModel) { Text(if (state.modelEngine == "MLX") "导入本地 MLX 文件夹" else "导入本地 GGUF 文件") }
                             if (state.modelEngine == "MLX") Text("进入包含配置、tokenizer 和 safetensors 权重的模型文件夹，再点“打开”。导入后点击“使用此模型”启用。", style = MaterialTheme.typography.bodySmall)
-                            state.modelLibrary?.let { ModelLibraryPanel(it, state.sending || state.modelChanging, actions::installModel,
+                            state.modelLibrary?.let { ModelLibraryPanel(it, state.sending || state.modelChanging || state.memoryClearing, actions::installModel,
                                 engine = state.modelEngine, loading = state.modelCatalogLoading, error = state.modelCatalogError,
-                                browse = actions::browseModels, inspect = actions::inspectModel, scrollState = settingsScroll) }
+                                browse = actions::browseModels, inspect = actions::inspectModel, scrollState = settingsScroll,
+                                remove = actions::removeModel) }
+                            if (state.modelDownloading) TextButton(onClick = actions::cancelModelDownload) { Text("取消下载") }
                         }
                         if (settingsSection == "工具扩展") {
                             Row(verticalAlignment = Alignment.CenterVertically) {

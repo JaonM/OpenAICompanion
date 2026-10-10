@@ -11,11 +11,19 @@ class DesktopModelLibraryTest {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         var fail = false
         var requestBody = ""
+        var deleted = false
         server.createContext("/api/pull") { exchange ->
             requestBody = exchange.requestBody.bufferedReader().readText()
             val response = (if (fail) "{\"error\":\"download failed\"}\n" else "{\"status\":\"pulling manifest\"}\n{\"status\":\"success\"}\n").toByteArray()
             exchange.sendResponseHeaders(200, response.size.toLong())
             exchange.responseBody.use { it.write(response) }
+        }
+        server.createContext("/api/delete") { exchange ->
+            assertEquals("DELETE", exchange.requestMethod)
+            assertTrue(exchange.requestBody.bufferedReader().readText().contains(ModelLibrary.get("qwen3-small").ollamaName))
+            deleted = true
+            exchange.sendResponseHeaders(200, -1)
+            exchange.close()
         }
         server.start()
         val adapter = DesktopModelServe()
@@ -29,10 +37,16 @@ class DesktopModelLibraryTest {
             assertTrue("qwen3-small" in adapter.modelLibrary().installed)
             adapter.installModel("qwen3-small")
             assertEquals("qwen3-small", adapter.modelLibrary().selected)
+            assertFailsWith<IllegalStateException> { adapter.removeModel("qwen3-small") }
+            assertFalse(deleted, "当前模型不能触发远端删除请求")
             val selected = adapter.model
             fail = true
             assertFailsWith<IllegalStateException> { adapter.installModel("qwen35-gguf") }
             assertEquals(selected, adapter.model)
+            adapter.save(adapter.endpoint, "different-model", "")
+            adapter.removeModel("qwen3-small")
+            assertTrue(deleted)
+            assertFalse("qwen3-small" in adapter.modelLibrary().installed)
         } finally { adapter.save(oldEndpoint, oldModel, ""); server.stop(0) }
     }
 }

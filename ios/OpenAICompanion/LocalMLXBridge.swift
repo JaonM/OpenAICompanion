@@ -182,24 +182,26 @@ private final class LocalMLX: @unchecked Sendable {
     static let shared = LocalMLX()
     private let lock = NSLock()
     private var active: Task<Void, Never>?
+    private var activeDownload = false
     private var container: ModelContainer?
     private var loadedPath: String?
     private var grammarTokenizer: GrammarTokenizer?
 
     // Kotlin calls this on its serial background model gate, never the main thread.
-    func run(_ operation: @escaping @Sendable () async throws -> Void) -> UnsafeMutablePointer<CChar>? {
+    func run(download: Bool = false, _ operation: @escaping @Sendable () async throws -> Void) -> UnsafeMutablePointer<CChar>? {
         let done = DispatchSemaphore(value: 0)
         let result = ResultBox()
         let task = Task.detached(priority: .userInitiated) {
             do { try await operation() } catch { result.error = error is GrammarError ? String(describing: error) : error.localizedDescription }
             done.signal()
         }
-        lock.lock(); active = task; lock.unlock()
+        lock.lock(); active = task; activeDownload = download; lock.unlock()
         done.wait()
-        lock.lock(); active = nil; lock.unlock()
+        lock.lock(); active = nil; activeDownload = false; lock.unlock()
         return result.error.flatMap { strdup($0) }
     }
     func cancel() { lock.lock(); let task = active; lock.unlock(); task?.cancel() }
+    func cancelDownload() { lock.lock(); let task = activeDownload ? active : nil; lock.unlock(); task?.cancel() }
     func unload() { container = nil; grammarTokenizer = nil; loadedPath = nil; MLX.Memory.clearCache() }
 
     func validateImportedModel(path: String) async throws {
@@ -372,6 +374,7 @@ func ocMLXGenerate(_ path: UnsafePointer<CChar>?, _ request: UnsafePointer<CChar
     return LocalMLX.shared.run { try await LocalMLX.shared.generate(path: modelPath, requestJSON: requestJSON, maxTokens: Int(maxTokens), emit: emit) }
 }
 @_cdecl("oc_mlx_cancel") func ocMLXCancel() { LocalMLX.shared.cancel() }
+@_cdecl("oc_model_download_cancel") func ocModelDownloadCancel() { LocalMLX.shared.cancelDownload() }
 @_cdecl("oc_mlx_unload") func ocMLXUnload() { LocalMLX.shared.unload() }
 
 private struct MLXModelFile: Decodable {
@@ -381,25 +384,103 @@ private struct MLXModelFile: Decodable {
     let blobId: String?
 }
 
+// Owns one pinned artifact transfer; cancellation persists URLSession resume data.
+private final class ResumableModelDownload: @unchecked Sendable {
+    private let lock = NSLock()
+    private let resumeFile: URL
+    private var task: URLSessionDownloadTask?
+    private var cancelled = false
+    private var finished = false
+    private var completion: (@Sendable (Result<URL, Error>) -> Void)?
+    init(resumeFile: URL) { self.resumeFile = resumeFile }
+    private func finish(_ result: Result<URL, Error>) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true
+        task = nil
+        let reply = completion
+        completion = nil
+        lock.unlock()
+        reply?(result)
+    }
+    func start(url: URL, completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
+        lock.lock()
+        self.completion = completion
+        guard !cancelled else { lock.unlock(); finish(.failure(CancellationError())); return }
+        let received: @Sendable (URL?, URLResponse?, Error?) -> Void = { [self] temporary, response, error in
+            lock.lock(); let wasCancelled = cancelled; lock.unlock()
+            if wasCancelled { return } // cancel's resume-data callback completes the operation.
+            if let error {
+                if let data = (error as NSError).userInfo["NSURLSessionDownloadTaskResumeData"] as? Data {
+                    try? data.write(to: resumeFile, options: .atomic)
+                } else { try? FileManager.default.removeItem(at: resumeFile) }
+                finish(.failure(error)); return
+            }
+            guard let temporary, let status = (response as? HTTPURLResponse)?.statusCode, [200, 206].contains(status) else {
+                try? FileManager.default.removeItem(at: resumeFile)
+                finish(.failure(MLXFailure.message("模型下载 HTTP 响应无效，请重试"))); return
+            }
+            do {
+                // URLSession's temporary URL expires when its callback returns.
+                let cached = resumeFile.appendingPathExtension("complete")
+                try? FileManager.default.removeItem(at: cached)
+                try FileManager.default.moveItem(at: temporary, to: cached)
+                try? FileManager.default.removeItem(at: resumeFile)
+                finish(.success(cached))
+            } catch { finish(.failure(error)) }
+        }
+        if let data = try? Data(contentsOf: resumeFile) {
+            task = URLSession.shared.downloadTask(withResumeData: data, completionHandler: received)
+        } else { task = URLSession.shared.downloadTask(with: url, completionHandler: received) }
+        task?.resume()
+        lock.unlock()
+    }
+    func cancel() {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        cancelled = true
+        let current = task
+        lock.unlock()
+        current?.cancel(byProducingResumeData: { [self] data in
+            if let data { try? data.write(to: resumeFile, options: .atomic) }
+            finish(.failure(CancellationError()))
+        })
+    }
+}
+
+private func resumableModelDownload(from url: URL, resumeFile: URL) async throws -> URL {
+    try Task.checkCancellation()
+    let cached = resumeFile.appendingPathExtension("complete")
+    if FileManager.default.fileExists(atPath: cached.path) { return cached }
+    try FileManager.default.createDirectory(at: resumeFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let operation = ResumableModelDownload(resumeFile: resumeFile)
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+            operation.start(url: url) { continuation.resume(with: $0) }
+        }
+    } onCancel: { operation.cancel() }
+}
+
 private func downloadMLXModel(to path: String, repository: String, revision: String, manifest: String) async throws {
     let files = try JSONDecoder().decode([MLXModelFile].self, from: Data(manifest.utf8))
     guard repository.range(of: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$", options: .regularExpression) != nil,
           revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
           !files.isEmpty, files.count <= 512, Set(files.map(\.file)).count == files.count else { throw MLXFailure.message("模型文件清单无效") }
     let destination = URL(fileURLWithPath: path, isDirectory: true)
-    let staging = destination.deletingLastPathComponent().appendingPathComponent(".mlx-download-" + UUID().uuidString)
+    let staging = destination.deletingLastPathComponent().appendingPathComponent(".mlx-download-" + destination.lastPathComponent + "-" + revision)
     let manager = FileManager.default
     try manager.createDirectory(at: staging, withIntermediateDirectories: true)
-    defer { try? manager.removeItem(at: staging) }
     for file in files {
         try Task.checkCancellation()
         guard file.bytes > 0, file.file.count <= 200,
               file.file.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({ $0 != "." && $0 != ".." && $0.range(of: "^[A-Za-z0-9_.-]+$", options: .regularExpression) != nil }) else { throw MLXFailure.message("模型文件路径无效") }
         let url = URL(string: "https://huggingface.co/\(repository)/resolve/\(revision)/\(file.file)")!
-        let (temporary, response) = try await URLSession.shared.download(from: url)
-        defer { try? manager.removeItem(at: temporary) }
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-              (try manager.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == file.bytes else { throw MLXFailure.message("模型文件下载失败：\(file.file)") }
+        let target = staging.appendingPathComponent(file.file)
+        let temporary = manager.fileExists(atPath: target.path) ? target : try await resumableModelDownload(from: url, resumeFile: target.appendingPathExtension("resume"))
+        guard (try manager.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == file.bytes else {
+            try? manager.removeItem(at: temporary)
+            throw MLXFailure.message("模型文件下载失败：\(file.file)")
+        }
         let handle = try FileHandle(forReadingFrom: temporary)
         defer { try? handle.close() }
         var hash = SHA256(), gitHash = Insecure.SHA1()
@@ -410,11 +491,14 @@ private func downloadMLXModel(to path: String, repository: String, revision: Str
         let digest = hash.finalize().map({ String(format: "%02x", $0) }).joined()
         let gitDigest = gitHash.finalize().map({ String(format: "%02x", $0) }).joined()
         let valid = !(file.sha256 ?? "").isEmpty ? digest == file.sha256 : gitDigest == file.blobId
-        guard valid else { throw MLXFailure.message("模型文件校验失败：\(file.file)") }
-        let target = staging.appendingPathComponent(file.file)
+        guard valid else {
+            try? manager.removeItem(at: temporary)
+            throw MLXFailure.message("模型文件校验失败：\(file.file)")
+        }
         try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try manager.moveItem(at: temporary, to: target)
+        if temporary != target { try manager.moveItem(at: temporary, to: target) }
     }
+    try Task.checkCancellation()
     if manager.fileExists(atPath: destination.path) { _ = try manager.replaceItemAt(destination, withItemAt: staging) }
     else { try manager.moveItem(at: staging, to: destination) }
 }
@@ -422,7 +506,7 @@ private func downloadMLXModel(to path: String, repository: String, revision: Str
 func ocMLXDownloadManifest(_ path: UnsafePointer<CChar>?, _ repository: UnsafePointer<CChar>?, _ revision: UnsafePointer<CChar>?, _ manifest: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
     guard let path, let repository, let revision, let manifest else { return strdup("MLX 模型下载参数无效") }
     let directory = String(cString: path), repo = String(cString: repository), sha = String(cString: revision), files = String(cString: manifest)
-    return LocalMLX.shared.run { try await downloadMLXModel(to: directory, repository: repo, revision: sha, manifest: files) }
+    return LocalMLX.shared.run(download: true) { try await downloadMLXModel(to: directory, repository: repo, revision: sha, manifest: files) }
 }
 
 // Local import never resolves remote files. Only safe model files are copied.
@@ -490,17 +574,23 @@ func ocModelDownload(_ rawURL: UnsafePointer<CChar>?, _ rawPath: UnsafePointer<C
     guard let rawURL, let rawPath, let rawHash,
           let url = URL(string: String(cString: rawURL)), url.scheme == "https", url.host == "huggingface.co" else { return strdup("模型下载参数无效") }
     let destination = URL(fileURLWithPath: String(cString: rawPath)), expectedHash = String(cString: rawHash)
-    return LocalMLX.shared.run {
+    guard bytes > 0, expectedHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { return strdup("模型校验参数无效") }
+    return LocalMLX.shared.run(download: true) {
         let manager = FileManager.default
-        let (temporary, response) = try await URLSession.shared.download(from: url)
-        defer { try? manager.removeItem(at: temporary) }
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-              (try manager.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == bytes else { throw MLXFailure.message("模型下载失败或文件大小不匹配") }
+        let temporary = try await resumableModelDownload(from: url, resumeFile: destination.deletingLastPathComponent().appendingPathComponent(".model-" + expectedHash + ".resume"))
+        guard (try manager.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == bytes else {
+            try? manager.removeItem(at: temporary)
+            throw MLXFailure.message("模型下载失败或文件大小不匹配")
+        }
         let handle = try FileHandle(forReadingFrom: temporary)
         defer { try? handle.close() }
         var hash = SHA256()
-        while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
-        guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == expectedHash else { throw MLXFailure.message("模型 SHA256 校验失败") }
+        while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { try Task.checkCancellation(); hash.update(data: data) }
+        guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == expectedHash else {
+            try? manager.removeItem(at: temporary)
+            throw MLXFailure.message("模型 SHA256 校验失败")
+        }
+        try Task.checkCancellation()
         try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         if manager.fileExists(atPath: destination.path) { _ = try manager.replaceItemAt(destination, withItemAt: temporary) }
         else { try manager.moveItem(at: temporary, to: destination) }

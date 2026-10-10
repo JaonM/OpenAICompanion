@@ -76,6 +76,8 @@ interface MobileBackend {
     val modelStatus: String
     val modelLibrary: ModelLibraryState? get() = null
     suspend fun installModel(id: String) = Unit
+    suspend fun removeModel(id: String) = Unit
+    fun cancelModelDownload() = Unit
     suspend fun browseModels(engine: String, search: String, more: Boolean) = Unit
     suspend fun inspectModel(id: String) = Unit
     val modelEngines: List<String> get() = emptyList()
@@ -277,11 +279,28 @@ class MobileController(
         }
     }
 
+    private var modelDownloadJob: Job? = null
     override fun installModel(id: String) {
+        if (state.value.sending || state.value.modelChanging || state.value.memoryClearing) return
+        val downloading = id !in (state.value.modelLibrary?.installed ?: emptySet())
+        mutableState.update { it.copy(modelChanging = true, modelDownloading = downloading) }
+        modelDownloadJob = scope.launch {
+            try { perform { backend.installModel(id) } }
+            finally { syncSettings(); mutableState.update { it.copy(modelChanging = false, modelDownloading = false) } }
+        }
+    }
+
+    override fun cancelModelDownload() {
+        if (!state.value.modelDownloading) return
+        modelDownloadJob?.cancel()
+        backend.cancelModelDownload()
+    }
+
+    override fun removeModel(id: String) {
         if (state.value.sending || state.value.modelChanging || state.value.memoryClearing) return
         mutableState.update { it.copy(modelChanging = true) }
         scope.launch {
-            try { perform { backend.installModel(id) } }
+            try { perform { backend.removeModel(id) } }
             finally { syncSettings(); mutableState.update { it.copy(modelChanging = false) } }
         }
     }

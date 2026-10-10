@@ -36,7 +36,8 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
     private val requestGate = Mutex()
     private val defaults = CompanionModelDefaults()
     private val preferences = Preferences.userNodeForPackage(DesktopModelServe::class.java)
-    private val catalogFile = File(System.getProperty("user.home"), "Library/Application Support/OpenAICompanion/model-library.json")
+    private val catalogFile = File(System.getenv("COMPANION_DATA_DIR")?.takeIf(String::isNotBlank)
+        ?: (System.getProperty("user.home") + "/Library/Application Support/OpenAICompanion"), "model-library.json")
     private val catalog = HuggingFaceModelCatalog().apply {
         remember(runCatching { Json.decodeFromString<List<LibraryModel>>(catalogFile.takeIf { it.isFile }?.readText() ?: "[]") }.getOrDefault(emptyList()))
     }
@@ -48,6 +49,9 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
         .build()
     private val activeRequest = AtomicReference<CompletableFuture<HttpResponse<InputStream>>?>()
     private val activeStream = AtomicReference<InputStream?>()
+    private val downloadRequest = AtomicReference<CompletableFuture<HttpResponse<InputStream>>?>()
+    private val downloadStream = AtomicReference<InputStream?>()
+    @Volatile private var downloadCancelled = false
 
     @Volatile var endpoint: String = preferences.get("endpoint", defaults.desktopEndpoint)
     @Volatile var model: String = preferences.get("model", defaults.modelName)
@@ -74,22 +78,31 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
             check(compatible.allowed) { compatible.description }
             check(isLocalEndpoint()) { "模型库仅支持本机 Ollama，请先连接 localhost" }
             if (id !in state.installed) {
+                downloadCancelled = false
                 val uri = URI.create(endpoint)
                 val pull = URI(uri.scheme, null, uri.host, uri.port, "/api/pull", null, null)
                 val body = buildJsonObject { put("model", JsonPrimitive(entry.ollamaName)); put("stream", JsonPrimitive(true)) }.toString()
                 val request = HttpRequest.newBuilder(pull).timeout(Duration.ofHours(2)).header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body)).build()
-                val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
-                response.body().bufferedReader().use { reader ->
+                val pending = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
+                downloadRequest.set(pending)
+                if (downloadCancelled) pending.cancel(true)
+                val response = try { pending.get() } finally { downloadRequest.compareAndSet(pending, null) }
+                val stream = response.body()
+                downloadStream.set(stream)
+                try { stream.bufferedReader().use { reader ->
+                    check(!downloadCancelled) { "模型下载已取消" }
                     check(response.statusCode() == 200) { "Ollama 下载失败 HTTP ${response.statusCode()}" }
                     var success = false
                     reader.forEachLine { line ->
+                        check(!downloadCancelled) { "模型下载已取消" }
                         val item = Json.parseToJsonElement(line).jsonObject
                         item["error"]?.jsonPrimitive?.content?.let(::error)
                         if (item["status"]?.jsonPrimitive?.content == "success") success = true
                     }
                     check(success) { "模型下载未完成" }
-                }
+                } } finally { downloadStream.compareAndSet(stream, null) }
+                check(!downloadCancelled) { "模型下载已取消" }
                 installedModels = installedModels + entry.ollamaName
                 catalogFile.parentFile.mkdirs()
                 val temporary = File.createTempFile(".catalog-", ".json", catalogFile.parentFile)
@@ -106,6 +119,22 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
     fun isLocalEndpoint(): Boolean = runCatching { URI.create(endpoint).host }
         .getOrNull() in setOf("localhost", "127.0.0.1", "::1")
 
+    override suspend fun removeModel(id: String) = requestGate.withLock {
+        withContext(Dispatchers.IO) {
+            val state = modelLibrary()
+            check(isLocalEndpoint() && id in state.installed && state.selected != id) { "请先切换当前模型，再删除" }
+            val entry = catalog.get(id)
+            val uri = URI.create(endpoint)
+            val request = HttpRequest.newBuilder(URI(uri.scheme, null, uri.host, uri.port, "/api/delete", null, null))
+                .timeout(Duration.ofSeconds(30)).header("Content-Type", "application/json")
+                .method("DELETE", HttpRequest.BodyPublishers.ofString(buildJsonObject { put("model", JsonPrimitive(entry.ollamaName)) }.toString())).build()
+            check(client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode() == 200) { "Ollama 模型删除失败" }
+            installedModels = installedModels - entry.ollamaName
+            catalogFile.parentFile.mkdirs()
+            catalogFile.writeText(Json.encodeToString(catalog.models.filter { it.ollamaName in installedModels }))
+        }
+    }
+
     fun save(endpoint: String, model: String, apiKey: String) {
         this.endpoint = endpoint.trim()
         this.model = model.trim()
@@ -119,6 +148,11 @@ class DesktopModelServe : AppModelServe, ModelLibraryProvider {
         lastError = "生成已取消"
         activeRequest.getAndSet(null)?.cancel(true)
         activeStream.getAndSet(null)?.let { stream -> runCatching { stream.close() } }
+    }
+    fun cancelModelDownload() {
+        downloadCancelled = true
+        downloadRequest.get()?.cancel(true)
+        downloadStream.get()?.let { runCatching { it.close() } }
     }
 
     suspend fun localStatus(): String = withContext(Dispatchers.IO) {

@@ -24,6 +24,7 @@ char *oc_mlx_download_manifest(const char *model_directory, const char *reposito
 char *oc_mlx_import_directory(const char *source_directory, const char *models_directory);
 char *oc_model_download(const char *url, const char *path, const char *sha256, long long bytes);
 void oc_mlx_cancel(void);
+void oc_model_download_cancel(void);
 void oc_mlx_unload(void);
 
 #ifdef __cplusplus

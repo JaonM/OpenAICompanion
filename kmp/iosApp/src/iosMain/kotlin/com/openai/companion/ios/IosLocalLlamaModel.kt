@@ -7,6 +7,7 @@ import kotlinx.serialization.decodeFromString
 import com.openai.companion.ios.llama.oc_mlx_import_directory
 import com.openai.companion.ios.llama.oc_mlx_download_manifest
 import com.openai.companion.ios.llama.oc_model_download
+import com.openai.companion.ios.llama.oc_model_download_cancel
 import com.openai.companion.kmp.ModelLibrary
 import com.openai.companion.kmp.ModelLibraryProvider
 import com.openai.companion.kmp.ModelLibraryState
@@ -121,6 +122,21 @@ class IosLocalLlamaModel : AppModelServe, ModelLibraryProvider {
         }
     }
 
+    override suspend fun removeModel(id: String) = withContext(Dispatchers.Default) {
+        gate.withLock {
+            val model = catalog.get(id)
+            val state = modelLibrary()
+            check(id in state.installed && state.selected != id) { "请先切换当前模型，再删除" }
+            val path = if (model.engine == "MLX") mlxDirectory(model) else ggufPath(model)
+            check(NSFileManager.defaultManager.removeItemAtPath(path, error = null)) { "模型删除失败" }
+            for (key in listOf("selectedCatalogMLX", "selectedCatalogGGUF")) {
+                if (defaults.stringForKey(key) == id) defaults.removeObjectForKey(key)
+            }
+            if (defaults.stringForKey(MODEL_FILE_KEY)?.let { path == modelDirectory() + it } == true) defaults.removeObjectForKey(MODEL_FILE_KEY)
+            defaults.setObject(Json.encodeToString(catalog.models.filter(::downloaded)), forKey = "downloadedCatalogModels")
+        }
+    }
+
     suspend fun selectEngine(name: String) = withContext(Dispatchers.Default) {
         require(name in listOf("llama.cpp", "MLX")) { "未知推理引擎" }
         if (name == selectedEngine) return@withContext
@@ -214,6 +230,7 @@ class IosLocalLlamaModel : AppModelServe, ModelLibraryProvider {
         oc_llama_cancel(engine)
         oc_mlx_cancel()
     }
+    fun cancelDownload() = oc_model_download_cancel()
 
     fun status(): String {
         if (selectedEngine == "MLX") return if (mlxReady(activeMLX())) "MLX 模型可用 · ${activeMLX().let { if (it.revision == "local") it.title else it.repository.substringAfter('/') }}" else "请在模型库下载并选择 MLX 模型"

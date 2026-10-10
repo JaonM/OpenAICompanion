@@ -100,6 +100,8 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe(), pr
     private val proactiveWake = Channel<Unit>(Channel.CONFLATED)
     private val discoveryWake = Channel<Unit>(Channel.CONFLATED)
     private val notificationSink = DesktopNotificationSink()
+    @Volatile var notificationStatus = "尚无待发送提醒"
+        private set
     private val codec = CompanionConversationCodec()
     private val bindings = GeneratedHarnessBindingsAdapter()
     private val manager = McpServerManager()
@@ -198,14 +200,17 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe(), pr
                 try {
                     processProactiveTasks()
                     val nextRun = nextProactiveWakeAt()
+                    val pendingNotifications = Json.parseToJsonElement(appReadyProactiveNotifications().value()).jsonArray.isNotEmpty()
                     if (nextRun == null) {
-                        proactiveWake.receive()
+                        if (pendingNotifications) withTimeoutOrNull(15_000) { proactiveWake.receive() }
+                        else proactiveWake.receive()
                     } else {
                         val waitMillis = ((nextRun - Instant.now().epochSecond) * 1_000)
                             .coerceAtLeast(1)
-                        withTimeoutOrNull(waitMillis) { proactiveWake.receive() }
+                        withTimeoutOrNull(if (pendingNotifications) minOf(waitMillis, 15_000) else waitMillis) { proactiveWake.receive() }
                     }
                 } catch (error: Exception) {
+                    notificationStatus = "提醒暂缓：${error.message}"
                     System.err.println("主动任务暂缓：${error.message}")
                     withTimeoutOrNull(60_000) { proactiveWake.receive() }
                 }
@@ -368,10 +373,14 @@ class DesktopBackend(val modelServe: DesktopModelServe = DesktopModelServe(), pr
         Json.parseToJsonElement(appReadyProactiveNotifications().value()).jsonArray.forEach { item ->
             val notification = item.jsonObject
             if (notificationSink.deliver(
+                "companion-${System.getenv("COMPANION_DATA_DIR").orEmpty().hashCode()}-${notification.getValue("id").jsonPrimitive.content}-${notification.getValue("event_at").jsonPrimitive.content}",
                 notification.getValue("title").jsonPrimitive.content,
                 notification.getValue("body").jsonPrimitive.content,
             )) {
                 appMarkProactiveDelivered(notification.getValue("id").jsonPrimitive.content.toLong()).value()
+                notificationStatus = "系统已记录通知送达；横幅显示仍受专注模式等系统设置影响"
+            } else {
+                notificationStatus = "通知已提交，等待系统确认送达"
             }
         }
     }

@@ -67,6 +67,8 @@ import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.DialogState
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import com.openai.companion.kmp.CompanionStreamAccumulator
 
@@ -411,6 +413,8 @@ private fun CodexSettings(
     var connecting by remember { mutableStateOf(false) }
     var library by remember { mutableStateOf(backend.modelServe.modelLibrary()) }
     var downloading by remember { mutableStateOf(false) }
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
+    var canCancelDownload by remember { mutableStateOf(false) }
     var catalogLoading by remember { mutableStateOf(false) }
     var catalogError by remember { mutableStateOf<String?>(null) }
     fun catalogAction(action: suspend () -> Unit) {
@@ -427,17 +431,28 @@ private fun CodexSettings(
         MaterialTheme {
             val modelLibraryScroll = rememberScrollState()
             Column(Modifier.fillMaxSize().verticalScroll(modelLibraryScroll).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ModelLibraryPanel(library, downloading, engine = "Ollama", scrollState = modelLibraryScroll, loading = catalogLoading, error = catalogError,
+                ModelLibraryPanel(library, downloading || !memoryClearEnabled, engine = "Ollama", scrollState = modelLibraryScroll, loading = catalogLoading, error = catalogError,
                     browse = { search, more -> catalogAction { backend.modelServe.browseModels("Ollama", search, more) } },
-                    inspect = { id -> catalogAction { backend.modelServe.inspectModel(id) } }, install = { id -> scope.launch {
+                    inspect = { id -> catalogAction { backend.modelServe.inspectModel(id) } }, install = { id ->
+                    canCancelDownload = id !in library.installed
                     downloading = true
+                    downloadJob = scope.launch {
                     try {
                         backend.modelServe.installModel(id)
                         model = backend.modelServe.model
                         onSaved()
-                    } catch (cause: Exception) { onError(cause.message) }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (cause: Exception) { onError(cause.message) }
+                    finally { library = backend.modelServe.modelLibrary(); downloading = false; canCancelDownload = false }
+                } }, remove = { id -> scope.launch {
+                    downloading = true
+                    try { backend.modelServe.removeModel(id) }
+                    catch (cause: Exception) { onError(cause.message) }
                     finally { library = backend.modelServe.modelLibrary(); downloading = false }
                 } })
+                if (downloading && canCancelDownload) TextButton(onClick = {
+                    backend.modelServe.cancelModelDownload(); downloadJob?.cancel()
+                }) { Text("取消下载") }
                 Text("模型与连接", style = MaterialTheme.typography.titleLarge)
                 Text("默认连接本机 Ollama，使用 Unsloth Qwen3.8-27B UD-Q4_K_M。", color = secondaryText,
                     style = MaterialTheme.typography.bodySmall)
@@ -505,6 +520,10 @@ private fun ProactiveTasksDialog(backend: DesktopBackend, onClose: () -> Unit, o
     val scope = rememberCoroutineScope()
     var tasks by remember { mutableStateOf(backend.proactiveTasks) }
     var proactiveSettings by remember { mutableStateOf(backend.proactiveSettings) }
+    var notificationStatus by remember { mutableStateOf(backend.notificationStatus) }
+    LaunchedEffect(Unit) {
+        while (true) { notificationStatus = backend.notificationStatus; delay(1_000) }
+    }
     var memorySyncEndpoint by remember { mutableStateOf(backend.memorySyncEndpoint) }
     var memorySyncToken by remember { mutableStateOf("") }
     var memorySyncStatus by remember { mutableStateOf(backend.memorySyncStatus) }
@@ -513,6 +532,7 @@ private fun ProactiveTasksDialog(backend: DesktopBackend, onClose: () -> Unit, o
             Column(Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("端侧模型会从对话和已有记忆主动发现任务。", style = MaterialTheme.typography.titleMedium)
+                Text(notificationStatus, style = MaterialTheme.typography.bodySmall)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(proactiveSettings.enabled, { enabled -> scope.launch {
                         try {

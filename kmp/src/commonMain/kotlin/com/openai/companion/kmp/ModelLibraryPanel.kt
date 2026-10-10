@@ -15,10 +15,16 @@ import androidx.compose.ui.unit.dp
 fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String) -> Unit,
     engine: String = state.catalogEngine.ifBlank { if (state.device.platform == "macOS") "Ollama" else "llama.cpp" },
     loading: Boolean = false, error: String? = null, browse: (String, Boolean) -> Unit = { _, _ -> },
-    inspect: (String) -> Unit = {}, scrollState: ScrollState? = null) {
+    inspect: (String) -> Unit = {}, scrollState: ScrollState? = null, remove: (String) -> Unit = {}) {
     val uriHandler = LocalUriHandler.current
     val focusManager = LocalFocusManager.current
     var search by remember(engine) { mutableStateOf("") }
+    var removing by remember { mutableStateOf<LibraryModel?>(null) }
+    removing?.let { model -> AlertDialog(onDismissRequest = { removing = null },
+        title = { Text("删除已下载模型？") },
+        text = { Text("${model.title}\n释放模型占用的空间，不清除对话与记忆。需要时可重新${if (model.revision == "local") "导入" else "下载"}；当前使用的模型需先切换后再删除。") },
+        confirmButton = { TextButton(enabled = !busy, onClick = { removing = null; remove(model.id) }) { Text("确认删除") } },
+        dismissButton = { TextButton(onClick = { removing = null }) { Text("取消") } }) }
     LaunchedEffect(engine) { browse("", false) }
     val currentBrowse by rememberUpdatedState(browse)
     val currentSearch by rememberUpdatedState(search)
@@ -38,6 +44,7 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
     Text(if (engine == "MLX") "来源：Hugging Face / mlx-community" else "来源：Hugging Face / GGUF 仓库",
         style = MaterialTheme.typography.bodySmall)
     Text("浏览只读取模型信息。下载完成后点击“使用此模型”切换；仅显示适合当前设备的候选，兼容性按硬件估算，当前仅支持文本。", style = MaterialTheme.typography.bodySmall)
+    Text("取消下载会保留可恢复数据，重试时继续；系统恢复数据不可用时重新下载。", style = MaterialTheme.typography.bodySmall)
     OutlinedTextField(search, { search = it }, label = { Text("搜索 Hugging Face 模型") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     Row { Button(enabled = !loading && !busy, onClick = { focusManager.clearFocus(); browse(search, false) }) { Text("搜索") }
         TextButton(enabled = !loading && !busy, onClick = { browse(search, false) }) { Text("刷新列表") } }
@@ -64,6 +71,8 @@ fun ModelLibraryPanel(state: ModelLibraryState, busy: Boolean, install: (String)
                     Text(if (state.selected == model.id) "使用中" else if (downloaded) "使用此模型" else if (!model.resolved) "查看文件" else "下载")
                 }
                 if (downloaded && state.selected != model.id) Text("已下载，无需重复下载", style = MaterialTheme.typography.bodySmall)
+                if (downloaded) TextButton(enabled = !busy && !loading && state.selected != model.id,
+                    onClick = { removing = model }) { Text("删除模型") }
             }
         }
     }
