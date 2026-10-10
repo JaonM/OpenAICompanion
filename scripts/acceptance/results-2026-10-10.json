@@ -39,5 +39,83 @@
     "Initial JVM run lacked HARNESS_LIBRARY_PATH; native bridge failures resolved by supplying the existing library.",
     "Markdown 0.33.0 passed JVM rendering but failed native linking; 0.37.0 linked on iOS but failed JVM UI runtime. Stable 0.35.0 passes both.",
     "An intermediate streamed-state wrapper re-created parser instances; instances are now remembered and final render test passes."
-  ]
+  ],
+  "mlx_native_tools": {
+    "scope": "iOS MLX native tool templates, messages, parsing and required-call constraints",
+    "implementation_commit": "832d8e7",
+    "device": "iPhone 17 Pro Max / iOS 27.0.1",
+    "model": "Qwen3.5-4B-MLX-4bit",
+    "sdk": "mlx-swift-lm 3.32.3 (clean pinned checkout)",
+    "checks": [
+      {
+        "name": "Native messages retain tool roles/call IDs, typed arguments and reject malformed inputs; GGUF regression preserved",
+        "status": "passed",
+        "log": "/tmp/companion-mlx-native-prompt-final-1010.log"
+      },
+      {
+        "name": "Production JSON types, UTF-16 stream boundaries, required-call tags and current-turn resource/agent constraints",
+        "status": "passed",
+        "log": "/tmp/companion-mlx-native-values-final-1010.log"
+      },
+      {
+        "name": "Installed SDK Qwen35 XML/JSON parsing, typed/empty arguments and malformed/undeclared calls",
+        "status": "passed",
+        "log": "/tmp/companion-mlx-native-parser-final-1010.log"
+      },
+      {
+        "name": "Full JVM regression with native Harness library",
+        "status": "passed",
+        "log": "/tmp/companion-mlx-native-jvm-1010.log"
+      },
+      {
+        "name": "Routing regression including device IDs rejected as resource references",
+        "status": "passed",
+        "tests": 8,
+        "log": "/tmp/companion-mlx-native-routing-test-1010.log"
+      },
+      {
+        "name": "Final signed iOS App and UI test build",
+        "status": "passed",
+        "log": "/tmp/companion-mlx-native-device13-1010.log"
+      },
+      {
+        "name": "Physical MLX local arithmetic returns exactly 42 without new remote tasks",
+        "status": "passed",
+        "seconds": 55.416,
+        "log": "/tmp/companion-mlx-native-device11-1010.log"
+      },
+      {
+        "name": "Physical growing reasoning and answer streams, exact complete 1..30, stop and restored input",
+        "status": "passed",
+        "seconds": 120.755,
+        "log": "/tmp/companion-mlx-native-device11-1010.log"
+      },
+      {
+        "name": "Physical discovery, routing, approval, new Mac task, execution and iPhone conversation result 42",
+        "status": "passed",
+        "seconds": 168.71,
+        "log": "/tmp/companion-mlx-native-device13-1010.log",
+        "bundle": "/tmp/companion-physical-acceptance-20261007/DerivedData/Logs/Test/Test-OpenAICompanion-2026.10.10_11-47-38-+0800.xcresult",
+        "local_task_id": 26,
+        "remote_task_id": "518873fe1f4346b8bc746828501ff446",
+        "server_state": "TASK_STATE_COMPLETED",
+        "server_output": "42",
+        "screenshot": "/tmp/companion-mlx-native-passed-1010/E5C77FFA-1A66-42F3-A4CD-D60810398C5F.png"
+      }
+    ],
+    "failed_diagnostics": [
+      "Initial Foundation empty-prefix check rejected the first streamed chunk; fixed with UTF-16 prefix checks and combining-character/emoji regression fixtures.",
+      "Unconstrained required turns could return text, invalid calls or incorrect resource references. Required calls now use native structural tags and declared schemas; fresh discovery constrains resource references and the current REMOTE route constrains agent_id.",
+      "SDK Qwen XML compiler rejected an empty closed object and then an empty const_string. Empty XML parameter bodies use a newline; Qwen3.5 required calls use the SDK-supported framed JSON dialect with the optimized JSON Schema compiler.",
+      "Plain native answers initially added headings/notes despite digits-only requests. Latest-request format guidance fixed the exact 42 and 1..30 device regressions.",
+      "Intermediate device11 test group was mixed: local/streaming passed while cross-device failed. It is not counted as an entirely passing group.",
+      "Device12 created real remote task e19dc55d9f594ab3b9c0b8e9b03da7e5 and the Mac returned 42, but the UI test still searched StaticText after Markdown rendering changed element type. The corrected type-independent locator preserves the new task and exact result assertions; device13 passes.",
+      "Diagnostic logs remain at /tmp/companion-mlx-native-device-1010.log and /tmp/companion-mlx-native-device2-1010.log through device12-1010.log. Temporary route-argument export code was removed before implementation commit."
+    ],
+    "limits": [
+      "Physical inference checks cover the selected Qwen3.5 model and this device, not every MLX model family or long-duration stress.",
+      "MLX input remains text-only. llama.cpp tool compatibility handling is unchanged.",
+      "Automatic calls are parsed and validated before execution; simultaneous tools plus response schema use final JSON instructions and existing Harness result validation rather than a JSON-only mask."
+    ]
+  }
 }

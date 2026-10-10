@@ -94,7 +94,7 @@ KMP + Compose 版本已有共享界面、状态控制器、MCP 客户端、Kotli
 
 MLX 使用固定 `mlx-swift-lm 3.32.3`，依赖版本由 Xcode `Package.resolved` 锁定。模型为 [mlx-community/Qwen3.5-4B-MLX-4bit](https://huggingface.co/mlx-community/Qwen3.5-4B-MLX-4bit)，固定 revision `32f3e8ecf65426fc3306969496342d504bfa13f3`，全部文件约 3.06 GB。`model.safetensors` 大小 3,034,300,695 字节，SHA-256 `5fb9acd0246866381cf8c5c354c6db1019f6498eec4ccb4f5edcc71ffeacb2db`。下载入口逐文件校验大小和 SHA-256，全部完成后才替换模型目录；下载失败保留原目录。模型保存在 App 私有 MLXModels 目录，不加入 App 包或 Git。本次已经从上游下载、校验并复制到验收手机；App 内再次下载的网络流程另列待验收。
 
-两个引擎均接收 Harness 的 `messages` 请求，使用 `role` 和文本 `content`，输出 Chat Completions 风格的增量片段。适配层将 developer 转为 system，将工具返回包为不可信 user 数据，并保留历史工具名和调用 ID；这属于文本兼容层，不是完整 OpenAI HTTP API。llama.cpp 使用 GGUF 内模板的原生适配；MLX Tokenizer 使用模型的 `chat_template.jinja`。当前只接入文本推理：仓库含视觉权重和多模态模板不代表 App 已支持图片、视频或音频输入。
+两个引擎均接收 Harness 的 `messages` 请求，使用 `role` 和文本 `content`，输出 Chat Completions 风格的增量片段。llama.cpp 兼容层将 developer 转为 system，将工具返回包为不可信 user 数据，并保留历史工具名和调用 ID。MLX 的最新原生工具协议见下文；两者均不是完整 OpenAI HTTP API。llama.cpp 使用 GGUF 内模板的原生适配；MLX Tokenizer 使用模型的 `chat_template.jinja`。当前只接入文本推理：仓库含视觉权重和多模态模板不代表 App 已支持图片、视频或音频输入。
 
 Qwen3.5 保留 256 token 思考预算和最多 512 token 正文。思考内容通过独立 reasoning 增量实时显示为灰色小字，最多保留 1200 个 UTF-16 单元并用省略号截断，界面最多显示三行；历史思考仍折叠显示。随后正文在模型生成期间逐步增长，支持从工具 JSON 包装中解码不完整字符串，并处理转义、中文和 Unicode 代理对。只输出新增片段，结束时补齐剩余片段；工具调用与委托任务的结构化状态仍在完整校验后交付，不能流成正文。停止、完成或失败后移除实时正文与思考气泡。
 
@@ -104,7 +104,7 @@ Foundation 流片段/模板回归通过；共享控制器 13 项、设备路由 
 
 MLX 的长提示词预填充分为每批 128 token，并同步回收 GPU 中间结果，避免手机上的瞬时内存峰值；结构化输出使用 MLX 官方库的 JSON Schema 约束接口。已通过的 MLX 真机用例覆盖 `42 → 50` 连续对话、重启保留引擎、切回原 GGUF 并回答 `42`。此前长提示词退出、流式语法掩码计算变慢及路由重复发现的失败均保留在验收记录中。
 
-明确委托尚未提交时，Harness 使用标准 `tool_choice: required`，两个本地引擎在输出约束中禁止用普通文本代替工具调用；路由不支持、需要用户处理或执行失败时仍可解释原因。Harness 也拒绝模型绕过此要求返回的口头应答，只有本轮真实任务回执才确认提交。
+明确委托尚未提交时，Harness 使用标准 `tool_choice: required`，llama.cpp 通过输出语法约束要求调用，MLX 的 Qwen/JSON 格式通过原生工具参数约束及最终调用检查要求调用；路由不支持、需要用户处理或执行失败时仍可解释原因。Harness 也拒绝模型绕过此要求返回的口头应答，只有本轮真实任务回执才确认提交。
 
 
 ## 2026-10-09 收尾验收
@@ -114,3 +114,15 @@ MLX 的长提示词预填充分为每批 128 token，并同步回收 GPU 中间�
 设备发现现在明确包含 `model.complete`，路由参数只采用本轮发布的能力名；未配置设备网关时不发布设备路由工具，保留独立 A2A 的直接委托路径。消息列表使用稳定标识，自动滚动随下一次布局执行，修复测试中出现的文本布局缓存崩溃。
 
 这些是指定手机和测试服务下的功能验收，不能视为完整生产或性能验收：已开始的后台记忆推理仍可能延长下一轮等待；App 内重新下载 3.06 GB 模型、其他机型与长时内存压力、Android 真机、后台推送和正式服务部署仍按原记录待验收。MLX 当前只支持文本输入。
+
+## 2026-10-10 MLX 原生工具协议
+
+MLX 改用模型自身的 chat template：标准 `tools` Schema 传入 `UserInput.tools`；历史 assistant 保留 `tool_calls`，工具结果保留 `role: tool`、`tool_call_id` 和 `name`。API 中的 JSON 参数字符串转为模板所需的对象，布尔、数值、数组和空值保留相应类型。非文本消息或损坏参数显式报错，不静默丢弃。
+
+输出由 SDK `ToolCallProcessor` 解析，Qwen3.5 使用 `.qwen35`，其他模型使用模型配置的格式。只接受本轮声明的工具并启用严格参数校验；结束时拒绝损坏或不完整的调用。调用转回标准 Chat Completions `message.tool_calls`，由现有 Harness 完成审批、路由、执行和工具回填。工具结果仍是不可信数据，设备路由授权继续由 Harness 校验。标准工具 Schema 只引用本轮发现的资源；没有资源时限制 `resource_refs` 为空，并将委托目标限制为本轮 REMOTE 路由返回的 Agent。过去请求的路由不会沿用。
+
+普通答案直接流式输出文本与 Markdown，不再强制 `{"text":...}` 包装；思考保持独立流。适配层提醒模型遵循最新用户的输出格式，避免旧回答格式或旧任务失败影响当前请求。显式 JSON Schema 且无工具时继续使用 xgrammar；同时提供工具时保留原生调用语法，以提示词要求最终 JSON，并交给现有结构化结果校验，不将整个输出限制为 JSON。`tool_choice: required` 使用 xgrammar 原生 structural tag 约束工具名和参数 Schema；Qwen3.5/JSON 采用 SDK 支持的 `<tool_call>` 内 JSON，XML 格式采用 `qwen_xml_parameter` 编译器。其他格式以提示词和最终校验要求调用。未产生有效调用会报错。llama.cpp 的既有兼容协议不受本次修改影响。
+
+运行 `scripts/test-ios-prompt.sh` 验证两种消息适配，运行 `scripts/test-ios-mlx-values.sh` 验证生产转换函数的 JSON 类型与 UTF-16 流式边界；`scripts/test-ios-mlx-parser.sh <mlx-swift-lm checkout>` 直接编译所用 SDK 的 Qwen3.5 解析器，验证原生 XML、兼容 JSON 和损坏调用。真机验证及失败记录见 `scripts/acceptance/results-2026-10-10.json`。
+
+本轮真机验收通过：MLX 普通问答精确返回 `42` 且未增加远端任务（55.416 秒）；思考与正文在生成期间增长，最终 `1..30` 完整无重复，停止后恢复输入（120.755 秒）；原生工具完成设备发现、路由、审批、Mac 执行与对话内结果 `42`（168.710 秒，本地任务 26，远端任务 `518873fe1f4346b8bc746828501ff446`）。服务端独立核验状态 `TASK_STATE_COMPLETED`、结果 `42`；截图确认手机前台任务卡已完成。签名构建、输入适配、SDK 解析和 JVM 回归通过。中间失败保留于验收记录，混合测试组不计为整组通过。真机覆盖当前 Qwen3.5 模型，未覆盖所有 MLX 模型及长时压力。

@@ -79,6 +79,9 @@ class CrossDeviceServiceTest {
             assertEquals(setOf("model.complete", "calendar", "build"), discovered.last().jsonObject["capabilities"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet())
             assertEquals("LOCAL", route("calendar"))
             assertEquals("REMOTE", route("build"))
+            assertEquals("REMOTE", route("model.complete", "mac"))
+            assertEquals("UNSUPPORTED", route("model.complete", "mac", resource = "mac"),
+                "A device ID must not be treated as a registered data resource")
             assertEquals("REMOTE", route("calendar", "mac"))
             assertEquals("REMOTE", route("calendar", "https://gateway.test/agents/mac/card"))
             val renamed = peers.map { if (it["id"] == JsonPrimitive("mac")) JsonObject(it + ("name" to JsonPrimitive("Acceptance Mac"))) else it }

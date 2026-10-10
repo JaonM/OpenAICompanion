@@ -218,7 +218,15 @@
         return app.state == XCUIApplicationStateNotRunning || app.buttons[@"发送一次"].exists || app.buttons[@"send-message"].exists;
     }];
     XCTAssertEqual([XCTWaiter waitForExpectations:@[[[XCTNSPredicateExpectation alloc] initWithPredicate:routed object:app]] timeout:300], XCTWaiterResultCompleted);
-    XCTAssertTrue(app.buttons[@"发送一次"].exists, @"未产生远端委托确认，不能把口头答复计作执行成功。");
+    XCUIElement *modelError = [app.staticTexts matchingPredicate:
+        [NSPredicate predicateWithFormat:@"label BEGINSWITH %@", @"model error:"]].firstMatch;
+    if (!app.buttons[@"发送一次"].exists) {
+        XCUIElement *routeCall = [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:
+            @"label BEGINSWITH %@", @"› 工具：调用工具：route_task"]].firstMatch;
+        if (routeCall.hittable) [routeCall tap];
+        [self retainScreenshot:app name:@"Remote delegation failure"];
+    }
+    XCTAssertTrue(app.buttons[@"发送一次"].exists, @"未产生远端委托确认：%@", modelError.exists ? modelError.label : @"无工具提交");
     XCTAssertTrue(app.staticTexts[@"Acceptance Mac"].exists);
     [app.buttons[@"发送一次"] tap];
     XCTAssertTrue([app.buttons[@"任务"] waitForExistenceWithTimeout:20]);
@@ -232,7 +240,7 @@
     XCTAssertEqual([XCTWaiter waitForExpectations:@[created] timeout:20], XCTWaiterResultCompleted);
     NSString *resultPattern = [NSString stringWithFormat:@"任务 %lu 远端结果： *(42|17 *\\+ *25 *= *42) *", (unsigned long)createdTask];
     NSPredicate *newResult = [NSPredicate predicateWithFormat:@"label MATCHES %@", resultPattern];
-    XCTAssertTrue([[app.staticTexts matchingPredicate:newResult].firstMatch waitForExistenceWithTimeout:180]);
+    XCTAssertTrue([[[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:newResult].firstMatch waitForExistenceWithTimeout:180]);
     XCTAssertTrue(app.textViews.firstMatch.exists, @"远端结果必须返回对话前台。");
     [self retainScreenshot:app name:@"Companion remote result in conversation"];
 }
@@ -254,7 +262,7 @@
     XCTAssertTrue(app.staticTexts[fixture[@"completedTaskText"]].exists);
     XCTAssertTrue(app.staticTexts[@"已完成"].exists);
     NSString *result = [NSString stringWithFormat:@"任务 %@ 远端结果：%@", number, fixture[@"completedTaskResult"]];
-    XCTAssertTrue(app.staticTexts[result].exists);
+    XCTAssertTrue([[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:result].firstMatch.exists);
 }
 
 - (void)testScheduledReminderSurvivesAppTermination {

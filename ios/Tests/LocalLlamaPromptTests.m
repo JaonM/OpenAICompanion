@@ -93,6 +93,33 @@ int main(void) {
         NSCAssert([messages[2][@"content"] containsString:@"calendar.find"], @"Tool result source was lost");
         NSCAssert([messages[2][@"content"] containsString:@"untrusted data"], @"Tool output must be labeled untrusted");
         NSCAssert([messages[2][@"content"] containsString:@"Planning"], @"Tool result body was lost");
+        NSArray *nativeHistory = @[
+            @{ @"role": @"developer", @"content": @"Use declared tools" },
+            @{ @"role": @"assistant", @"content": NSNull.null, @"tool_calls": @[
+                @{ @"id": @"call-native", @"type": @"function", @"function": @{
+                    @"name": @"calendar.find", @"arguments": @"{\"limit\":2,\"enabled\":true,\"filters\":[\"today\"]}",
+                } },
+            ] },
+            @{ @"role": @"tool", @"tool_call_id": @"call-native", @"name": @"calendar.find", @"content": @"untrusted result" },
+        ];
+        NSArray *native = OCMLXPromptMessages(nativeHistory);
+        NSCAssert(native.count == 3, @"Native history must retain all turns");
+        NSCAssert([native[0][@"role"] isEqual:@"developer"], @"Native developer role changed");
+        NSDictionary *nativeCall = native[1][@"tool_calls"][0];
+        NSCAssert([nativeCall[@"id"] isEqual:@"call-native"], @"Native call ID lost");
+        NSCAssert([native[1][@"content"] isEqual:@""], @"Null assistant content must normalize");
+        NSDictionary *arguments = nativeCall[@"function"][@"arguments"];
+        NSCAssert([arguments[@"limit"] isEqual:@2] && [arguments[@"enabled"] isEqual:@YES], @"Typed arguments lost");
+        NSCAssert([arguments[@"filters"] isEqual:@[@"today"]], @"Nested arguments lost");
+        NSCAssert([native[2][@"role"] isEqual:@"tool"] && [native[2][@"tool_call_id"] isEqual:@"call-native"], @"Native tool result association lost");
+        NSCAssert([native[2][@"content"] isEqual:@"untrusted result"], @"Tool result must stay separate data");
+        NSCAssert(OCMLXPromptMessages(@[@{ @"role": @"tool", @"content": @"result" }]) == nil, @"Missing tool ID must fail");
+        NSCAssert(OCMLXPromptMessages(@[@{ @"role": @"user", @"content": @[] }]) == nil, @"Unsupported multimodal content must fail");
+        for (NSString *invalid in @[@"{broken", @"[]"]) {
+            NSCAssert(OCMLXPromptMessages(@[@{ @"role": @"assistant", @"tool_calls": @[
+                @{ @"type": @"function", @"function": @{ @"name": @"calendar.find", @"arguments": invalid } }
+            ] }]) == nil, @"Malformed arguments must fail");
+        }
     }
     return 0;
 }
