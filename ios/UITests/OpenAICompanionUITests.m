@@ -135,6 +135,32 @@
     XCTAssertFalse(body.exists);
 }
 
+- (void)testCrossDeviceConfigurationHelp {
+    XCUIApplication *app = [self acceptanceApp];
+    [app launch];
+    [self openSettingsSection:@"跨设备执行" app:app];
+    XCUIElement *help = app.buttons[@"配置说明"];
+    XCTAssertTrue([help waitForExistenceWithTimeout:5]);
+    XCTAssertTrue(help.hittable);
+    [self retainScreenshot:app name:@"Configuration help entry"];
+    [help tap];
+    XCUIElement *firstSection = [[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:@"1. 准备设备服务"].firstMatch;
+    XCTAssertTrue([firstSection waitForExistenceWithTimeout:5]);
+    [self retainScreenshot:app name:@"Configuration help opened"];
+    XCUIElement *lastSection = [[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:@"连接失败怎么办"].firstMatch;
+    for (NSInteger i = 0; i < 10 && !lastSection.hittable; i++) {
+        XCUICoordinate *start = [app coordinateWithNormalizedOffset:CGVectorMake(0.5, 0.75)];
+        XCUICoordinate *end = [app coordinateWithNormalizedOffset:CGVectorMake(0.5, 0.3)];
+        [start pressForDuration:0.05 thenDragToCoordinate:end];
+    }
+    XCTAssertTrue(lastSection.hittable, @"详细配置说明应可滚动到故障排查。");
+    [self retainScreenshot:app name:@"Configuration help troubleshooting"];
+    [app.buttons[@"关闭"] tap];
+    XCTAssertTrue(help.hittable);
+    XCTAssertFalse(firstSection.exists);
+    // Leave the settings entry visible for the user after acceptance.
+}
+
 - (void)testSettingsNavigationAndDraftPreservation {
     XCUIApplication *app = [self acceptanceApp];
     [app launch];
