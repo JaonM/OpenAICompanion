@@ -5,6 +5,10 @@ NS_ASSUME_NONNULL_BEGIN
 /** Maps Chat Completions history to roles supported by generic GGUF chat templates. */
 FOUNDATION_EXPORT NSArray<NSDictionary<NSString *, NSString *> *> *OCLlamaPromptMessages(NSArray *rawMessages);
 
+/** Preserves native tool roles/IDs and converts API argument strings to template objects.
+ * Returns nil for malformed or non-text messages rather than dropping history. */
+FOUNDATION_EXPORT NSArray<NSDictionary<NSString *, id> *> * _Nullable OCMLXPromptMessages(NSArray *rawMessages);
+
 FOUNDATION_EXPORT BOOL OCLlamaUsesThinking(NSString *architecture);
 
 /** Opens supported Qwen models' thinking block after its assistant prefix. */

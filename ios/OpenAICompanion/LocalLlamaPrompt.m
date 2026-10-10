@@ -146,6 +146,48 @@ NSString *OCLlamaResponseGrammar(NSDictionary *request, NSArray<NSString *> *too
     return grammar;
 }
 
+NSArray<NSDictionary<NSString *, id> *> *OCMLXPromptMessages(NSArray *rawMessages) {
+    NSMutableArray *messages = [NSMutableArray array];
+    for (id raw in rawMessages) {
+        if (![raw isKindOfClass:NSDictionary.class]) return nil;
+        NSString *role = raw[@"role"];
+        if (![@[@"system", @"developer", @"user", @"assistant", @"tool"] containsObject:role]) return nil;
+        id content = raw[@"content"];
+        NSArray *calls = raw[@"tool_calls"];
+        if (calls && ![calls isKindOfClass:NSArray.class]) return nil;
+        if ([role isEqual:@"assistant"] && calls.count && (!content || content == NSNull.null)) content = @"";
+        if (![content isKindOfClass:NSString.class]) return nil;
+        NSMutableDictionary *message = [@{@"role": role, @"content": content} mutableCopy];
+        if ([role isEqual:@"tool"]) {
+            NSString *callID = raw[@"tool_call_id"];
+            if (![callID isKindOfClass:NSString.class] || !callID.length) return nil;
+            message[@"tool_call_id"] = callID;
+            if ([raw[@"name"] isKindOfClass:NSString.class]) message[@"name"] = raw[@"name"];
+        }
+        if (calls.count) {
+            if (![role isEqual:@"assistant"]) return nil;
+            NSMutableArray *normalized = [NSMutableArray array];
+            for (id call in calls) {
+                if (![call isKindOfClass:NSDictionary.class] || ![call[@"type"] isEqual:@"function"]) return nil;
+                NSDictionary *function = call[@"function"];
+                if (![function isKindOfClass:NSDictionary.class] || ![function[@"name"] isKindOfClass:NSString.class] || ![function[@"name"] length]) return nil;
+                id arguments = function[@"arguments"];
+                if ([arguments isKindOfClass:NSString.class]) arguments = [NSJSONSerialization JSONObjectWithData:[arguments dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+                if (![arguments isKindOfClass:NSDictionary.class]) return nil;
+                NSMutableDictionary *normalizedCall = [@{@"type": @"function", @"function": @{@"name": function[@"name"], @"arguments": arguments}} mutableCopy];
+                if (call[@"id"]) {
+                    if (![call[@"id"] isKindOfClass:NSString.class] || ![call[@"id"] length]) return nil;
+                    normalizedCall[@"id"] = call[@"id"];
+                }
+                [normalized addObject:normalizedCall];
+            }
+            message[@"tool_calls"] = normalized;
+        }
+        [messages addObject:message];
+    }
+    return messages;
+}
+
 NSArray<NSDictionary<NSString *, NSString *> *> *OCLlamaPromptMessages(NSArray *rawMessages) {
     NSMutableArray<NSDictionary<NSString *, NSString *> *> *messages = [NSMutableArray array];
     for (id raw in rawMessages) {
