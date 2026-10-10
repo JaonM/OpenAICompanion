@@ -3,6 +3,7 @@
 import asyncio
 from collections import Counter, OrderedDict
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -41,7 +42,7 @@ class RateLimiter:
 
 
 class CompanionService:
-    def __init__(self, directory, base_url, metrics_token=None):
+    def __init__(self, directory, base_url, metrics_token=None, trusted_proxies=()):
         parsed = urlsplit(base_url)
         if (parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in ('127.0.0.1', 'localhost'))
                 or not parsed.netloc or parsed.username or parsed.password or parsed.path not in ('', '/')
@@ -54,6 +55,7 @@ class CompanionService:
         self.memories = RelayStore(str(directory / 'memory-sync.sqlite'))
         self.base_url = base_url.rstrip('/')
         self.metrics_token = metrics_token
+        self.trusted_proxies = {str(ipaddress.ip_address(peer)) for peer in trusted_proxies}
         self.rates, self.pairing_rates = RateLimiter(), RateLimiter(30)
         self.counts, self.duration_ms = Counter(), Counter()
 
@@ -174,6 +176,12 @@ class CompanionService:
 
     async def redeem(self, scope, headers, receive):
         peer = (scope.get('client') or ('unknown',))[0]
+        # Only our configured proxy may supply the header; Caddy overwrites it.
+        if peer in self.trusted_proxies:
+            try:
+                peer = str(ipaddress.ip_address(headers.get('x-companion-client-ip', '')))
+            except ValueError:
+                raise HttpError(400, 'trusted proxy client address required')
         if not self.pairing_rates.allow(peer):
             raise HttpError(429, 'pairing rate exceeded')
         body = await self.body(headers, receive, 4096)
@@ -265,7 +273,8 @@ class CompanionService:
 def create_app():
     os.umask(0o077)
     return CompanionService(os.environ['COMPANION_SERVICE_DATA'], os.environ['COMPANION_SERVICE_URL'],
-                            os.environ.get('COMPANION_METRICS_TOKEN'))
+                            os.environ.get('COMPANION_METRICS_TOKEN'),
+                            filter(None, os.environ.get('COMPANION_TRUSTED_PROXIES', '').split(',')))
 
 
 if __name__ == '__main__':

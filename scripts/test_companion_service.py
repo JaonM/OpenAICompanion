@@ -29,7 +29,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.mac = self.app.credentials.issue('user', 'mac', ['tasks'])
         self.other = self.app.credentials.issue('other', 'mac', ['tasks'])
 
-    async def request(self, path, payload=None, token=None, method=None, headers=()):
+    async def request(self, path, payload=None, token=None, method=None, headers=(), peer='127.0.0.1'):
         body = json.dumps(payload).encode() if payload is not None else b''
         emitted = []
         async def receive():
@@ -37,11 +37,38 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         async def send(event):
             emitted.append(event)
         scope = {'type': 'http', 'method': method or ('POST' if payload is not None else 'GET'),
-                 'path': path, 'client': ('127.0.0.1', 1234), 'headers': [
+                 'path': path, 'client': (peer, 1234), 'headers': [
                      (b'content-type', b'application/json'), (b'content-length', str(len(body)).encode()),
                      *([(b'authorization', ('Bearer ' + token).encode())] if token else []), *headers]}
         await self.app(scope, receive, send)
         return emitted[0]['status'], json.loads(emitted[1]['body'])
+
+    async def test_pairing_limits_isolate_clients_behind_trusted_proxy(self):
+        self.app.trusted_proxies = {'172.30.73.2'}
+        for _ in range(30):
+            status, _ = await self.request('/v1/pairing/redeem', {'code': 'invalid'},
+                peer='172.30.73.2', headers=[(b'x-companion-client-ip', b'192.0.2.1')])
+            self.assertEqual(status, 400)
+        status, _ = await self.request('/v1/pairing/redeem', {'code': 'invalid'},
+            peer='172.30.73.2', headers=[(b'x-companion-client-ip', b'192.0.2.1')])
+        self.assertEqual(status, 429)
+        _, invite = await self.request('/v1/pairing/invite', {'device_id': 'tablet'}, self.phone['token'])
+        status, _ = await self.request('/v1/pairing/redeem', {'code': invite['code']},
+            peer='172.30.73.2', headers=[(b'x-companion-client-ip', b'192.0.2.2')])
+        self.assertEqual(status, 200)
+
+    async def test_untrusted_client_cannot_bypass_limit_with_forged_header(self):
+        for index in range(31):
+            status, _ = await self.request('/v1/pairing/redeem', {'code': 'invalid'},
+                headers=[(b'x-companion-client-ip', f'192.0.2.{index}'.encode())])
+        self.assertEqual(status, 429)
+
+    async def test_trusted_proxy_requires_valid_client_address(self):
+        self.app.trusted_proxies = {'172.30.73.2'}
+        for headers in ([], [(b'x-companion-client-ip', b'invalid')]):
+            status, _ = await self.request('/v1/pairing/redeem', {'code': 'invalid'},
+                peer='172.30.73.2', headers=headers)
+            self.assertEqual(status, 400)
 
     async def register(self, credential):
         status, _ = await self.request('/v1/devices/register', {

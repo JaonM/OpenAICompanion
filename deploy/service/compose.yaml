@@ -7,6 +7,8 @@ services:
     environment:
       COMPANION_SERVICE_URL: https://${COMPANION_DOMAIN:?Set COMPANION_DOMAIN}
       COMPANION_METRICS_TOKEN: ${COMPANION_METRICS_TOKEN:?Set a random metrics token}
+      COMPANION_TRUSTED_PROXIES: ${COMPANION_PROXY_IP:-172.30.73.2}
+    networks: [service]
     volumes:
       - companion-data:/data
     read_only: true
@@ -34,6 +36,14 @@ services:
     depends_on:
       companion:
         condition: service_healthy
+    networks:
+      service:
+        ipv4_address: ${COMPANION_PROXY_IP:-172.30.73.2}
+networks:
+  service:
+    ipam:
+      config:
+        - subnet: ${COMPANION_SERVICE_SUBNET:-172.30.73.0/24}
 volumes:
   companion-data:
   caddy-data:

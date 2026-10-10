@@ -139,12 +139,43 @@ fn fresh_delegation_history(history: &[Message], input: &str) -> Vec<Message> {
 
 // A previous delegation does not grant permission to send the next question away.
 fn explicitly_remote(input: &str) -> bool {
-    let text = input.to_lowercase();
-    if ["不要委托", "不委托", "不要远程", "不要远端", "本地回答", "本机回答", "do not delegate", "don't delegate", "do not run on"].iter().any(|word| text.contains(word)) { return false; }
-    ["委托给", "委托到", "交给远端", "交给电脑", "交给 mac", "发送到设备", "发送到 mac", "远端执行", "远程执行", "在电脑上", "在 mac 上",
-        "delegate to", "delegate this", "run on", "execute on", "send to", "ask the agent"]
-        .iter().any(|word| text.contains(word))
-
+    // Quoted task contents/examples are not execution authorization. Process
+    // clauses in order so a later instruction can amend an earlier one.
+    let mut text = String::new();
+    let mut closing_quote = None;
+    for ch in input.to_lowercase().chars() {
+        if let Some(end) = closing_quote {
+            if ch == end { closing_quote = None; text.push(' '); }
+        } else if let Some(end) = match ch {
+            '「' => Some('」'), '『' => Some('』'), '“' => Some('”'), '"' => Some('"'), '`' => Some('`'), _ => None,
+        } { closing_quote = Some(end); }
+        else { text.push(ch); }
+    }
+    let mut remote = false;
+    for clause in text.split([',', '，', ';', '；', '。', '\n']) {
+        let instruction = clause.trim().trim_start_matches("请问").trim();
+        if ["怎么", "如何", "怎样", "how to ", "how do ", "what does "].iter().any(|prefix| instruction.starts_with(prefix)) { continue; }
+        if ["不要委托", "不委托", "不要远程", "不要远端", "本地回答", "本机回答", "do not delegate", "don't delegate", "do not run on"]
+            .iter().any(|word| clause.contains(word)) { remote = false; continue; }
+        let named_device = ["电脑", "mac", "ipad", "iphone", "手机", "android", "服务器", "server", "设备"]
+            .iter().any(|word| clause.contains(word));
+        let execute = ["执行", "运行", "处理", "计算", "run", "execute", "process", "calculate"]
+            .iter().any(|word| clause.contains(word));
+        let negated = ["不要", "禁止", "无需", "不需要", "不允许", "别把"]
+            .iter().filter_map(|word| clause.find(word)).any(|index| {
+                ["委托", "交给", "发送到", "远端", "远程"].iter().any(|word| clause[index..].contains(word))
+                    || (named_device && ["执行", "运行", "处理", "计算"].iter().any(|word| clause[index..].contains(word)))
+            });
+        if negated { remote = false; continue; }
+        if ["委托给", "委托到", "交给远端", "交给电脑", "发送到设备", "远端执行", "远程执行",
+            "delegate to", "delegate this", "run on", "execute on", "ask the agent"]
+            .iter().any(|word| clause.contains(word))
+            || (named_device && (clause.contains("交给") || clause.contains("发送到") || clause.contains("send to")
+                || (execute && (clause.contains('在') || clause.contains('用') || clause.contains(" on "))))) {
+            remote = true;
+        }
+    }
+    remote
 }
 
 fn delegation_target(history: &[Message], explicit: bool) -> Option<String> {
@@ -770,6 +801,16 @@ mod tests {
         assert!(!explicitly_remote("柿子能和螃蟹一起吃吗"));
         assert!(!explicitly_remote("这个问题交给你：柿子能和螃蟹一起吃吗"));
         assert!(!explicitly_remote("17+25，不要委托给 Mac"));
+        assert!(explicitly_remote("不要委托给手机，委托给 Mac 计算 17+25"));
+        assert!(explicitly_remote("在 iPad 上执行这个任务"));
+        assert!(explicitly_remote("用我的服务器运行这个任务"));
+        assert!(!explicitly_remote("委托给 Mac 计算 17+25，本地回答"));
+        assert!(!explicitly_remote("解释一下“委托给 Mac”是什么意思"));
+        assert!(!explicitly_remote("请翻译：\"run on the server\""));
+        assert!(!explicitly_remote("请不要把任务委托给 Mac"));
+        assert!(!explicitly_remote("无需在服务器上执行"));
+        assert!(!explicitly_remote("请问如何委托给 Mac？"));
+        assert!(explicitly_remote("请委托给 Mac 计算 17+25，不要调用工具"));
     }
 
     #[test]

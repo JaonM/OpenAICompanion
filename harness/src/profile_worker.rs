@@ -48,7 +48,7 @@ pub(crate) fn process_pending(
         .pending_profile_turns(session_id)
         .map_err(memory_error)?
     {
-        let result = process_turn(&store, &model, &runtime, turn_id);
+        let result = process_turn(&store, &model, &runtime, turn_id, std::time::Duration::from_secs(30));
         if let Err(error) = result {
             if first_error.is_none() {
                 first_error = Some(error);
@@ -63,6 +63,7 @@ fn process_turn(
     model: &ModelServeWrapper,
     runtime: &tokio::runtime::Runtime,
     turn_id: i64,
+    timeout: std::time::Duration,
 ) -> Result<(), AgentError> {
     let turn = store.get_trace_turn(turn_id).map_err(memory_error)?;
     if !matches!(
@@ -82,13 +83,13 @@ fn process_turn(
         "known_memories": known,
         "now_unix_seconds": now_unix_seconds(),
     });
-    let response = runtime.block_on(model.complete_silent(ModelRequest {
+    let response = runtime.block_on(async { tokio::time::timeout(timeout, model.complete_silent(ModelRequest {
             response_format: None,
             system_prompt: "从本轮用户输入提取未来有用的原子记忆点。只把用户明确说出的内容当作事实，不推断敏感属性，不从助手回答或工具结果提取。短期上下文无需保存。中期用于有期限的计划或进行中的事项；长期用于明确且持续有效的事实、偏好、约束或明确要求记住的内容。相同内容不重复。用户明确纠正已有记忆时填写 replaces_id；明确完成或取消中期事项时 action=archive。输出严格 JSON 数组，每项仅包含 action(upsert|archive)、tier(long|medium)、kind(preference|fact|goal|constraint)、topic_id、content、evidence（用户输入中的连续原文）、expires_at（Unix 秒，可为 null）、replaces_id（整数，可为 null）。无合适内容输出 []。中期若无明确到期时间，expires_at 为 null。最多 3 项。".into(),
             user_input: String::new(),
             history: vec![Message::User { content: input.to_string() }],
             tools: Vec::new(),
-        }))?;
+        })).await }).map_err(|_| AgentError::Memory("profile extraction timed out; will retry later".into()))??;
     let candidates: Vec<Candidate> = serde_json::from_str(response.content.trim())
         .map_err(|error| AgentError::Memory(format!("invalid profile response: {error}")))?;
     if candidates.len() > 3 {
@@ -273,6 +274,28 @@ mod tests {
     }
 
     struct FixedModel(&'static str);
+
+    #[test]
+    fn timed_out_profile_remains_pending_and_can_be_retried() {
+        struct HangingModel;
+        #[async_trait::async_trait]
+        impl ModelServeCallback for HangingModel {
+            async fn complete(&self, _: String, _: Arc<dyn ModelStreamCallback>) -> Result<(), ModelServeError> {
+                std::future::pending().await
+            }
+        }
+        let store = MemoryStore::in_memory().unwrap();
+        let session = store.create_trace_session().unwrap().id;
+        let turn = finished(&store, session, "我喜欢 Kotlin", TraceStatus::Completed);
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let model = ModelServeWrapper::new(Arc::new(HangingModel));
+        let error = process_turn(&store, &model, &runtime, turn, std::time::Duration::from_millis(10)).unwrap_err();
+        assert!(error.to_string().contains("timed out"));
+        assert_eq!(store.pending_profile_turns(session).unwrap(), vec![turn]);
+        assert!(store.list_active().unwrap().is_empty());
+        process_pending(store.clone(), ModelServeWrapper::new(Arc::new(FixedModel("[]"))), session).unwrap();
+        assert!(store.pending_profile_turns(session).unwrap().is_empty());
+    }
 
     #[async_trait::async_trait]
     impl ModelServeCallback for FixedModel {
