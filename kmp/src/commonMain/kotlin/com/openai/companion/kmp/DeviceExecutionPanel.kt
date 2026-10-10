@@ -40,7 +40,8 @@ fun DeviceExecutionPanel(service: CrossDeviceService, client: A2aClient) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("我的设备 · 跨设备执行", style = MaterialTheme.typography.titleLarge)
         Text("普通问答在本机完成。需要远端时，在对话中说“委托给设备名称：任务内容”，确认后发送，结果回到对话。")
-        Text("1. 首台设备由管理员填写 HTTPS 服务地址和令牌。\n2. 在已连接的 Mac 上生成配对码。\n3. 手机填写相同服务地址、设备名称和配对码。设备会自动发现，无需重复添加 A2A。", style = MaterialTheme.typography.bodySmall)
+        Text("参与协作的设备连接同一个 HTTPS 设备服务，并使用同一用户下各自的凭据。连接后自动发现，无需重复配置 A2A。", style = MaterialTheme.typography.bodySmall)
+        DeviceConfigurationHelp()
         OutlinedTextField(endpoint, { endpoint = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(name, { name = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth())
         TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "收起高级设置" else "高级设置（首台设备接入与权限）") }

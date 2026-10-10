@@ -408,8 +408,9 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         }
                         if (settingsSection == "跨设备执行") {
                             MobileSectionTitle("我的设备 · 跨设备执行")
-                            Text("普通问答默认在本机完成。需要其他设备时，在对话中说“委托给 Mac：整理这份资料”，确认后发送；结果会回到当前对话。")
-                            Text("首次连接：从已连接的 Mac 获取服务地址和配对码，填入下方即可。所有设备使用同一个 HTTPS 设备服务；配对后自动发现，无需再配置 A2A。", style = MaterialTheme.typography.bodySmall)
+                            Text("普通问答默认在本机完成。需要其他设备时，在对话中指定设备名称和任务，确认委托后，结果会回到当前对话。")
+                            Text("参与协作的设备连接同一个 HTTPS 设备服务，并使用同一用户下各自的凭据。连接后自动发现，无需重复配置 A2A。", style = MaterialTheme.typography.bodySmall)
+                            DeviceConfigurationHelp()
                             OutlinedTextField(deviceEndpointDraft, { deviceEndpointDraft = it }, label = { Text("设备服务地址") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "设备服务地址" })
                             OutlinedTextField(deviceNameDraft, { deviceNameDraft = it }, label = { Text("本设备名称") }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "本设备名称" })
                             TextButton(onClick = { advancedDevices = !advancedDevices }) { Text(if (advancedDevices) "收起高级设置" else "高级设置（令牌与第三方智能体）") }
@@ -437,7 +438,7 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                         }
                         if (settingsSection == "远端 Agent（A2A）") {
                             MobileSectionTitle("第三方智能体（A2A）")
-                            Text("仅连接独立的第三方 Agent 时需要。自己的手机和 Mac 配对后会自动发现，不用在这里重复添加。Agent Card 地址由该服务提供方提供。")
+                            Text("仅连接独立的第三方 Agent 时需要。同一用户的设备连接设备服务后会自动发现，不用在这里重复添加。Agent Card 地址由该服务提供方提供。")
                             OutlinedTextField(
                                 value = a2aCardDraft,
                                 onValueChange = { a2aCardDraft = it },
