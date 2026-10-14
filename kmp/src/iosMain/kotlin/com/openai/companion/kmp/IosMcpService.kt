@@ -14,6 +14,7 @@ class IosMcpService(
     bindings: GeneratedHarnessBindings,
     approve: suspend (String, String) -> Boolean,
     requestInput: suspend (String, String, JsonObject) -> JsonObject,
+    extraDeviceTools: suspend () -> List<com.openai.companion.kmp.device.DeviceTool> = { emptyList() },
 ) : MobileMcpService(
     loadDeviceToolsEnabled = { NSUserDefaults.standardUserDefaults.boolForKey("deviceToolsEnabled") },
     saveDeviceToolsEnabled = { NSUserDefaults.standardUserDefaults.setBool(it, forKey = "deviceToolsEnabled") },
@@ -22,7 +23,9 @@ class IosMcpService(
         IosCalendarEventDataSource(),
         { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
             platform.UIKit.UIApplication.sharedApplication.applicationState == platform.UIKit.UIApplicationState.UIApplicationStateActive
-        } }, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings)) },
+        } }, com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings)).also { registry ->
+            extraDeviceTools().forEach { registry.register(it) }
+        } },
     bindings = bindings,
     approve = approve,
     requestInput = requestInput,

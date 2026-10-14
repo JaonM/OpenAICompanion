@@ -20,6 +20,13 @@
 		A1000000000000000000000C /* LocalLlamaPrompt.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* LocalLlamaPrompt.m */; };
 		B10000000000000000000001 /* OpenAICompanionUITests.m in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* OpenAICompanionUITests.m */; };
 		B10000000000000000000002 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* XCTest.framework */; };
+		D10000000000000000000001 = {isa = PBXBuildFile; fileRef = D20000000000000000000001; };
+		D10000000000000000000002 = {isa = PBXBuildFile; fileRef = D20000000000000000000002; };
+		D10000000000000000000003 = {isa = PBXBuildFile; fileRef = D20000000000000000000003; };
+		D10000000000000000000004 = {isa = PBXBuildFile; fileRef = D20000000000000000000004; };
+		D10000000000000000000005 = {isa = PBXBuildFile; fileRef = D20000000000000000000005; };
+		D10000000000000000000006 = {isa = PBXBuildFile; fileRef = D20000000000000000000006; };
+		D10000000000000000000007 = {isa = PBXBuildFile; fileRef = D20000000000000000000007; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +45,13 @@
 		B20000000000000000000001 /* OpenAICompanionUITests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = OpenAICompanionUITests.m; sourceTree = "<group>"; };
 		B20000000000000000000002 /* OpenAICompanionUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenAICompanionUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000000000000000000003 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		D20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceToolCatalog.swift; sourceTree = "<group>"; };
+		D20000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceToolsBridge.swift; sourceTree = "<group>"; };
+		D20000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceHealthTools.swift; sourceTree = "<group>"; };
+		D20000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceHomeTools.swift; sourceTree = "<group>"; };
+		D20000000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceEventTools.swift; sourceTree = "<group>"; };
+		D20000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAlarmTools.swift; sourceTree = "<group>"; };
+		D20000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceResourceTools.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -95,6 +109,13 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000010 /* Main.m */,
+				D20000000000000000000001,
+				D20000000000000000000002,
+				D20000000000000000000003,
+				D20000000000000000000004,
+				D20000000000000000000005,
+				D20000000000000000000006,
+				D20000000000000000000007,
 				C20000000000000000000001,
 				C20000000000000000000002,
 				A2000000000000000000000B /* LocalLlamaBridge.mm */,
@@ -224,6 +245,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000000000000000000000B /* Main.m in Sources */,
+				D10000000000000000000001,
+				D10000000000000000000002,
+				D10000000000000000000003,
+				D10000000000000000000004,
+				D10000000000000000000005,
+				D10000000000000000000006,
+				D10000000000000000000007,
 				C10000000000000000000001,
 				A10000000000000000000007 /* LocalLlamaBridge.mm in Sources */,
 				A1000000000000000000000C /* LocalLlamaPrompt.m in Sources */,
@@ -308,6 +336,7 @@
 					OpenAICompanionAppShared,
 				);
 				SWIFT_VERSION = 5.0;
+				CODE_SIGN_ENTITLEMENTS = OpenAICompanion/OpenAICompanion.entitlements;
 				SWIFT_OBJC_BRIDGING_HEADER = OpenAICompanion/LocalMLXBridging.h;
 				PRODUCT_BUNDLE_IDENTIFIER = com.openai.companion.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -341,6 +370,7 @@
 					OpenAICompanionAppShared,
 				);
 				SWIFT_VERSION = 5.0;
+				CODE_SIGN_ENTITLEMENTS = OpenAICompanion/OpenAICompanion.entitlements;
 				SWIFT_OBJC_BRIDGING_HEADER = OpenAICompanion/LocalMLXBridging.h;
 				PRODUCT_BUNDLE_IDENTIFIER = com.openai.companion.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";

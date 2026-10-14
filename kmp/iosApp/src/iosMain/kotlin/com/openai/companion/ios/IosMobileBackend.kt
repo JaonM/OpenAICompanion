@@ -103,7 +103,7 @@ class IosMobileBackend(
 ) : MobileBackend {
     private val codec = CompanionConversationCodec()
     private val bindings = IosHarnessBindings()
-    private val mcp = IosMcpService(bindings, approve, requestInput)
+    private val mcp = IosMcpService(bindings, approve, requestInput) { nativeDeviceTools(com.openai.companion.kmp.device.BindingsDeviceOperationJournal(bindings)) }
     private val a2aHttp = HttpClient(Darwin) {
         followRedirects = false
         install(HttpTimeout) { requestTimeoutMillis = 30_000 }
@@ -168,6 +168,13 @@ class IosMobileBackend(
     private val mutableProactiveTasks = MutableStateFlow<List<ProactiveTask>>(emptyList())
     override val proactiveTaskUpdates: StateFlow<List<ProactiveTask>> = mutableProactiveTasks.asStateFlow()
 
+    override val deviceToolGroups get() = nativeDeviceGroupState()
+    override val deviceToolGroupLabels get() = nativeDeviceGroups
+    override suspend fun setDeviceToolGroup(group: String, enabled: Boolean) {
+        require(group in nativeDeviceGroups)
+        NSUserDefaults.standardUserDefaults.setBool(enabled, forKey = "deviceGroup.$group")
+        if (mcp.deviceToolsEnabled) mcp.setDeviceToolsEnabled(true)
+    }
     override val deviceToolsEnabled get() = mcp.deviceToolsEnabled
     override suspend fun setDeviceToolsEnabled(enabled: Boolean) = mcp.setDeviceToolsEnabled(enabled)
     override val mcpEndpoint: String get() = mcp.endpoint

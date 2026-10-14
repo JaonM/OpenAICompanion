@@ -122,6 +122,8 @@ data class MobileUiState(
     val mcpStatus: String = "未连接 MCP",
     val mcpBusy: Boolean = false,
     val deviceToolsEnabled: Boolean = false,
+    val deviceToolGroups: Map<String, Boolean> = emptyMap(),
+    val deviceToolGroupLabels: Map<String, String> = emptyMap(),
     val approval: MobileToolApproval? = null,
     val inputPrompt: MobileInputPrompt? = null,
     val deviceEndpoint: String = "",
@@ -143,6 +145,7 @@ interface MobileActions {
     fun cancel()
     fun configureMcp(endpoint: String)
     fun setDeviceToolsEnabled(enabled: Boolean) = Unit
+    fun setDeviceToolGroup(group: String, enabled: Boolean) = Unit
     fun authorizeMcp(clientId: String)
     fun answerApproval(id: Long, allow: Boolean)
     fun answerInput(id: Long, contentJson: String?)
@@ -314,8 +317,17 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(state.deviceToolsEnabled, actions::setDeviceToolsEnabled,
                                     modifier = Modifier.semantics { contentDescription = "端侧工具扩展开关" })
-                                Text("启用端侧工具扩展（设备上下文与日历）")
+                                Text("启用端侧工具扩展")
                             }
+                            state.deviceToolGroups.forEach { (group, enabled) ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(enabled, { actions.setDeviceToolGroup(group, it) }, enabled = state.deviceToolsEnabled,
+                                        modifier = Modifier.semantics { contentDescription = "${state.deviceToolGroupLabels[group] ?: group}开关" })
+                                    Text(state.deviceToolGroupLabels[group] ?: group)
+                                }
+                            }
+                            if (state.deviceToolGroups.isNotEmpty()) Text("按需请求系统授权；个人数据将交给当前模型处理。健康无数据不等于数值为零。")
+
                             Text("扩展默认关闭；启用后，日历访问仍需逐次确认和系统权限。")
                             Text(state.mcpStatus, style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -608,12 +620,12 @@ fun CompanionMobileScreen(state: MobileUiState, actions: MobileActions) {
         if (approval != null) {
             AlertDialog(
                 onDismissRequest = { actions.answerApproval(approval.id, false) },
-                title = { Text("允许 MCP 工具调用？") },
+                title = { Text("允许工具调用？") },
                 text = {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         Text(approval.name)
                         Text(approval.argumentsJson)
-                        Text("允许后会向 MCP 服务发送这些参数。")
+                        Text("允许后将执行此工具，返回结果供当前模型处理。")
                     }
                 },
                 confirmButton = {

@@ -33,6 +33,34 @@ class DeviceOperationPersistenceTest {
         System.setProperty("uniffi.component.harness.libraryOverride", System.getenv("HARNESS_LIBRARY_PATH"))
     }
 
+    @Test fun allNativeWriteToolsPersistAndReplayThroughRustSqlite() = runBlocking<Unit> {
+        setupLibrary()
+        val path = Files.createTempFile("native-journal-", ".sqlite")
+        val names = listOf("device_calendar_update_event", "device_reminder_create_item",
+            "device_reminder_complete_item", "device_home_set_characteristic",
+            "device_home_execute_scene", "device_alarm_create", "device_alarm_cancel")
+        try {
+            assertTrue(appOpenStore(path.toString()).ok)
+            for (name in names) {
+                var writes = 0
+                fun tool() = NativeDeviceTool(McpToolDescriptor(name, "test", "{}"), true,
+                    BindingsDeviceOperationJournal(GeneratedHarnessBindingsAdapter())) {
+                    writes++
+                    DeviceToolResult(data = buildJsonObject { put("tool", name) })
+                }
+                val arguments = buildJsonObject { put("request_id", "native-durable-001") }
+                val first = tool().execute(arguments)
+                assertEquals("ok", first.status, name)
+                assertTrue(appOpenStore(path.toString()).ok)
+                assertEquals(first, tool().execute(arguments), name)
+                assertEquals(1, writes, name)
+                assertFailsWith<IllegalArgumentException> {
+                    tool().execute(JsonObject(arguments + ("changed" to JsonPrimitive(true))))
+                }
+            }
+        } finally { Files.deleteIfExists(path) }
+    }
+
     @Test fun successReplaysAfterReopeningDatabaseAndRecreatingTools() = runBlocking<Unit> {
         setupLibrary()
         val path = Files.createTempFile("device-journal-success-", ".sqlite")

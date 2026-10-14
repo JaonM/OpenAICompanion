@@ -17,6 +17,12 @@ char *oc_llama_generate(OCLlamaHandle handle, const char *request_json_utf8,
 void oc_llama_cancel(OCLlamaHandle handle);
 void oc_llama_free_string(char *value);
 
+/* Device bridge callbacks own their string only for the duration of the callback. */
+char *oc_device_catalog(void);
+void oc_device_call(const char *call_id, const char *name, const char *arguments,
+                    OCLlamaOnChunk completion, void *context);
+void oc_device_cancel(const char *call_id);
+
 /* MLX Swift adapter; errors use the same malloc/free ownership as llama.cpp. */
 char *oc_mlx_generate(const char *model_directory, const char *request_json,
                       int max_tokens, OCLlamaOnChunk on_chunk, void *context);

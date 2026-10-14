@@ -40,6 +40,20 @@
     <string>经你确认后查询和新建日程，帮助安排日程；查询结果供当前模型处理。</string>
     <key>NSCalendarsUsageDescription</key>
     <string>经你确认后查询和新建日程，帮助安排日程。</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>经你确认后读取所选健康指标，供当前模型整理活动与睡眠记录。</string>
+    <key>NSHomeKitUsageDescription</key>
+    <string>经你确认后查看家庭设备、控制灯光和温控，或执行支持的场景。</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>经你确认后读取、创建和完成提醒事项。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>由你扫描纸质文档并在本机识别文字。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>由你确认后录制短音频，用于本机转写。</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>将你选择或录制的短音频在支持的设备上本地转写。</string>
+    <key>NSAlarmKitUsageDescription</key>
+    <string>经你确认后创建和管理本应用的闹钟。</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UIApplicationSceneManifest</key>

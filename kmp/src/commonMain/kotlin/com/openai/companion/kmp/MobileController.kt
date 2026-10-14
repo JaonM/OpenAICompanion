@@ -32,6 +32,9 @@ interface MobileBackend {
     suspend fun configureMcp(endpoint: String)
     suspend fun authorizeMcp(clientId: String)
     suspend fun refreshMcp()
+    val deviceToolGroups: Map<String, Boolean> get() = emptyMap()
+    val deviceToolGroupLabels: Map<String, String> get() = emptyMap()
+    suspend fun setDeviceToolGroup(group: String, enabled: Boolean) = Unit
     val deviceToolsEnabled: Boolean get() = false
     suspend fun setDeviceToolsEnabled(enabled: Boolean) = Unit
     suspend fun importModel()
@@ -241,6 +244,10 @@ class MobileController(
     }
 
     override fun openReminderSettings() = backend.openReminderSettings()
+
+    override fun setDeviceToolGroup(group: String, enabled: Boolean) {
+        scope.launch { perform { backend.setDeviceToolGroup(group, enabled); syncSettings() } }
+    }
 
     override fun setDeviceToolsEnabled(enabled: Boolean) {
         scope.launch { perform { backend.setDeviceToolsEnabled(enabled); syncSettings() } }
@@ -494,6 +501,8 @@ class MobileController(
             it.copy(
                 mcpEndpoint = backend.mcpEndpoint,
                 deviceToolsEnabled = backend.deviceToolsEnabled,
+                deviceToolGroups = backend.deviceToolGroups,
+                deviceToolGroupLabels = backend.deviceToolGroupLabels,
                 mcpStatus = backend.mcpStatus,
                 modelStatus = backend.modelStatus,
                 modelLibrary = backend.modelLibrary,
