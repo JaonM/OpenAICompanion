@@ -1,0 +1,250 @@
+{
+  "date": "2026-10-13",
+  "scope": "iOS P0/P1 native device tools",
+  "new_tool_count": 28,
+  "optional_group_count": 9,
+  "checks": [
+    {
+      "name": "Kotlin iOS compilation and complete simulator App link",
+      "status": "passed",
+      "log": "/tmp/companion-device-xcode-final.log"
+    },
+    {
+      "name": "Shared device tool regression",
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0,
+      "log": "/tmp/companion-acceptance-shared-final.log"
+    },
+    {
+      "name": "Rust tool policy and agent loop",
+      "passed": 17,
+      "failed": 0,
+      "log": "/tmp/companion-device-rust-tests.log"
+    },
+    {
+      "name": "Rust device task scope",
+      "passed": 1,
+      "failed": 0,
+      "log": "/tmp/companion-device-rust-task-tests.log"
+    },
+    {
+      "name": "Native simulator fixtures",
+      "status": "passed",
+      "covers": [
+        "schema types",
+        "date ranges",
+        "home allowlist and value bounds",
+        "callback once",
+        "serialized calls",
+        "opaque resources",
+        "UTF-8 slices",
+        "PDF extraction",
+        "Vision OCR",
+        "request ID constraints aligned with durable journal",
+        "read versus write timeout result classification"
+      ],
+      "log": "/tmp/companion-acceptance-native-final.log"
+    },
+    {
+      "name": "Tool group settings UI",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "result_bundle": "/tmp/companion-device-tools-ui-final.xcresult",
+      "screenshot_review": "nine groups visible; master and groups default off; no authorization prompt"
+    },
+    {
+      "name": "Complete Rust library regression",
+      "passed": 83,
+      "failed": 0,
+      "log": "/tmp/companion-acceptance-rust-final.log"
+    },
+    {
+      "name": "Physical settings and health availability end-to-end",
+      "passed": 2,
+      "failed": 0,
+      "result_bundle": "/tmp/companion-native-physical-discovery.xcresult"
+    },
+    {
+      "name": "Physical native tool acceptance, deduplicated cases",
+      "passed": 12,
+      "scope": "All nine groups exercised; successful read/authorization or cancellation is not full coverage of every tool or physical effect.",
+      "details": "acceptance_round.physical_cases"
+    }
+  ],
+  "not_verified": [
+    "Health permission revocation, statistics reconciliation with Health app, sleep/workout real records and multiple sources",
+    "HomeKit accessory simulator end-to-end",
+    "HomeKit real accessory control, scenes, state synchronization and physical effects",
+    "Real calendar update and reminder create/complete with isolated account fixtures",
+    "AlarmKit lock-screen delivery",
+    "Successful contact/photo selection, physical document capture, and selected-file/PDF reading through system picker (synthetic native read/PDF/OCR passed)",
+    "Actual microphone recording/interruption and on-device Speech language/recognition accuracy",
+    "VoiceOver and dynamic type; other iOS/device/model combinations"
+  ],
+  "limitations": [
+    "Unresolved native writes remain blocked in durable journal; no source-specific automatic recovery for new tools",
+    "Native resources are process-local, expire after ten minutes and are not transferred across devices",
+    "AlarmKit tools registered only on iOS 26+"
+  ],
+  "build_notes": "Initial package checkout downloaded full MLX history. Stopped task-owned build processes, initialized pinned submodules shallowly, repaired temporary checkout registration, then built successfully. Repository dependency pins unchanged.",
+  "acceptance_round": {
+    "status": "completed_with_unverified_scope",
+    "device": "iPhone 17 Pro Max, iOS 27.0.1",
+    "model": "local MLX Qwen3.5-4B-4bit",
+    "method": "Real model → Harness → per-call approval → native C bridge → structured result asserted by XCTest",
+    "fixed_findings": [
+      {
+        "issue": "New native writers rejected by legacy SQLite journal allowlist",
+        "fix": "Explicit allowlist for all seven new writers; shared and native request_id constraints aligned with Rust",
+        "verification": "35 shared tests passed, including all writers through real Rust SQLite and replay after reopen"
+      },
+      {
+        "issue": "load_more_tools exposed a non-JSON schema and prevented model request encoding",
+        "fix": "Valid object JSON Schema with model-request serialization regression",
+        "verification": "83 Rust tests passed; physical health availability chain passed"
+      },
+      {
+        "issue": "UIAlertController crashed when replacing its private presentation delegate",
+        "fix": "Preserve alert presentation delegate; retain swipe-dismiss callbacks for sheet pickers",
+        "verification": "Physical alarm create/list/cancel, recording confirmation cancellation and picker cancellation passed. Preserve UIKit alert delegate; ignore dismissal callback from an earlier sheet."
+      },
+      {
+        "issue": "Read-only timeout misleadingly reported potentially completed write",
+        "fix": "INTERACTION_TIMEOUT for reads; OUTCOME_UNKNOWN retained for writes",
+        "verification": "Native read/write timeout classification regression passed; physical timed-out read returned INTERACTION_TIMEOUT during an incomplete authorization attempt."
+      }
+    ],
+    "test_harness_fixes": [
+      "Wait for conversation ready status instead of a temporarily hidden thinking element",
+      "Enable the specific Health step-count switch before tapping Allow",
+      "Dismiss iOS 27 document picker by swiping its sheet",
+      "Retry initial settings navigation after host launch refresh",
+      "Select limited history on the second iOS 27 Health authorization screen",
+      "Require exact JSON arguments before approving a tool"
+    ],
+    "unique_physical_cases_passed": 12,
+    "physical_cases": [
+      {
+        "name": "testNativeDeviceToolGroupsAreDiscoverableWithoutRequestingPermissions",
+        "status": "passed",
+        "seconds": 11.031,
+        "result_bundle": "/tmp/companion-native-physical-discovery.xcresult"
+      },
+      {
+        "name": "testNativeHealthAvailabilityThroughModelAndHarness",
+        "status": "passed",
+        "seconds": 80.14,
+        "result_bundle": "/tmp/companion-native-physical-verified.xcresult"
+      },
+      {
+        "name": "testNativeContactPickerCancellation",
+        "status": "passed",
+        "seconds": 44.925,
+        "result_bundle": "/tmp/companion-native-physical-interactions.xcresult"
+      },
+      {
+        "name": "testNativeHomeDiscoveryWithoutAccessoryControl",
+        "status": "passed",
+        "seconds": 73.835,
+        "result_bundle": "/tmp/companion-native-physical-interactions.xcresult"
+      },
+      {
+        "name": "testNativeAppAlarmCreateListCancel",
+        "status": "passed",
+        "seconds": 245.8,
+        "result_bundle": "/tmp/companion-native-physical-final.xcresult"
+      },
+      {
+        "name": "testNativeAudioRecordingConfirmationCancellation",
+        "status": "passed",
+        "seconds": 90.288,
+        "result_bundle": "/tmp/companion-native-physical-final.xcresult"
+      },
+      {
+        "name": "testNativeCalendarEditableEventQuery",
+        "status": "passed",
+        "seconds": 94.608,
+        "result_bundle": "/tmp/companion-native-physical-final.xcresult"
+      },
+      {
+        "name": "testNativeDocumentScannerCancellation",
+        "status": "passed",
+        "seconds": 88.196,
+        "result_bundle": "/tmp/companion-native-physical-final.xcresult"
+      },
+      {
+        "name": "testNativeFilePickerCancellation",
+        "status": "passed",
+        "seconds": 77.426,
+        "result_bundle": "/tmp/companion-native-physical-verified.xcresult"
+      },
+      {
+        "name": "testNativePhotoPickerCancellation",
+        "status": "passed",
+        "seconds": 92.276,
+        "result_bundle": "/tmp/companion-native-physical-final.xcresult"
+      },
+      {
+        "name": "testNativeReminderListAuthorization",
+        "status": "passed",
+        "seconds": 86.138,
+        "result_bundle": "/tmp/companion-native-physical-final.xcresult"
+      },
+      {
+        "name": "testNativeHealthStatisticsPermissionAndQuery",
+        "status": "passed",
+        "seconds": 82.386,
+        "result_bundle": "/tmp/companion-native-health-authorized.xcresult"
+      }
+    ],
+    "alarm_fixture_cleanup": "Created acceptance alarm was listed and cancelled successfully; cancellation result asserted and screenshot reviewed.",
+    "health_authorization": "Only step-count read access; past 30 days and future data selected on iOS 27. No reconciliation with Health app totals claimed.",
+    "attempts": [
+      {
+        "result_bundle": "/tmp/companion-native-physical-smoke.xcresult",
+        "result": "No tests ran: automation mode startup timeout"
+      },
+      {
+        "result_bundle": "/tmp/companion-native-physical-smoke-retry.xcresult",
+        "result": "UI test compilation failure caused by an Objective-C assertion macro comma; fixed"
+      },
+      {
+        "result_bundle": "/tmp/companion-native-physical-smoke-fixed.xcresult",
+        "passed": 0,
+        "failed": 2,
+        "reason": "Settings startup timing and invalid load_more_tools schema; fixed"
+      },
+      {
+        "result_bundle": "/tmp/companion-native-physical-discovery.xcresult",
+        "passed": 2,
+        "failed": 0,
+        "note": "passed"
+      },
+      {
+        "result_bundle": "/tmp/companion-native-physical-interactions.xcresult",
+        "passed": 2,
+        "failed": 5,
+        "note": "Mixed runs are not counted as fully passing; individual successful cases retained and failed cases rerun."
+      },
+      {
+        "result_bundle": "/tmp/companion-native-physical-final.xcresult",
+        "passed": 7,
+        "failed": 1,
+        "note": "Mixed runs are not counted as fully passing; individual successful cases retained and failed cases rerun."
+      },
+      {
+        "result_bundle": "/tmp/companion-native-physical-verified.xcresult",
+        "passed": 2,
+        "failed": 1,
+        "note": "Mixed runs are not counted as fully passing; individual successful cases retained and failed cases rerun."
+      },
+      {
+        "result_bundle": "/tmp/companion-native-health-authorized.xcresult",
+        "passed": 1,
+        "failed": 0
+      }
+    ]
+  }
+}

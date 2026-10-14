@@ -1,4 +1,5 @@
 #import <XCTest/XCTest.h>
+#import <TargetConditionals.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -28,7 +29,11 @@
         [app.buttons[@"远端 Agent（A2A）"] tap];
         return;
     }
+    XCTAssertTrue([app.buttons[@"设置"] waitForExistenceWithTimeout:30]);
     [app.buttons[@"设置"] tap];
+    // The initial host refresh can replace the first frame while the app launches.
+    if (![app.staticTexts[@"工具扩展"] waitForExistenceWithTimeout:3] && app.buttons[@"设置"].hittable)
+        [app.buttons[@"设置"] tap];
     XCUIElement *entry = [[app descendantsMatchingType:XCUIElementTypeAny]
         matchingIdentifier:[@"settings-" stringByAppendingString:section]].firstMatch;
     for (NSInteger i = 0; i < 6 && !entry.hittable; i++) [app swipeUp];
@@ -427,6 +432,256 @@
         XCTAssertTrue([app.staticTexts[@"后台提醒未启用"] waitForExistenceWithTimeout:15]);
     }
     [app.buttons[@"完成"] tap];
+}
+
+// Native acceptance uses the production model, Harness, approval, registry and C bridge.
+// Launch arguments enable only the selected group without changing saved preferences.
+- (XCUIApplication *)nativeToolAcceptanceApp:(NSString *)group {
+#if TARGET_OS_SIMULATOR
+    XCTSkip(@"Native model-to-system acceptance requires a physical device with a configured MLX model.");
+#endif
+    XCUIApplication *app = [self acceptanceApp];
+    NSMutableArray *arguments = [NSMutableArray arrayWithArray:@[@"-localInferenceEngine", @"MLX", @"-deviceToolsEnabled", @"YES", @"-mcpEndpoint", @""]];
+    for (NSString *name in @[@"health", @"home", @"reminders", @"alarms", @"contacts", @"calendar_edit", @"files", @"capture", @"audio"])
+        [arguments addObjectsFromArray:@[[@"-deviceGroup." stringByAppendingString:name], [name isEqualToString:group] ? @"YES" : @"NO"]];
+    app.launchArguments = arguments;
+    [app launch];
+    XCTAssertTrue([app.buttons[@"send-message"] waitForExistenceWithTimeout:45]);
+    return app;
+}
+
+- (NSDictionary *)invokeNativeTool:(NSString *)tool arguments:(NSString *)arguments app:(XCUIApplication *)app interaction:(void (^)(XCUIApplication *))interaction {
+    NSString *prompt = [NSString stringWithFormat:@"本机工具验收 %@。请实际调用 %@，参数为 %@。如果尚未发现这个工具，先用 load_more_tools 查找。只执行这一项，不委托其他设备，不创建其他任务。最后简短报告工具执行状态，不能编造结果。", NSUUID.UUID.UUIDString, tool, arguments];
+    XCUIElement *message = app.textViews.firstMatch;
+    [self enterAcceptanceText:prompt field:message app:app];
+    [app.buttons[@"send-message"] tap];
+    XCUIElement *thinking = [[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:@"assistant-thinking"].firstMatch;
+    XCTAssertTrue([thinking waitForExistenceWithTimeout:15]);
+    XCUIElement *request = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:
+        [NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND label == %@", @"conversation-message-", [@"user：" stringByAppendingString:prompt]]].firstMatch;
+    XCTAssertTrue([request waitForExistenceWithTimeout:10]);
+    NSInteger requestIndex = [[[request.identifier substringFromIndex:[@"conversation-message-" length]] componentsSeparatedByString:@"-"].firstObject integerValue];
+    BOOL approved = NO;
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:360];
+    while (deadline.timeIntervalSinceNow > 0) {
+        XCUIElement *allow = app.buttons[@"允许一次"];
+        if (allow.exists) {
+            XCUIElement *name = [app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", [@"本机 · " stringByAppendingString:tool]]].firstMatch;
+            if (!name.exists) {
+                XCTFail(@"Only the requested local tool may be approved");
+                return @{};
+            }
+            NSDictionary *expectedArguments = [NSJSONSerialization JSONObjectWithData:[arguments dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+            BOOL argumentsMatch = NO;
+            for (XCUIElement *text in app.staticTexts.allElementsBoundByIndex) {
+                if (![text.label hasPrefix:@"{"]) continue;
+                id value = [NSJSONSerialization JSONObjectWithData:[text.label dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                if ([expectedArguments isEqual:value]) { argumentsMatch = YES; break; }
+            }
+            if (!argumentsMatch) { XCTFail(@"Tool approval arguments must match this test's exact request"); return @{}; }
+            [allow tap]; approved = YES;
+        }
+        if (interaction) interaction(app);
+        if (approved && app.staticTexts[@"持续对话 · 就绪"].exists) break;
+        [NSThread sleepForTimeInterval:1];
+    }
+    XCTAssertTrue(approved, @"Model must actually request the local tool");
+    XCTAssertFalse(thinking.exists, @"Tool or model did not finish");
+    XCUIElement *body = nil;
+    for (NSInteger attempt = 0; attempt < 15; attempt++) {
+        XCUIElementQuery *collapsed = [app.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"label BEGINSWITH %@", [@"› 工具：" stringByAppendingString:tool]]];
+        if (collapsed.count > 0) [collapsed.allElementsBoundByIndex.lastObject tap];
+        XCUIElementQuery *bodies = [[app descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:
+            [NSPredicate predicateWithFormat:@"identifier BEGINSWITH %@ AND label BEGINSWITH %@", @"conversation-message-", [@"tool：" stringByAppendingString:tool]]];
+        for (XCUIElement *candidate in bodies.allElementsBoundByIndex) {
+            NSInteger index = [[[candidate.identifier substringFromIndex:[@"conversation-message-" length]] componentsSeparatedByString:@"-"].firstObject integerValue];
+            if (index > requestIndex) { body = candidate; break; }
+        }
+        if (body) break;
+        [app swipeDown];
+    }
+    XCTAssertNotNil(body, @"Must find this turn's real tool result, not an assistant claim");
+    if (!body) return @{};
+    NSRange start = [body.label rangeOfString:@"{"];
+    XCTAssertNotEqual(start.location, NSNotFound);
+    if (start.location == NSNotFound) return @{};
+    NSString *json = [body.label substringFromIndex:start.location];
+    NSDictionary *result = [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    XCTAssertNotNil(result, @"Expected a structured native result");
+    XCTAssertEqualObjects(result[@"source"][@"platform"], @"ios");
+    [self retainScreenshot:app name:[@"Native acceptance " stringByAppendingString:tool]];
+    return result;
+}
+
+- (void)testNativeHealthAvailabilityThroughModelAndHarness {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:@"health"];
+    NSDictionary *result = [self invokeNativeTool:@"device_health_get_availability" arguments:@"{}" app:app interaction:nil];
+    XCTAssertEqualObjects(result[@"status"], @"ok");
+    XCTAssertEqualObjects(result[@"data"][@"available"], @YES);
+    XCTAssertEqualObjects(result[@"data"][@"read_authorization"], @"not_disclosed");
+}
+
+- (void)testNativeHealthStatisticsPermissionAndQuery {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:@"health"];
+    NSISO8601DateFormatter *formatter = [NSISO8601DateFormatter new];
+    NSString *start = [formatter stringFromDate:[NSDate dateWithTimeIntervalSinceNow:-86400]];
+    NSString *end = [formatter stringFromDate:NSDate.date];
+    NSString *args = [NSString stringWithFormat:@"{\"metric\":\"steps\",\"start\":\"%@\",\"end\":\"%@\",\"time_zone\":\"Asia/Shanghai\"}", start, end];
+    NSDictionary *result = [self invokeNativeTool:@"device_health_query_statistics" arguments:args app:app interaction:^(XCUIApplication *current) {
+        XCUIElement *steps = current.switches[@"UIA.Health.Read.步数.SwitchCell.Switch"];
+        if (steps.exists && steps.hittable && [steps.value isEqual:@"0"]) [steps tap];
+        XCUIElement *healthAllow = current.buttons[@"UIA.Health.Allow.Button"];
+        if (healthAllow.exists && healthAllow.hittable && healthAllow.enabled) [healthAllow tap];
+        XCUIElement *recentHistory = current.staticTexts[@"过去30天及后续数据"];
+        if (recentHistory.exists && recentHistory.hittable) [recentHistory tap];
+        for (NSString *label in @[@"允许", @"Allow"]) {
+            XCUIElement *button = current.buttons[label];
+            if (button.exists && button.hittable && button.enabled) [button tap];
+        }
+    }];
+    XCTAssertEqualObjects(result[@"status"], @"ok");
+    XCTAssertEqualObjects(result[@"data"][@"coverage"], @"readable_data_only");
+    XCTAssertEqualObjects(result[@"data"][@"unit"], @"count");
+    XCTAssertNotNil(result[@"data"][@"days"]);
+}
+
+- (void)testNativeContactPickerCancellation {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:@"contacts"];
+    __block BOOL cancelled = NO;
+    NSDictionary *result = [self invokeNativeTool:@"device_contact_pick" arguments:@"{}" app:app interaction:^(XCUIApplication *current) {
+        [self acceptNativeSystemPermissions:current];
+        for (NSString *label in @[@"取消", @"Cancel", @"关闭", @"Close"]) {
+            XCUIElement *button = current.buttons[label];
+            if (button.exists && button.hittable && !current.buttons[@"允许一次"].exists) { [button tap]; cancelled = YES; }
+        }
+    }];
+    XCTAssertTrue(cancelled);
+    XCTAssertEqualObjects(result[@"error"][@"code"], @"USER_CANCELLED");
+}
+
+- (void)cancelNativePicker:(NSString *)tool group:(NSString *)group {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:group];
+    __block BOOL cancelled = NO;
+    NSDictionary *result = [self invokeNativeTool:tool arguments:@"{}" app:app interaction:^(XCUIApplication *current) {
+        [self acceptNativeSystemPermissions:current];
+        for (NSString *label in @[@"取消", @"Cancel", @"关闭", @"Close"]) {
+            XCUIElement *button = current.buttons[label];
+            if (button.exists && button.hittable && !current.buttons[@"允许一次"].exists) { [button tap]; cancelled = YES; }
+        }
+        // iOS 27's document sheet has no Cancel button; dismiss its top edge.
+        if (!cancelled && [tool isEqualToString:@"device_file_pick"] && current.searchFields.firstMatch.exists) {
+            XCUICoordinate *top = [current coordinateWithNormalizedOffset:CGVectorMake(0.5, 0.075)];
+            [top pressForDuration:0.1 thenDragToCoordinate:[current coordinateWithNormalizedOffset:CGVectorMake(0.5, 0.85)]];
+            cancelled = YES;
+        }
+    }];
+    XCTAssertTrue(cancelled);
+    XCTAssertEqualObjects(result[@"error"][@"code"], @"USER_CANCELLED");
+}
+- (void)testNativeFilePickerCancellation { [self cancelNativePicker:@"device_file_pick" group:@"files"]; }
+- (void)testNativePhotoPickerCancellation { [self cancelNativePicker:@"device_photo_pick" group:@"capture"]; }
+
+- (void)acceptNativeSystemPermissions:(XCUIApplication *)app {
+    XCUIApplication *springboard = [[XCUIApplication alloc] initWithBundleIdentifier:@"com.apple.springboard"];
+    for (XCUIApplication *surface in @[app, springboard]) {
+        for (NSString *label in @[@"允许完全访问", @"Allow Full Access", @"允许", @"Allow", @"好", @"OK"]) {
+            XCUIElement *button = surface.alerts.buttons[label];
+            if (button.exists && button.hittable) [button tap];
+        }
+    }
+}
+
+- (void)testNativeDocumentScannerCancellation {
+    [self cancelNativePicker:@"device_document_scan" group:@"capture"];
+}
+
+- (void)testNativeAudioRecordingConfirmationCancellation {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:@"audio"];
+    __block BOOL cancelled = NO;
+    NSDictionary *result = [self invokeNativeTool:@"device_audio_record" arguments:@"{\"seconds\":2}" app:app interaction:^(XCUIApplication *current) {
+        [self acceptNativeSystemPermissions:current];
+        XCUIElement *cancel = current.alerts.buttons[@"取消"];
+        if (current.alerts[@"开始录音"].exists && cancel.hittable) {
+            [cancel tap]; cancelled = YES;
+        }
+    }];
+    XCTAssertTrue(cancelled);
+    XCTAssertEqualObjects(result[@"error"][@"code"], @"USER_CANCELLED");
+}
+
+- (void)testNativeCalendarEditableEventQuery {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:@"calendar_edit"];
+    NSISO8601DateFormatter *formatter = [NSISO8601DateFormatter new];
+    NSString *start = [formatter stringFromDate:NSDate.date];
+    NSString *end = [formatter stringFromDate:[NSDate dateWithTimeIntervalSinceNow:86400]];
+    NSString *args = [NSString stringWithFormat:@"{\"start\":\"%@\",\"end\":\"%@\"}", start, end];
+    NSDictionary *result = [self invokeNativeTool:@"device_calendar_list_editable_events" arguments:args app:app interaction:^(XCUIApplication *current) {
+        [self acceptNativeSystemPermissions:current];
+    }];
+    XCTAssertEqualObjects(result[@"status"], @"ok");
+    XCTAssertEqualObjects(result[@"data"][@"scope"], @"writable_nonrecurring_timed_events");
+    XCTAssertTrue([result[@"data"][@"events"] isKindOfClass:NSArray.class]);
+}
+
+- (void)testNativeHomeDiscoveryWithoutAccessoryControl {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:@"home"];
+    NSDictionary *result = [self invokeNativeTool:@"device_home_list_homes" arguments:@"{}" app:app interaction:^(XCUIApplication *current) {
+        [self acceptNativeSystemPermissions:current];
+    }];
+    XCTAssertEqualObjects(result[@"status"], @"ok");
+    XCTAssertTrue([result[@"data"][@"homes"] isKindOfClass:NSArray.class]);
+    // Discovery success, including no configured homes, is not accessory control acceptance.
+    XCTAssertEqualObjects(result[@"data"][@"acceptance"], @"real_accessories_not_verified");
+}
+
+- (void)testNativeReminderListAuthorization {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:@"reminders"];
+    NSDictionary *result = [self invokeNativeTool:@"device_reminder_list_lists" arguments:@"{}" app:app interaction:^(XCUIApplication *current) {
+        [self acceptNativeSystemPermissions:current];
+    }];
+    XCTAssertEqualObjects(result[@"status"], @"ok");
+    XCTAssertTrue([result[@"data"][@"lists"] isKindOfClass:NSArray.class]);
+}
+
+- (void)testNativeAppAlarmCreateListCancel {
+    XCUIApplication *app = [self nativeToolAcceptanceApp:@"alarms"];
+    NSISO8601DateFormatter *formatter = [NSISO8601DateFormatter new];
+    NSString *time = [formatter stringFromDate:[NSDate dateWithTimeIntervalSinceNow:86400]];
+    NSString *args = [NSString stringWithFormat:@"{\"request_id\":\"%@\",\"title\":\"Companion 验收（自动清理）\",\"time\":\"%@\"}", NSUUID.UUID.UUIDString, time];
+    void (^approve)(XCUIApplication *) = ^(XCUIApplication *current) {
+        [self acceptNativeSystemPermissions:current];
+        XCUIElement *confirm = current.alerts.buttons[@"确认"];
+        if (confirm.exists && confirm.hittable) [confirm tap];
+    };
+    NSDictionary *created = [self invokeNativeTool:@"device_alarm_create" arguments:args app:app interaction:approve];
+    XCTAssertEqualObjects(created[@"status"], @"ok");
+    NSString *alarmId = created[@"data"][@"alarm_id"];
+    XCTAssertTrue(alarmId.length > 0);
+    @try {
+        NSDictionary *listed = [self invokeNativeTool:@"device_alarm_list" arguments:@"{}" app:app interaction:nil];
+        XCTAssertEqualObjects(listed[@"status"], @"ok");
+        NSArray *matches = [listed[@"data"][@"alarms"] filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"alarm_id == %@", alarmId]];
+        XCTAssertEqual(matches.count, 1u);
+    } @finally {
+        NSString *cancelArgs = [NSString stringWithFormat:@"{\"request_id\":\"%@\",\"alarm_id\":\"%@\"}", NSUUID.UUID.UUIDString, alarmId];
+        NSDictionary *cancelled = [self invokeNativeTool:@"device_alarm_cancel" arguments:cancelArgs app:app interaction:approve];
+        XCTAssertEqualObjects(cancelled[@"status"], @"ok");
+        XCTAssertEqualObjects(cancelled[@"data"][@"cancelled"], @YES);
+    }
+}
+
+- (void)testNativeDeviceToolGroupsAreDiscoverableWithoutRequestingPermissions {
+    XCUIApplication *app = [self acceptanceApp];
+    [app launch];
+    [self openSettingsSection:@"工具扩展" app:app];
+    for (NSString *group in @[@"健康（只读）", @"家庭（实验功能 · 真实配件待验收）", @"提醒事项", @"闹钟", @"联系人选择", @"日历修改", @"文件读取", @"照片、扫描与 OCR", @"录音与本地转写"]) {
+        XCUIElement *control = [[app descendantsMatchingType:XCUIElementTypeAny]
+            matchingIdentifier:[group stringByAppendingString:@"开关"]].firstMatch;
+        for (NSInteger i = 0; i < 5 && !control.hittable; i++) [app swipeUp];
+        XCTAssertTrue(control.exists, @"Missing group: %@", group);
+    }
+    XCTAssertEqual(app.alerts.count, 0, @"Opening settings must not request system permissions");
+    [self retainScreenshot:app name:@"Native device tool groups"];
 }
 
 - (void)testSingleConversationAndSettingsSurviveRelaunch {
