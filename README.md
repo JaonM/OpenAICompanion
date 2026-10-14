@@ -1,14 +1,23 @@
 # OpenAICompanion
 
-OpenAICompanion 是一个面向个人设备、以本地数据为中心的 AI 助手实验项目。它使用 Rust Harness 运行 Agent Loop、保存会话轨迹与记忆，并通过 Kotlin Multiplatform（KMP）和 UniFFI 连接应用端。项目仍处于 MVP 开发阶段；架构图中的部分能力尚未实现。
+OpenAICompanion 是一个面向个人设备、以本地数据为中心的 AI 助手实验项目。它使用 Rust Harness 运行 Agent Loop、保存会话轨迹与记忆，并通过 Kotlin Multiplatform（KMP）和 UniFFI 连接应用端。项目仍处于 MVP 开发阶段。
 
-## iOS Demo
+## 重点功能与 Demo
 
-<p align="center">
-  <img src="assets/ios-demo.gif" alt="iOS 真机界面演示：跨设备任务完成结果与可滚动的配置说明" width="360">
-</p>
+- **本地对话**：iOS 支持 GGUF / MLX 推理、思考与正文流式输出、停止生成和 Markdown；模型可下载或导入。
+- **健康与家庭**：健康数据只读查询；家庭支持发现、有限灯光/温控与已有场景控制，真实配件控制待验收。
+- **端侧办事**：提醒事项、日历修改、App 闹钟，以及联系人选择、文件读取、图片 OCR、前台录音与本地转写。
+- **跨设备协作**：明确委托后交给其他设备执行，结果回到当前对话；Mac 可通过独立 worker 接单。
+- **记忆与提醒**：本地持续对话、三层记忆及独立清理、可选记忆同步与系统计划提醒。
 
-真机验收截图轮播：展示远端任务结果回到 iPhone 对话，以及跨设备配置说明。截图经过裁剪遮挡，不展示验收服务地址；轮播间隔不代表推理速度。iOS 支持本地 GGUF / MLX 推理、思考与正文流式显示、Markdown 和明确委托后的跨设备执行。
+以下为三个重点能力各一个代表场景。GIF 使用真实验收截图分步轮播，包含局部放大和隐私遮挡；不是连续录屏，切换间隔不代表推理速度。
+
+| 健康查询 | App 闹钟 | 跨设备执行 |
+| --- | --- | --- |
+| <img src="assets/demos/ios-health.gif" alt="健康查询：步数查询参数与返回结果，个人数值已遮挡" width="320"> | <img src="assets/demos/ios-alarm.gif" alt="App 闹钟：创建、查询列表、取消的真机结果" width="320"> | <img src="assets/demos/ios-cross-device.gif" alt="跨设备执行：调用记录与 Mac 返回的计算结果" width="320"> |
+| 一次步数统计查询；只读取系统允许共享的数据。 | 一个验收闹钟完成创建 → 查询 → 取消，已清理。 | iPhone 委托 Mac 计算 `17 + 25`，收到结果 `42`。 |
+
+家庭缺少真实配件验收环境，当前仅验证授权与家庭发现，不展示控制成功演示。素材来源与演示范围见 [Demo 说明](assets/demos/README.md)。
 
 [使用 iOS](#ios) · [使用 macOS](#macos) · [使用 Android](#android) · [配置可选功能](#可选功能配置)
 
@@ -19,10 +28,30 @@ OpenAICompanion 是一个面向个人设备、以本地数据为中心的 AI 助
 | 平台 | 实现 | 状态 |
 | --- | --- | --- |
 | macOS | Compose Desktop（KMP/JVM）+ Rust Harness | MVP 已实现，可在 macOS 本机构建运行 |
-| iOS | KMP + Compose Multiplatform + Kotlin/Native Rust 绑定 + llama.cpp / MLX | KMP 界面，原生模型桥接；验收范围及待验收项见 iOS MVP 指南 |
+| iOS | KMP + Compose Multiplatform + Kotlin/Native Rust 绑定 + llama.cpp / MLX + Swift 系统工具 | P0/P1 新增九类、28 个端侧工具；指定真机基础验收，详情见下文 |
 | Android | KMP + Compose Multiplatform + Rust UniFFI + llama.cpp JNI | Debug APK 已构建；Android 35 ARM64 模拟器已验证安装、首屏启动与本地存储初始化 |
 
 各设备分别维护一条本地持续对话，不提供新建会话入口，也不会自动同步聊天记录。Rust Harness 管理对话轨迹和中长期记忆；中长期记忆可另行配置 HTTPS 同步。iOS 已完成指定真机上的本地问答、流式输出、停止、跨设备结果回流、模型库下载与导入，以及一次性系统提醒等场景验收；这不代表所有机型、模型或完整生产验收通过。详见各平台指南。
+
+2026-10-13 端侧工具验收：共享回归 **35 项**、Rust 库测试 **83 项**及原生模拟器策略/资源测试通过；指定 iPhone 上累计 **12 个不同用例通过**，覆盖九类工具的设置、部分授权/读取及取消流程。闹钟创建/查询/取消已验证；部分工具仅验证取消，不能视为全部 28 个工具端到端通过。完整范围见 [端侧工具指南](docs/ios_device_tools.md#验证)与[验收记录](scripts/acceptance/ios-device-tools-2026-10-13.json)。
+
+## iOS 端侧工具
+
+在既有设备上下文、日历查询与新建之外，P0/P1 新增以下九个可选分组（iOS 26+ 共 28 个工具）。健康、家庭列为优先能力；各分组默认关闭，在“设置 → 工具扩展”中按需开启。
+
+| 分组 | 已实现能力 | 当前边界 |
+| --- | --- | --- |
+| 健康 | 步数、步行/跑步距离、活动能量统计；睡眠与运动记录 | 只读；步数授权查询已验证，健康 App 对账、撤销及多来源记录待验收；无数据不等于零。 |
+| 家庭（实验性） | 家庭/房间/配件发现、状态读取、灯光与温控、已有场景 | 仅授权发现通过；无真实配件控制验收，不支持门锁、车库门和安防控制。 |
+| 提醒事项 | 查询列表/事项、创建、完成非重复事项 | 列表授权通过；真实创建/完成待验收。 |
+| 日历修改 | 查询可编辑事件、修改起止时间 | 查询通过；限单个非重复、非全天日程，真实修改待验收。 |
+| 闹钟 | 创建、查询、取消本 App 的 AlarmKit 闹钟 | iOS 26+；创建/查询/取消通过，锁屏响铃待验收；不管理“时钟”App 的全部闹钟。 |
+| 联系人 | 系统选择器选择一位联系人 | 取消流程通过；成功选取待验收。 |
+| 文件 | 选择 TXT/Markdown/PDF/音频；文本分段与 PDF 分页读取 | 选择取消与合成材料读取通过；真机成功选取并读取待验收。 |
+| 图片采集 | 选择照片、扫描文稿、本地 Vision OCR | 取消流程与合成图 OCR 通过；实际选图/扫描采集待验收。 |
+| 音频 | 最长 60 秒前台录音、设备本地 Speech 转写 | 录音确认取消通过；实际录音、打断与识别待验收，不支持本地识别时直接失败。 |
+
+开启分组不会立即申请权限；调用时逐次审批，并按需请求系统授权。写入另有原生确认与持久化操作日志，结果不确定时不自动重试。文件、图片和音频使用当前进程内的临时引用，10 分钟过期，不跨设备传输。工具参数、权限和限制见 [iOS 端侧工具指南](docs/ios_device_tools.md)。
 
 ## 生产基础进展
 
@@ -65,7 +94,7 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 open ios/OpenAICompanion.xcodeproj
 ```
 
-在 Xcode 中选择 `OpenAICompanion` target，在 Signing & Capabilities 选择自己的开发团队，再选择已连接的 iPhone，运行安装。真机需开启开发者模式，按系统提示信任自己的开发者 App。工程不附带可直接安装的正式发布包。
+在 Xcode 中选择 `OpenAICompanion` target，在 Signing & Capabilities 选择自己的开发团队，再选择已连接的 iPhone，运行安装。工程已声明 HealthKit 与 HomeKit，签名所用 provisioning profile 需支持这些能力。真机需开启开发者模式，按系统提示信任自己的开发者 App。工程不附带可直接安装的正式发布包。
 
 安装完整 Xcode 后，可运行 `./scripts/ios-app-check.sh` 构建 iOS 模拟器 App，检查 KMP、Rust、llama.cpp 与 Xcode 工程的链接。
 
@@ -74,8 +103,9 @@ open ios/OpenAICompanion.xcodeproj
 1. 进入“设置 → 端侧模型”，选择 `MLX` 或 `llama.cpp`。App 不内置模型，也不需要连接 Mac 的 Ollama。
 2. 在对应引擎的模型库搜索适合设备的模型，点击“下载”；下载完成后点击“使用此模型”启用。列表按设备兼容性估算过滤，浏览列表不会下载权重。下载时保持 App 前台。
 3. 也可导入本地文件：llama.cpp 选择 GGUF；MLX 选择包含配置、tokenizer 和 safetensors 权重的完整文件夹，导入成功后点击“使用此模型”。
-4. 返回对话，输入问题并点击纸飞机或使用键盘发送；生成期间显示思考动画和流式输出，可点击停止。思考与工具历史默认折叠，点击展开。当前只支持文本输入。
+4. 返回对话，输入问题并点击纸飞机或使用键盘发送；生成期间显示思考动画和流式输出，可点击停止。思考与工具历史默认折叠，点击展开。对话输入框目前为文本输入；文件、照片、扫描和录音通过端侧工具调起系统交互。
 5. 需要协作时进入“设置 → 跨设备执行”，点击“配置说明”查看详细步骤；第三方 A2A 入口位于其高级设置中。
+6. 使用本机数据时进入“设置 → 工具扩展”，开启总开关及所需分组，例如“健康”；回到对话发起请求，并按提示批准具体调用与系统权限。家庭和其他尚未验收的行为请参考上方边界。
 
 需要 iOS 17+；实际模型选择还受架构、内存和空间限制。构建 llama.cpp 需要 CMake 3.28+。模型兼容性见[模型库指南](docs/model-library-and-devices.md)，完整构建与验收范围见 [iOS MVP 指南](docs/ios_mvp.md)。
 
@@ -112,20 +142,9 @@ adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
 | 主动任务与提醒 | 主动任务页开启总开关、选择发现间隔、允许系统通知，并管理生成的任务 | 固定计划可交给手机系统提醒；模型发现和实时查询仍需要可运行的执行端。远程 APNs 未接入。 |
 | 历史与记忆 | 移动端“设置 → 历史与记忆”；Mac 设置中的“清空历史与记忆” | 短期清空聊天与原始轨迹；中期清空摘要与阶段性事项；长期清空已提取事实与偏好。三档独立、删除前确认，中长期记忆点删除可随同步传播。详见[三档区别](docs/memory.md#清空历史与记忆)。 |
 | 记忆同步 | 同步接口完整地址（如 `https://tasks.example.com/v1/memories/sync`）及有 `memory` 权限的凭据 | 与设备配对分别配置；仅同步中长期记忆点，不同步聊天、任务、模型或工具凭据。 |
-| 端侧工具扩展 | 设置中开启设备上下文与日历扩展 | 默认关闭；仍受平台实现、系统权限及逐次确认限制。 |
+| 端侧工具扩展 | “设置 → 工具扩展”开启总开关；iOS 可独立选择健康、家庭等九类新增分组 | 默认关闭；首次使用按需授权，逐次审批。新增九类仅在 iOS 实现，闹钟要求 iOS 26+。 |
 
 模型接口、MCP 地址、设备服务根地址、记忆同步接口和 Agent Card 地址用途不同，不能混填。设备服务的生产部署及凭据签发见[跨设备指南](docs/cross_device_execution.md)；记忆同步机制见[记忆同步指南](docs/memory_sync.md)。
-
-## 架构
-
-- `harness/`：Rust Agent Loop、模型与工具回调接口、SQLite 记忆及会话轨迹。
-- `kmp/`：跨平台数据模型、Compose 界面、共享 MCP/A2A 客户端、Android/macOS UniFFI JVM 绑定，以及 iOS Kotlin/Native Rust 绑定。
-- `ios/`：Objective-C 启动壳、Objective-C++ llama.cpp 适配与 Swift MLX 桥接；界面和业务逻辑位于 `kmp/`。
-- `scripts/`：绑定生成及平台构建脚本。
-
-![OpenAICompanion 产品愿景架构图](assets/architecture.png)
-
-上图描述产品愿景，不代表所有模块已在当前 MVP 中实现。已落地能力以代码和各平台指南为准。
 
 ## 测试
 
@@ -148,9 +167,19 @@ iOS 的 KMP 核心代码可在 `kmp/` 下用 `./gradlew -PkmpJvmToolchain=21 :co
 工具调用历史到 GGUF 提示词的本地转换测试可运行 `./scripts/test-ios-prompt.sh`。
 用于 iOS 模拟器手动验收的本机 MCP 服务及步骤见 [iOS MVP 指南](docs/ios_mvp.md)。
 
+iOS 原生端侧工具策略与合成资源测试（需要已启动的模拟器）：
+
+```bash
+./scripts/test-ios-device-tools.sh <模拟器-UDID>
+```
+
+这项测试不访问真实健康/家庭数据，也不等于配件控制或真机权限验收。共享工具回归命令与真机用例见 [端侧工具验证](docs/ios_device_tools.md#验证)。
+
 ## 数据与安全
 
 会话轨迹和记忆保存在应用本地 SQLite 中，目前**没有数据库加密**。macOS 模型请求会发送到设置的服务地址；iOS 的 GGUF / MLX 推理在设备本机进行。三端各自保存本地数据，尚无跨设备会话同步。不要将未认证的 Ollama HTTP 服务直接暴露到公网。处理敏感个人数据前，请先评估存储加密、模型服务权限与网络配置。
+
+端侧工具返回的个人数据会进入当前会话、模型处理与工具轨迹。“本机工具”不保证结果永不离机；使用远程模型或跨设备委托时应核对发送范围。健康工具只读，家庭控制需逐次确认。
 
 ## 文档
 
@@ -166,6 +195,7 @@ iOS 的 KMP 核心代码可在 `kmp/` 下用 `./gradlew -PkmpJvmToolchain=21 :co
 - [跨端记忆同步](docs/memory_sync.md)
 - [跨设备任务路由与 A2A 执行](docs/cross_device_execution.md)
 - [统一端侧工具：设备上下文、日程查询与新建](docs/device_calendar_tool.md)
+- [iOS 端侧工具：健康、家庭与 P0/P1 扩展](docs/ios_device_tools.md)
 
 ## 反馈与贡献
 
