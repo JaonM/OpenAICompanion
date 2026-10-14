@@ -40,6 +40,11 @@ pub trait ToolExecutor {
     fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError>;
     fn execute(&self, call: ToolCall) -> ExecutorFuture<'static, Result<ToolOutput, AgentError>>;
 
+    /// Host-owned execution budget, including foreground system interaction.
+    fn execution_timeout(&self, _call: &ToolCall, default: std::time::Duration) -> std::time::Duration {
+        default
+    }
+
     fn should_retry(&self, _call: &ToolCall, error: &AgentError) -> bool {
         error.is_retryable()
     }
@@ -68,7 +73,7 @@ impl Tool for LoadMoreTools {
         ToolDefinition::new(
             "load_more_tools",
             "Load the next page of registered tools",
-            "{num_tools?: integer}",
+            r#"{"type":"object","properties":{},"additionalProperties":false}"#,
         )
     }
 
@@ -352,6 +357,16 @@ impl ToolExecutor for ToolRegistry {
         self.execute_in_context(call, "foreground")
     }
 
+    fn execution_timeout(&self, call: &ToolCall, default: std::time::Duration) -> std::time::Duration {
+        match self.tools.get(&call.name) {
+            Some(RegisteredTool::KmpMcp { definition, .. })
+                if definition.policy.as_ref().is_some_and(|p|
+                    p.valid() && p.origin == "device" && p.requires_foreground && p.requires_approval) =>
+                default.max(std::time::Duration::from_secs(180)),
+            _ => default,
+        }
+    }
+
     fn should_retry(&self, call: &ToolCall, error: &AgentError) -> bool {
         if call.name == "delegate_to_agent" || call.name == "list_remote_agents" {
             return false;
@@ -408,6 +423,21 @@ mod tests {
         fn execute(&self, _: ToolCall) -> ToolFuture {
             Box::pin(async { Ok(ToolOutput::success("ok")) })
         }
+    }
+
+    #[test]
+    fn paginated_tools_encode_as_a_real_model_request() {
+        let mut registry = ToolRegistry::new(1).unwrap();
+        registry.register(NamedTool("first")).unwrap();
+        registry.register(NamedTool("second")).unwrap();
+        let request = crate::ModelRequest {
+            response_format: None, system_prompt: String::new(), user_input: String::new(),
+            history: vec![], tools: registry.list_tools().unwrap(),
+        };
+        let json: serde_json::Value = serde_json::from_str(&request.to_chat_completions_json().unwrap()).unwrap();
+        let discovery = json["tools"].as_array().unwrap().iter()
+            .find(|tool| tool["function"]["name"] == "load_more_tools").unwrap();
+        assert_eq!(discovery["function"]["parameters"]["type"], "object");
     }
 
     #[test]
@@ -508,6 +538,27 @@ mod tests {
             let error = AgentError::ToolExecution { name: name.into(), message:"lost connection".into(), error:crate::ToolExecutionError::NetworkUnreachable };
             assert_eq!(registry.should_retry(&ToolCall::new("1", name, "{}"), &error), permitted);
             assert_eq!(block_on(registry.execute_background(ToolCall::new("1", name, "{}"))).is_ok(), permitted);
+        }
+    }
+
+    #[test]
+    fn system_interaction_budget_requires_trusted_foreground_policy() {
+        use std::time::Duration;
+        let mut registry = ToolRegistry::new(8).unwrap();
+        let provider: Arc<dyn ToolProvider> = Arc::new(UnusedProvider);
+        let mut device = public_read_policy();
+        device.data_class = "personal".into(); device.requires_foreground = true;
+        device.requires_approval = true; device.background_eligible = false; device.retry_mode = "never".into();
+        let mut remote = device.clone(); remote.origin = "remote".into();
+        registry.replace_mcp_tools(provider, vec![
+            McpTool { name: "native_picker".into(), description: String::new(), input_schema_json: "{}".into(), policy: Some(device) },
+            McpTool { name: "device_fake_picker".into(), description: String::new(), input_schema_json: "{}".into(), policy: Some(remote) },
+            McpTool { name: "context".into(), description: String::new(), input_schema_json: "{}".into(), policy: Some(public_read_policy()) },
+        ]).unwrap();
+        let default = Duration::from_secs(30);
+        assert_eq!(registry.execution_timeout(&ToolCall::new("1", "native_picker", "{}"), default), Duration::from_secs(180));
+        for name in ["device_fake_picker", "context", "missing"] {
+            assert_eq!(registry.execution_timeout(&ToolCall::new("1", name, "{}"), default), default);
         }
     }
 

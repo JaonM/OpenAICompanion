@@ -60,7 +60,10 @@ impl DeviceOperationStore {
         request_json: &str,
         claim: bool,
     ) -> Result<Value, MemoryError> {
-        if tool != "device_calendar_create_event"
+        if !matches!(tool, "device_calendar_create_event" | "device_calendar_update_event"
+            | "device_reminder_create_item" | "device_reminder_complete_item"
+            | "device_home_set_characteristic" | "device_home_execute_scene"
+            | "device_alarm_create" | "device_alarm_cancel")
             || !(8..=128).contains(&request_id.len())
             || !request_id
                 .bytes()
@@ -154,6 +157,25 @@ impl DeviceOperationStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_registered_native_writers_can_claim_operations() {
+        let store = MemoryStore::in_memory().unwrap();
+        for tool in ["device_calendar_create_event", "device_calendar_update_event",
+            "device_reminder_create_item", "device_reminder_complete_item",
+            "device_home_set_characteristic", "device_home_execute_scene",
+            "device_alarm_create", "device_alarm_cancel"] {
+            let first = store.device_operation(tool, "request-001", "{}", true).unwrap();
+            assert_eq!(first["claimed"], true, "{tool}");
+            assert_eq!(store.device_operation(tool, "request-001", "{}", true).unwrap()["claimed"], false);
+        }
+        for tool in ["device_health_get_availability", "device_unknown_write", ""] {
+            assert!(store.device_operation(tool, "request-001", "{}", true).is_err());
+        }
+        for id in ["short", "invalid id", "中文request001", "request001\n"] {
+            assert!(store.device_operation("device_alarm_create", id, "{}", true).is_err());
+        }
+    }
+
     #[test]
     fn journal_survives_reopen_and_never_reclaims_an_unfinished_write() {
         let path = std::env::temp_dir().join(format!(

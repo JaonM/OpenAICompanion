@@ -439,7 +439,7 @@ async fn execute_tools<E: ToolExecutor + Sync>(
                 if calls[next_to_start].name == "delegate_to_agent" {
                     std::time::Duration::from_secs(180)
                 } else {
-                    config.tool_execute_timeout
+                    executor.execution_timeout(&calls[next_to_start], config.tool_execute_timeout)
                 },
                 cancellation.clone(),
             );
@@ -472,7 +472,7 @@ async fn execute_tools<E: ToolExecutor + Sync>(
                     if calls[index].name == "delegate_to_agent" {
                         std::time::Duration::from_secs(180)
                     } else {
-                        config.tool_execute_timeout
+                        executor.execution_timeout(&calls[index], config.tool_execute_timeout)
                     },
                     cancellation.clone(),
                 );

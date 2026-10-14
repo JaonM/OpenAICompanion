@@ -752,6 +752,9 @@ impl crate::ToolExecutor for DeviceTaskExecutor {
             })
         }
     }
+    fn execution_timeout(&self, call: &crate::ToolCall, default: std::time::Duration) -> std::time::Duration {
+        self.inner.execution_timeout(call, default)
+    }
     fn should_retry(&self, _: &crate::ToolCall, _: &crate::AgentError) -> bool {
         false
     }
